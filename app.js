@@ -1,16 +1,17 @@
 // ============================================================
-//  アプリ状態管理
+//  ã¢ããªç¶æ
+ç®¡ç
 // ============================================================
 const state = {
   selectedTeeth: new Set(),
   insuranceType: 'insurance',   // 'insurance' | 'jishi'
   ampm: 'AM',
   priority: 'normal',
-  orders: []  // Firebaseから取得予定
+  orders: []  // Firebaseããåå¾äºå®
 };
 
 // ============================================================
-//  タブ切り替え
+//  ã¿ãåãæ¿ã
 // ============================================================
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -23,7 +24,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 });
 
 // ============================================================
-//  保険 / 自費 切り替え
+//  ä¿éº / èªè²» åãæ¿ã
 // ============================================================
 document.getElementById('btn-insurance').addEventListener('click', () => setInsurance('insurance'));
 document.getElementById('btn-jishi').addEventListener('click', () => setInsurance('jishi'));
@@ -37,16 +38,16 @@ function setInsurance(type) {
 }
 
 // ============================================================
-//  トグルボタン（single / multi 両対応）
+//  ãã°ã«ãã¿ã³ï¼single / multi ä¸¡å¯¾å¿ï¼
 // ============================================================
 document.addEventListener('click', e => {
   const btn = e.target.closest('.toggle-btn');
   if (!btn || !btn.dataset.group) return;
   if (btn.classList.contains('multi')) {
-    // 複数選択可：トグル
+    // è¤æ°é¸æå¯ï¼ãã°ã«
     btn.classList.toggle('active');
   } else {
-    // 単一選択：同グループを解除してアクティブ
+    // åä¸é¸æï¼åã°ã«ã¼ããè§£é¤ãã¦ã¢ã¯ãã£ã
     const group = btn.dataset.group;
     document.querySelectorAll(`.toggle-btn[data-group="${group}"]`).forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
@@ -54,7 +55,7 @@ document.addEventListener('click', e => {
 });
 
 // ============================================================
-//  展開エリア制御（汎用）
+//  å±éã¨ãªã¢å¶å¾¡ï¼æ±ç¨ï¼
 // ============================================================
 function bindExpand(checkboxId, areaId) {
   const chk = document.getElementById(checkboxId);
@@ -87,7 +88,8 @@ bindExpand('chk-articulator',    'articulator-area');
 bindExpand('chk-shade',          'shade-area');
 bindExpand('chk-shade-jishi',    'shade-jishi-area');
 
-// シェード「その他」ボタンで自由入力を展開（保険）
+// ã·ã§ã¼ãããã®ä»ããã¿ã³ã§èªç±å
+¥åãå±éï¼ä¿éºï¼
 document.querySelectorAll('.toggle-btn[data-group="shade"]').forEach(btn => {
   btn.addEventListener('click', () => {
     const area = document.getElementById('shade-other-area');
@@ -95,7 +97,8 @@ document.querySelectorAll('.toggle-btn[data-group="shade"]').forEach(btn => {
   });
 });
 
-// シェード「その他」ボタンで自由入力を展開（自費）
+// ã·ã§ã¼ãããã®ä»ããã¿ã³ã§èªç±å
+¥åãå±éï¼èªè²»ï¼
 document.querySelectorAll('.toggle-btn[data-group="shade-jishi"]').forEach(btn => {
   btn.addEventListener('click', () => {
     const area = document.getElementById('shade-jishi-other-area');
@@ -104,7 +107,7 @@ document.querySelectorAll('.toggle-btn[data-group="shade-jishi"]').forEach(btn =
 });
 
 // ============================================================
-//  AM/PM トグル
+//  AM/PM ãã°ã«
 // ============================================================
 document.querySelectorAll('.ampm-btn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -115,7 +118,8 @@ document.querySelectorAll('.ampm-btn').forEach(btn => {
 });
 
 // ============================================================
-//  優先度トグル
+//  åªå
+åº¦ãã°ã«
 // ============================================================
 document.querySelectorAll('.priority-btn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -126,42 +130,46 @@ document.querySelectorAll('.priority-btn').forEach(btn => {
 });
 
 // ============================================================
-//  フォームデータ収集
+//  ãã©ã¼ã ãã¼ã¿åé
 // ============================================================
 function collectFormData() {
   const ins = state.insuranceType;
 
-  // チェックボックスグループ
+  // ãã§ãã¯ããã¯ã¹ã°ã«ã¼ã
   function getChecked(containerId) {
     return [...document.querySelectorAll(`#${containerId} input[type="checkbox"]:checked`)]
       .map(c => c.value);
   }
 
-  // トグルボタン（単一選択）
+  // ãã°ã«ãã¿ã³ï¼åä¸é¸æï¼
   function getToggleVal(group) {
     const el = document.querySelector(`.toggle-btn[data-group="${group}"].active`);
     return el ? (el.dataset.val || el.textContent.trim()) : null;
   }
 
-  // 発注形態
+  // çºæ³¨å½¢æ
+
   const orderTypes = [...document.querySelectorAll('#order-type-group input:checked')].map(c => c.value);
 
-  // 補綴物・装置
+  // è£ç¶´ç©ã»è£
+ç½®
   const deviceGroup = ins === 'insurance' ? 'device-insurance' : 'device-jishi';
   const devices = getChecked(deviceGroup);
 
-  // クラスプ
+  // ã¯ã©ã¹ã
   const claspType = ins === 'insurance' ? getToggleVal('clasp-ins') : getToggleVal('clasp-jishi');
 
-  // バー
+  // ãã¼
   const barType = ins === 'insurance' ? getToggleVal('bar-ins') : getToggleVal('bar-jishi');
 
-  // 人工歯
+  // äººå·¥æ­¯
   const toothAnt  = ins === 'insurance' ? getToggleVal('tooth-ant-ins')  : getToggleVal('tooth-ant-jishi');
   const toothPost = ins === 'insurance' ? getToggleVal('tooth-post-ins') : getToggleVal('tooth-post-jishi');
 
   return {
-    // 患者・医院情報
+    // æ£è
+ã»å»é¢æ
+å ±
     clinicName:   document.getElementById('clinic-name').value.trim(),
     doctorName:   document.getElementById('doctor-name').value.trim(),
     patientName:  document.getElementById('patient-name').value.trim(),
@@ -169,99 +177,107 @@ function collectFormData() {
     patientGender:document.getElementById('patient-gender').value,
     issueDate:    document.getElementById('issue-date').value || new Date().toISOString().slice(0,10),
 
-    // 歯式
+    // æ­¯å¼
     selectedTeeth: [...state.selectedTeeth].sort((a,b)=>a-b),
 
-    // 区分
+    // åºå
     insuranceType: ins,
 
-    // 発注形態
+    // çºæ³¨å½¢æ
+
     orderTypes,
     repairDetail: document.getElementById('repair-detail').value,
 
-    // 補綴物
+    // è£ç¶´ç©
     bedType:      getToggleVal(ins === 'insurance' ? 'bed-insurance' : 'bed-jishi'),
     devices,
     claspType,
     barType,
 
-    // メタルアップ
+    // ã¡ã¿ã«ã¢ãã
     hasMetalup:   document.getElementById(`chk-metalup-${ins}`).checked,
     metalupDetail:document.getElementById(`metalup-${ins}-detail`).value,
 
-    // 補強床
+    // è£å¼·åº
     hasKyoko:     document.getElementById(`chk-kyoko-${ins}`).checked,
     kyokoDetail:  document.getElementById(`kyoko-${ins}-detail`).value,
 
-    // 人工歯
+    // äººå·¥æ­¯
     toothAnterior:  toothAnt,
     toothPosterior: toothPost,
 
-    // 色調
+    // è²èª¿
     shadeGuide:   document.getElementById('shade-guide').value,
     shadeNumber:  document.getElementById('shade-number').value,
 
-    // オプション
+    // ãªãã·ã§ã³
     goaFlag:      getToggleVal('goa'),
     hasArticulator: document.getElementById('chk-articulator').checked,
     articulatorType:  document.getElementById('articulator-type').value,
     articulatorDetail:document.getElementById('articulator-detail').value,
 
-    // 納期
+    // ç´æ
     deliveryDate: document.getElementById('delivery-date').value,
     ampm:         state.ampm,
     priority:     state.priority,
     remarks:      document.getElementById('remarks').value,
 
-    // メタデータ
-    status:       'pending',   // 未受付
+    // ã¡ã¿ãã¼ã¿
+    status:       'pending',   // æªåä»
     createdAt:    new Date().toISOString(),
     id:           'local_' + Date.now()
   };
 }
 
 // ============================================================
-//  バリデーション
+//  ããªãã¼ã·ã§ã³
 // ============================================================
 function validate(data) {
   const errors = [];
-  if (!data.clinicName)   errors.push('歯科医院名');
-  if (!data.doctorName)   errors.push('担当歯科医師');
-  if (!data.patientName)  errors.push('患者名');
+  if (!data.clinicName)   errors.push('æ­¯ç§å»é¢å');
+  if (!data.doctorName)   errors.push('æ
+å½æ­¯ç§å»å¸«');
+  if (!data.patientName)  errors.push('æ£è
+å');
 
-  if (!data.deliveryDate) errors.push('納期');
+  if (!data.deliveryDate) errors.push('ç´æ');
   return errors;
 }
 
 // ============================================================
-//  送信処理
+//  éä¿¡å¦ç
 // ============================================================
 document.getElementById('submit-btn').addEventListener('click', async () => {
   const data = collectFormData();
   const errors = validate(data);
 
   if (errors.length > 0) {
-    showToast(`入力必須項目: ${errors.join('、')}`, 'error');
+    showToast(`å
+¥åå¿
+é é 
+ç®: ${errors.join('ã')}`, 'error');
     return;
   }
 
-  // TODO: Firebase Firestore への保存
+  // TODO: Firebase Firestore ã¸ã®ä¿å­
   // try {
   //   const docRef = await addDoc(collection(window.db, 'orders'), data);
   //   console.log('Saved:', docRef.id);
   // } catch(e) {
-  //   showToast('送信に失敗しました', 'error');
+  //   showToast('éä¿¡ã«å¤±æãã¾ãã', 'error');
   //   return;
   // }
 
-  // 暫定：ローカル保存
+  // æ«å®ï¼ã­ã¼ã«ã«ä¿å­
   state.orders.unshift(data);
-  showToast('✅ 指示書を送信しました');
+  showToast('â
+ æç¤ºæ¸ãéä¿¡ãã¾ãã');
   resetForm();
 });
 
 function resetForm() {
-  // テキスト入力リセット
+  // ãã­ã¹ãå
+¥åãªã»ãã
   ['clinic-name','doctor-name','patient-name','patient-age','patient-gender',
    'shade-guide','shade-number','delivery-date','remarks',
    'repair-detail','metalup-ins-detail','kyoko-ins-detail',
@@ -272,23 +288,23 @@ function resetForm() {
     if (el) el.value = '';
   });
 
-  // 歯式リセット
+  // æ­¯å¼ãªã»ãã
   state.selectedTeeth.clear();
   document.querySelectorAll('.tooth.selected').forEach(t => t.classList.remove('selected'));
   updateTeethDisplay();
 
-  // チェックボックスリセット
+  // ãã§ãã¯ããã¯ã¹ãªã»ãã
   document.querySelectorAll('input[type="checkbox"]:checked').forEach(c => { c.checked = false; });
 
-  // 展開エリアリセット
+  // å±éã¨ãªã¢ãªã»ãã
   document.querySelectorAll('.expandable.open').forEach(a => a.classList.remove('open'));
 
-  // トグル・ボタンリセット
+  // ãã°ã«ã»ãã¿ã³ãªã»ãã
   document.querySelectorAll('.toggle-btn.active').forEach(b => b.classList.remove('active'));
 }
 
 // ============================================================
-//  受注リスト描画
+//  åæ³¨ãªã¹ãæç»
 // ============================================================
 function renderOrders() {
   const container = document.getElementById('order-list');
@@ -296,51 +312,54 @@ function renderOrders() {
   if (state.orders.length === 0) {
     container.innerHTML = `
       <div style="text-align:center;padding:48px;color:var(--text-muted)">
-        <div style="font-size:32px;margin-bottom:12px">📋</div>
-        <div>受注データがありません</div>
-        <div style="font-size:12px;margin-top:8px">Firebase接続後、医院側から送信すると表示されます</div>
+        <div style="font-size:32px;margin-bottom:12px">ð</div>
+        <div>åæ³¨ãã¼ã¿ãããã¾ãã</div>
+        <div style="font-size:12px;margin-top:8px">Firebaseæ¥ç¶å¾ãå»é¢å´ããéä¿¡ããã¨è¡¨ç¤ºããã¾ã</div>
       </div>`;
     updateSummary([]);
     return;
   }
 
-  // 納品日ごとにグループ化
+  // ç´åæ¥ãã¨ã«ã°ã«ã¼ãå
   const groups = {};
   state.orders.forEach(o => {
-    const key = o.deliveryDate || '日付未設定';
+    const key = o.deliveryDate || 'æ¥ä»æªè¨­å®';
     if (!groups[key]) groups[key] = [];
     groups[key].push(o);
   });
 
-  // 日付でソート
+  // æ¥ä»ã§ã½ã¼ã
   const sortedDates = Object.keys(groups).sort();
   let html = '';
   sortedDates.forEach(date => {
     const label = formatDateLabel(date);
-    html += `<div class="order-group"><div class="order-group-date">📅 ${label}</div>`;
+    html += `<div class="order-group"><div class="order-group-date">ð
+ ${label}</div>`;
     groups[date].forEach(order => {
       const cls = order.insuranceType === 'insurance' ? 'insurance' : 'jishi';
       const badge = order.insuranceType === 'insurance'
-        ? '<span class="order-badge insurance">保険</span>'
-        : '<span class="order-badge jishi">自費</span>';
+        ? '<span class="order-badge insurance">ä¿éº</span>'
+        : '<span class="order-badge jishi">èªè²»</span>';
       const statusChk = order.status === 'accepted'
-        ? '✅ 受付済み'
-        : '<button class="act-btn check" onclick="acceptOrder(\'' + order.id + '\')">受付</button>';
+        ? 'â
+ åä»æ¸ã¿'
+        : '<button class="act-btn check" onclick="acceptOrder(\'' + order.id + '\')">åä»</button>';
 
       html += `
         <div class="order-item ${cls}" id="order-${order.id}">
-          <div style="font-size:20px">👤</div>
+          <div style="font-size:20px">ð¤</div>
           <div class="order-info">
-            <div class="order-patient">${order.patientName || '患者名未設定'} ${badge}</div>
+            <div class="order-patient">${order.patientName || 'æ£è
+åæªè¨­å®'} ${badge}</div>
             <div class="order-meta">
-              ${order.clinicName || ''} ／ ${order.deliveryDate || ''} ${order.ampm || ''}
-              ${order.priority === 'urgent' ? '🚨急ぎ' : ''}
-              ${order.bedType ? '｜' + order.bedType : ''}
+              ${order.clinicName || ''} ï¼ ${order.deliveryDate || ''} ${order.ampm || ''}
+              ${order.priority === 'urgent' ? 'ð¨æ¥ã' : ''}
+              ${order.bedType ? 'ï½' + order.bedType : ''}
             </div>
           </div>
           <div class="order-actions">
             ${statusChk}
-            <button class="act-btn detail" onclick="showDetail('${order.id}')">詳細</button>
+            <button class="act-btn detail" onclick="showDetail('${order.id}')">è©³ç´°</button>
             <button class="act-btn pdf" onclick="exportPDF('${order.id}')">PDF</button>
           </div>
         </div>`;
@@ -352,19 +371,6 @@ function renderOrders() {
   updateSummary(state.orders);
 }
 
-function formatDateLabel(dateStr) {
-  if (dateStr === '日付未設定') return dateStr;
-  try {
-    const d = new Date(dateStr);
-    const today = new Date(); today.setHours(0,0,0,0);
-    const diff = Math.floor((d - today) / 86400000);
-    const week = ['日','月','火','水','木','金','土'];
-    const w = week[d.getDay()];
-    const base = `${d.getMonth()+1}/${d.getDate()}(${w})`;
-    if (diff === 0) return `本日 ${base}`;
-    if (diff === 1) return `明日 ${base}`;
-    return base;
-  } catch { return dateStr; }
 }
 
 function updateSummary(orders) {
@@ -385,30 +391,30 @@ function acceptOrder(id) {
   const order = state.orders.find(o => o.id === id);
   if (order) {
     order.status = 'accepted';
-    // TODO: Firestore更新
+    // TODO: Firestoreæ´æ°
     renderOrders();
-    showToast('受付済みにしました');
+    showToast('åä»æ¸ã¿ã«ãã¾ãã');
   }
 }
 
 // ============================================================
-//  日付初期値セット
+//  æ¥ä»åæå¤ã»ãã
 // ============================================================
 function initDates() {
   const today = new Date().toISOString().slice(0,10);
   document.getElementById('issue-date').value = today;
-  // 納期デフォルト：7日後
+  // ç´æããã©ã«ãï¼7æ¥å¾
   const next = new Date(); next.setDate(next.getDate() + 7);
   document.getElementById('delivery-date').value = next.toISOString().slice(0,10);
 }
 
 // ============================================================
-//  初期化
+//  åæå
 // ============================================================
 initDates();
 
 // ============================================================
-//  Firebase（本番接続 — 設定後アンコメント）
+//  Firebaseï¼æ¬çªæ¥ç¶ â è¨­å®å¾ã¢ã³ã³ã¡ã³ãï¼
 // ============================================================
 /*
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
@@ -427,12 +433,12 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db  = getFirestore(app);
 
-// リアルタイム受信（技工所側）
+// ãªã¢ã«ã¿ã¤ã åä¿¡ï¼æå·¥æå´ï¼
 const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
 onSnapshot(q, snapshot => {
   state.orders = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
   renderOrders();
 });
 
-// 送信時の保存（上記 submit-btn の addDoc コメントをアンコメント）
+// éä¿¡æã®ä¿å­ï¼ä¸è¨ submit-btn ã® addDoc ã³ã¡ã³ããã¢ã³ã³ã¡ã³ãï¼
 */
