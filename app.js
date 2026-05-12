@@ -325,7 +325,7 @@ function renderOrders() {
         : '<span class="order-badge jishi">自費</span>';
       const statusChk = order.status === 'accepted'
         ? '✅ 受付済み'
-        : '<button class="act-btn check" onclick="acceptOrder(\'' + order.id + '\')">' + '受付</button>';
+        : '<button class="act-btn check" onclick="acceptOrder(\'' + order.id + '\')"受付</button>';
 
       html += `
         <div class="order-item ${cls}" id="order-${order.id}">
