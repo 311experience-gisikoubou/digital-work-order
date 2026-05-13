@@ -199,8 +199,8 @@ function collectFormData() {
     toothPosterior: toothPost,
 
     // 色調
-    shadeGuide:   document.getElementById('shade-guide').value,
-    shadeNumber:  document.getElementById('shade-number').value,
+    shadeGuide:   document.getElementById('shade-guide')?.value ?? '',
+    shadeNumber:  document.getElementById('shade-number')?.value ?? '',
 
     // オプション
     goaFlag:      getToggleVal('goa'),
