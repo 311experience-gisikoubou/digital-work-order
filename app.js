@@ -130,6 +130,7 @@ document.querySelectorAll('.priority-btn').forEach(btn => {
 // ============================================================
 function collectFormData() {
   const ins = state.insuranceType;
+  const insKey = ins === 'insurance' ? 'ins' : 'jishi';
 
   // チェックボックスグループ
   function getChecked(containerId) {
@@ -186,12 +187,12 @@ function collectFormData() {
     barType,
 
     // メタルアップ
-    hasMetalup:   document.getElementById(`chk-metalup-${ins}`).checked,
-    metalupDetail:document.getElementById(`metalup-${ins}-detail`).value,
+    hasMetalup:   document.getElementById(`chk-metalup-${insKey}`).checked,
+    metalupDetail:document.getElementById(`metalup-${insKey}-detail`)?.value ?? '',
 
     // 補強床
-    hasKyoko:     document.getElementById(`chk-kyoko-${ins}`).checked,
-    kyokoDetail:  document.getElementById(`kyoko-${ins}-detail`).value,
+    hasKyoko:     document.getElementById(`chk-kyoko-${insKey}`).checked,
+    kyokoDetail:  document.getElementById(`kyoko-${insKey}-detail`).value,
 
     // 人工歯
     toothAnterior:  toothAnt,
