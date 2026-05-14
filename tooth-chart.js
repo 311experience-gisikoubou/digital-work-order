@@ -144,6 +144,30 @@ var claspDrag = { active: false, mode: null, uid: null, num: null, startX: 0, st
 
 function genUid(){ return Date.now().toString(36)+Math.random().toString(36).substring(2,6); }
 
+// ===== localStorage 保存・復元 =====
+function saveClaspState() {
+  try {
+    localStorage.setItem('dwo_clasp_v1', JSON.stringify(claspState));
+    if (typeof showToast === 'function') showToast('クラスプ位置を保存しました');
+  } catch(e) {}
+}
+
+function loadClaspState() {
+  try {
+    var raw = localStorage.getItem('dwo_clasp_v1');
+    if (!raw) return;
+    var saved = JSON.parse(raw);
+    Object.keys(saved).forEach(function(num) {
+      var n = parseInt(num, 10);
+      if (claspState[n] !== undefined) {
+        claspState[n] = saved[num];
+      }
+    });
+    renderAllClasps();
+    updateClaspList();
+  } catch(e) {}
+}
+
 function initClasp(){
   upperTeeth.concat(lowerTeeth).forEach(function(t){ claspState[t.num]=[]; });
 
@@ -186,6 +210,19 @@ function initClasp(){
   document.addEventListener("click",function(){
     document.querySelectorAll(".dir-menu").forEach(function(m){m.classList.remove("show");});
   });
+
+  // クラスプ位置保存ボタンを claspClearBtn の隣に挿入
+  var clearBtn = document.getElementById("claspClearBtn");
+  if (clearBtn && !document.getElementById("claspSaveBtn")) {
+    var saveBtn = document.createElement("button");
+    saveBtn.id = "claspSaveBtn";
+    saveBtn.textContent = "位置保存";
+    saveBtn.className = clearBtn.className;
+    saveBtn.addEventListener("click", saveClaspState);
+    clearBtn.parentNode.insertBefore(saveBtn, clearBtn.nextSibling);
+  }
+
+  loadClaspState();
 }
 
 function getInitialTransform(num, type, dir) {
