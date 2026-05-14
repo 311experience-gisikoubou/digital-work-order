@@ -146,6 +146,13 @@ function genUid(){ return Date.now().toString(36)+Math.random().toString(36).sub
 
 // ===== localStorage 保存・復元 =====
 function saveClaspState() {
+  var hasAny = upperTeeth.concat(lowerTeeth).some(function(t) {
+    return claspState[t.num] && claspState[t.num].length > 0;
+  });
+  if (!hasAny) {
+    if (typeof showToast === 'function') showToast('クラスプが配置されていません');
+    return;
+  }
   try {
     localStorage.setItem('dwo_clasp_v1', JSON.stringify(claspState));
     if (typeof showToast === 'function') showToast('クラスプ位置を保存しました');
