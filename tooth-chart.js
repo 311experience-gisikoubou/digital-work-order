@@ -270,6 +270,25 @@ function getInitialTransform(num, type, dir) {
   return { cx: cx, cy: cy, sx: flipX*sx, sy: sy, angle: 0 };
 }
 
+// 保存済み claspState から同じ歯・種別・方向の transform を取得する
+// 見つかれば {cx,cy,sx,sy,angle} を返す。なければ null。
+function getSavedTransform(num, type, dir) {
+  try {
+    var raw = localStorage.getItem('dwo_clasp_v1');
+    if (!raw) return null;
+    var saved = JSON.parse(raw);
+    var list = saved[String(num)];
+    if (!list) return null;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].type === type && list[i].dir === dir) {
+        var m = list[i];
+        return { cx: m.cx, cy: m.cy, sx: m.sx, sy: m.sy, angle: m.angle };
+      }
+    }
+    return null;
+  } catch(e) { return null; }
+}
+
 function applyClaspToTooth(num){
   if(!claspMode) return;
   var type=claspMode.type, dir=claspMode.dir;
@@ -277,14 +296,14 @@ function applyClaspToTooth(num){
   if(type==="T"){
     if(twinFirst===null){
       twinFirst=num;
-      var t1 = getInitialTransform(num, type, dir);
+      var t1 = getSavedTransform(num, type, dir) || getInitialTransform(num, type, dir);
       claspState[num].push(Object.assign({uid: genUid(), type:type, dir:dir, twin:null, isTwin1:true}, t1));
       renderAllClasps();
     } else if(twinFirst!==num){
       var n1=twinFirst;
       var c1 = claspState[n1].find(function(c){return c.type==="T"&&c.isTwin1;});
       if(c1) { c1.isTwin1 = false; c1.twinWith = num; }
-      var t2 = getInitialTransform(num, type, dir);
+      var t2 = getSavedTransform(num, type, dir) || getInitialTransform(num, type, dir);
       claspState[num].push(Object.assign({uid: genUid(), type:type, dir:dir, twinWith:n1}, t2));
       twinFirst=null;
       document.getElementById("twinHint").className="twin-hint";
@@ -298,7 +317,7 @@ function applyClaspToTooth(num){
   if(existing>=0){
     claspState[num].splice(existing,1);
   } else {
-    var t0 = getInitialTransform(num, type, dir);
+    var t0 = getSavedTransform(num, type, dir) || getInitialTransform(num, type, dir);
     var newUid = genUid();
     claspState[num].push(Object.assign({uid: newUid, type:type, dir:dir}, t0));
     activeClaspUid = newUid;
