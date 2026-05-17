@@ -228,8 +228,6 @@ function initClasp(){
     saveBtn.addEventListener("click", saveClaspState);
     clearBtn.parentNode.insertBefore(saveBtn, clearBtn.nextSibling);
   }
-
-  loadClaspState();
 }
 
 function getInitialTransform(num, type, dir) {
