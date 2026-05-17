@@ -2,7 +2,7 @@
 //  PDF出力（jsPDF）
 // ============================================================
 function exportPDF(id) {
-  const order = id ? state.orders.find(o => o.id === id) : null;
+  const order = id ? state.orders.find(o => o.id === id) : collectFormData();
   if (!order) { showToast('PDF出力するデータがありません', 'error'); return; }
 
   // jsPDF はUnicode/日本語フォント未内蔵のため、
