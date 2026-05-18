@@ -27,7 +27,7 @@ function exportPDF(id) {
     iframe.contentWindow.addEventListener('afterprint', cleanup);
     setTimeout(cleanup, 30000);
     iframe.contentWindow.print();
-  }, 400);
+  }, 2000);
   showToast('印刷ダイアログを開きます');
 }
 
