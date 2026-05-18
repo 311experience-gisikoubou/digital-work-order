@@ -16,10 +16,15 @@ function exportPDF(id) {
   iframe.contentDocument.close();
   setTimeout(function() {
     iframe.contentWindow.focus();
-    iframe.contentWindow.print();
-    setTimeout(function() {
+    var removed = false;
+    function cleanup() {
+      if (removed) return;
+      removed = true;
       if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
-    }, 1000);
+    }
+    iframe.contentWindow.addEventListener('afterprint', cleanup);
+    setTimeout(cleanup, 30000);
+    iframe.contentWindow.print();
   }, 400);
   showToast('印刷ダイアログを開きます');
 }
