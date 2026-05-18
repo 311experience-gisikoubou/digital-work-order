@@ -79,17 +79,19 @@ function _buildPrintHTML(order) {
   row('クラスプ', order.claspType);
   if (order.barType) row('バー', order.barType + 'バー');
 
-  // クラスプ配置詳細（claspState グローバルから生成）
+  // クラスプ配置詳細（claspState グローバルから集計）
   if (typeof claspState !== 'undefined') {
     const CN = { W:'キャストE', E:'エーカース', T:'双子鉤', R:'レスト', H:'フック', C:'コンビ鉤', I:'バー' };
-    const items = [];
+    const counts = {};
     Object.keys(claspState).forEach(function(num) {
       (claspState[num] || []).forEach(function(c) {
         if (c.isTwin1) return;
-        var lbl = (CN[c.type] || c.type) + (c.dir ? '-' + c.dir : '');
-        lbl += c.twinWith ? '（' + num + '↔' + c.twinWith + '）' : '（' + num + '）';
-        items.push(lbl);
+        counts[c.type] = (counts[c.type] || 0) + 1;
       });
+    });
+    const items = Object.keys(counts).map(function(t) {
+      var unit = t === 'T' ? '組' : '本';
+      return (CN[t] || t) + ' ' + counts[t] + unit;
     });
     if (items.length) row('クラスプ配置', items.join('　'));
   }
