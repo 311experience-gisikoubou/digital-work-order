@@ -196,6 +196,7 @@ function _buildPrintHTML(order, chartHtml) {
       position:absolute !important; top:0 !important; left:0 !important;
       width:55mm !important; height:96.25mm !important;
     }
+    .tooth-el { fill:transparent; stroke:transparent; }
     @media print {
       body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
