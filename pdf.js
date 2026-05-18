@@ -121,17 +121,17 @@ function _buildPrintHTML(order) {
   }
 
   const css = `
-    @page { size: A4; margin: 15mm; }
+    @page { size: A5; margin: 10mm; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'Meiryo', 'Hiragino Kaku Gothic Pro', 'Yu Gothic', 'MS Gothic', sans-serif;
-      font-size: 10pt;
+      font-size: 9pt;
       color: #000;
       line-height: 1.6;
     }
     h1 {
       text-align: center;
-      font-size: 16pt;
+      font-size: 13pt;
       margin-bottom: 2mm;
       padding-bottom: 3mm;
       border-bottom: 1.5px solid #444;
@@ -140,29 +140,29 @@ function _buildPrintHTML(order) {
       text-align: right;
       font-size: 8pt;
       color: #555;
-      margin-bottom: 5mm;
+      margin-bottom: 3mm;
     }
     .sect {
       background: #ccc;
       padding: 1mm 2mm;
-      font-size: 9pt;
+      font-size: 8pt;
       font-weight: bold;
-      margin: 5mm 0 1mm;
+      margin: 3mm 0 1mm;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
     .row {
       display: flex;
-      padding: 1.2mm 3mm;
+      padding: 1mm 2mm;
       border-bottom: 1px dotted #bbb;
-      min-height: 6mm;
+      min-height: 5mm;
       align-items: baseline;
     }
     .lbl {
-      width: 30mm;
+      width: 25mm;
       flex-shrink: 0;
       color: #555;
-      font-size: 9pt;
+      font-size: 8pt;
     }
     .val { flex: 1; }
     .remarks {
@@ -173,7 +173,7 @@ function _buildPrintHTML(order) {
       margin-top: 10mm;
       padding-top: 2mm;
       border-top: 1px solid #bbb;
-      font-size: 7pt;
+      font-size: 6pt;
       color: #999;
     }
     @media print {
