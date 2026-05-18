@@ -190,11 +190,11 @@ function _buildPrintHTML(order, chartHtml) {
       background:#fff;
       -webkit-print-color-adjust:exact; print-color-adjust:exact;
     }
-    .chart-wrap img { display:block; width:55mm; height:96.25mm; }
+    .chart-wrap img { display:block !important; width:55mm !important; height:96.25mm !important; }
     .chart-wrap svg,
     .chart-wrap .overlay-svg {
-      position:absolute; top:0; left:0;
-      width:55mm; height:96.25mm;
+      position:absolute !important; top:0 !important; left:0 !important;
+      width:55mm !important; height:96.25mm !important;
     }
     @media print {
       body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
