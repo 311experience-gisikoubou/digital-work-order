@@ -470,6 +470,21 @@ function getSVGPt(e){
 
 function buildSVG(){
   var svg=document.getElementById("toothSvg");
+
+  // レイヤー構造を確立（順序 = 描画の重なり順）
+  var toothLayer=document.createElementNS("http://www.w3.org/2000/svg","g");
+  toothLayer.id="toothLayer";
+  var outlineLayer=document.createElementNS("http://www.w3.org/2000/svg","g");
+  outlineLayer.id="outlineLayer";
+  var claspLayer=document.createElementNS("http://www.w3.org/2000/svg","g");
+  claspLayer.id="claspLayer";
+  var freeLineLayer=document.createElementNS("http://www.w3.org/2000/svg","g");
+  freeLineLayer.id="freeLineLayer";
+  svg.appendChild(toothLayer);
+  svg.appendChild(outlineLayer);
+  svg.appendChild(claspLayer);
+  svg.appendChild(freeLineLayer);
+
   upperTeeth.concat(lowerTeeth).forEach(function(t){
     toothState[t.num]=null;
     coords[t.num]={cx:t.cx,cy:t.cy,rx:t.rx,ry:t.ry};
@@ -498,7 +513,7 @@ function buildSVG(){
     enEl.setAttribute("class","edit-num");enEl.id="en-"+t.num;
     enEl.textContent=t.num;
     g.appendChild(enEl);
-    svg.appendChild(g);
+    toothLayer.appendChild(g);
   });
   
   var svgEl=document.getElementById("toothSvg");
