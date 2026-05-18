@@ -237,15 +237,12 @@ function getInitialTransform(num, type, dir) {
   var sz=Math.min(tw,th)*0.85;
 
   if(type === "W") {
-    // ワイヤー.svg: translate(-1350,-810) 後の座標範囲は約 -113～+119(幅232), -135～+90(高225)
-    // 外側の scale(sx,sy) で 歯のサイズ / 元座標範囲 に合わせる
-    var WIRE_WIDTH = 232; // 元SVG座標のおよその幅
-    var WIRE_HEIGHT = 225; // 元SVG座標のおよその高さ
-    var wScale = sz / Math.max(WIRE_WIDTH, WIRE_HEIGHT); // 歯に合わせたスケール
+    var WIRE_WIDTH = 232;
+    var WIRE_HEIGHT = 225;
+    var wScale = sz / Math.max(WIRE_WIDTH, WIRE_HEIGHT);
     var rightTeeth=[18,17,16,15,14,13,12,11,48,47,46,45,44,43,42,41];
     var isRight=rightTeeth.indexOf(num)>=0;
     var flipX = (dir==="M") ? (isRight ? 1 : -1) : (isRight ? -1 : 1);
-    // 初期配置: 歯の近心/遠心端に合わせる
     var posX = (dir==="M") ? (isRight ? bb.x2 : bb.x1) : (isRight ? bb.x1 : bb.x2);
     return { cx: posX, cy: bb.cy, sx: flipX*wScale, sy: wScale, angle: 0 };
   }
@@ -268,8 +265,6 @@ function getInitialTransform(num, type, dir) {
   return { cx: cx, cy: cy, sx: flipX*sx, sy: sy, angle: 0 };
 }
 
-// 保存済み claspState から同じ歯・種別・方向の transform を取得する
-// 見つかれば {cx,cy,sx,sy,angle} を返す。なければ null。
 function getSavedTransform(num, type, dir) {
   try {
     var raw = localStorage.getItem('dwo_clasp_v1');
@@ -326,7 +321,8 @@ function applyClaspToTooth(num){
 
 function renderAllClasps(){
   var svg=document.getElementById("toothSvg");
-  Array.from(svg.querySelectorAll(".clasp-group")).forEach(function(el){ el.parentNode.removeChild(el); });
+  var claspLayer=document.getElementById("claspLayer")||svg;
+  Array.from(claspLayer.querySelectorAll(".clasp-group")).forEach(function(el){ el.parentNode.removeChild(el); });
 
   upperTeeth.concat(lowerTeeth).forEach(function(t){
     claspState[t.num].forEach(function(c){
@@ -336,8 +332,6 @@ function renderAllClasps(){
       
       var trans;
       if(c.type === "W") {
-        // Wタイプ: ワイヤーSVGは内部でscaleしているので translate(-20,-30)は使わない
-        // cx,cy が中心点、scaleを外側に掛けるだけ
         trans = "translate("+c.cx+","+c.cy+") rotate("+c.angle+") scale("+c.sx+","+c.sy+")";
       } else {
         trans = "translate("+c.cx+","+c.cy+") rotate("+c.angle+") scale("+c.sx+","+c.sy+") translate(-20,-30)";
@@ -373,9 +367,6 @@ function renderAllClasps(){
       var color=CLASP_COLORS[c.type]||"#555";
       var inner=document.createElementNS("http://www.w3.org/2000/svg","g");
       if(c.type === "W") {
-        // ワイヤー.svg の実際の図形を使用（fill色をCLASP_COLORSで着色）
-        inner.innerHTML = WIRE_SVG_PATHS.replace(/fill="[^"]*"/g,'').replace(/<g /g,'<g fill="'+color+'" ').replace(/^<g /,'<g fill="'+color+'" ');
-        // 全pathにfillを適用するため、子要素にも直接設定
         var wireContainer = document.createElementNS("http://www.w3.org/2000/svg","g");
         wireContainer.setAttribute("fill", color);
         wireContainer.innerHTML = WIRE_SVG_PATHS;
@@ -406,7 +397,7 @@ function renderAllClasps(){
         g.appendChild(createHandle(c, t.num, "bl", 0, 60));
         g.appendChild(createHandle(c, t.num, "br", 40, 60));
       }
-      svg.appendChild(g);
+      claspLayer.appendChild(g);
     });
   });
 }
@@ -533,7 +524,7 @@ function buildSVG(){
 
     var rect = svgEl.getBoundingClientRect();
     var scaleX = 600 / rect.width;
-    var scaleY = 987 / rect.height; // 表示領域高さに合わせて適宜調整
+    var scaleY = 987 / rect.height;
     dx *= scaleX; dy *= scaleY;
 
     var c = claspState[claspDrag.num].find(function(item){return item.uid === claspDrag.uid;});
@@ -599,7 +590,6 @@ function clickTooth(num){
     return;
   }
   
-  // 歯をクリックした際、もしクラスプが選択中なら選択解除
   if(activeClaspUid) {
     activeClaspUid = null;
     renderAllClasps();
@@ -613,7 +603,6 @@ function clickTooth(num){
     toothState[num]=null;
     el.setAttribute("class","tooth-el"+(isEdit?" edit-mode":""));
     stamp.setAttribute("class","tooth-stamp");stamp.textContent="";
-    // 歯式チャートの選択を解除
     if(currentMode==="clear"||currentMode==="missing"){
       syncToShijiChart(num, false);
     }
@@ -622,7 +611,6 @@ function clickTooth(num){
     el.setAttribute("class","tooth-el "+currentMode);
     stamp.setAttribute("class","tooth-stamp show "+currentMode);
     stamp.textContent=STAMPS[currentMode];
-    // 欠損モードの場合のみ歯式チャートに反映
     if(currentMode==="missing"){
       syncToShijiChart(num, true);
     }
@@ -630,9 +618,7 @@ function clickTooth(num){
   updateResults();
 }
 
-// 歯式図 → 歯式チャート への同期
 function syncToShijiChart(num, isSelected) {
-  // state.selectedTeethはSetなのでtypeofチェック
   if(typeof state === 'undefined' || !state.selectedTeeth) return;
   var chartEl = document.querySelector('.tooth[data-num="' + num + '"]');
   if(!chartEl) return;
@@ -661,7 +647,6 @@ function onMM(e){
   var dx=pt.x-drag.startX,dy=pt.y-drag.startY;
   if(Math.abs(dx)>2||Math.abs(dy)>2)drag.moved=true;
   var num=drag.num,nx=Math.round(drag.origCx+dx),ny=Math.round(drag.origCy+dy);
-  // 範囲制限（SVGの表示範囲内に収める）
   nx = Math.max(10, Math.min(590, nx));
   ny = Math.max(10, Math.min(1100, ny));
   coords[num].cx=nx;coords[num].cy=ny;
@@ -717,7 +702,6 @@ function copyCoords(){
     lines.push("  {num:"+t.num+", cx:"+c.cx+", cy:"+c.cy+", rx:"+c.rx+", ry:"+c.ry+"}");
   });
   var text = lines.join(",\n");
-  // clipboardが使えない環境用のフォールバック
   try {
     navigator.clipboard.writeText(text).then(function(){
       alert("座標をコピーしました！\nClaudeに貼り付けてください。");
@@ -755,7 +739,6 @@ function resetAll(){
     if(el)el.setAttribute("class","tooth-el"+(isEdit?" edit-mode":""));
     if(st){st.setAttribute("class","tooth-stamp");st.textContent="";}
   });
-  // 歯式チャートも同時リセット
   if(typeof state !== 'undefined' && state.selectedTeeth){
     state.selectedTeeth.clear();
     document.querySelectorAll('.tooth.selected').forEach(function(t){ t.classList.remove('selected'); });
