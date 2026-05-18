@@ -1,55 +1,59 @@
 // ============================================================
-//  PDF出力（jsPDF）
-//  NOTE: jsPDF 標準フォントはCJK未対応のため日本語は文字化けします。
-//        本番運用時は日本語フォントの embedding が必要です。
+//  PDF出力（window.print() 方式）
+//  日本語はブラウザ/OSのフォントで表示。jsPDFは使用しない。
 // ============================================================
 function exportPDF(id) {
   const order = id ? state.orders.find(o => o.id === id) : collectFormData();
   if (!order) { showToast('PDF出力するデータがありません', 'error'); return; }
 
-  if (typeof window.jspdf === 'undefined') {
-    showToast('jsPDF 読み込み中、しばらくお待ちください', 'error');
-    return;
-  }
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const html = _buildPrintHTML(order);
 
-  const ML = 15;   // left margin
-  const PW = 180;  // content width
-  let y = 22;
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:0;height:0;border:0;';
+  document.body.appendChild(iframe);
+  iframe.contentDocument.open();
+  iframe.contentDocument.write(html);
+  iframe.contentDocument.close();
+  setTimeout(function() {
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
+    setTimeout(function() {
+      if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+    }, 1000);
+  }, 400);
+  showToast('印刷ダイアログを開きます');
+}
+
+function _buildPrintHTML(order) {
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  const lines = [];
 
   function sect(label) {
-    y += 2;
-    doc.setFillColor(200, 200, 200);
-    doc.rect(ML, y - 5, PW, 6.5, 'F');
-    doc.setFontSize(9);
-    doc.text(label, ML + 1, y);
-    y += 8;
+    lines.push('<div class="sect">' + esc(label) + '</div>');
   }
 
   function row(label, value) {
     if (value === null || value === undefined || value === '' || value === false) return;
-    doc.setFontSize(10);
-    doc.text(label + ': ' + String(value), ML + 3, y);
-    y += 6;
+    lines.push(
+      '<div class="row">' +
+      '<span class="lbl">' + esc(label) + '</span>' +
+      '<span class="val">' + esc(String(value)) + '</span>' +
+      '</div>'
+    );
   }
-
-  // タイトル
-  doc.setFontSize(18);
-  doc.text('歯科技工指示書', 105, y, { align: 'center' });
-  doc.setFontSize(8);
-  doc.text('発行日: ' + (order.issueDate || ''), 195, 14, { align: 'right' });
-  y += 2;
-  doc.setDrawColor(120, 120, 120);
-  doc.line(ML, y, ML + PW, y);
-  y += 8;
 
   // 医院・患者情報
   sect('医院・患者情報');
   row('医院名', order.clinicName);
   row('担当医', order.doctorName);
   row('患者名', order.patientName);
-  const ag = [order.patientAge ? order.patientAge + '歳' : '', order.patientGender].filter(Boolean).join('  ');
+  const ag = [order.patientAge ? order.patientAge + '歳' : '', order.patientGender].filter(Boolean).join('　');
   if (ag) row('年齢・性別', ag);
 
   // 納期・優先度
@@ -78,11 +82,11 @@ function exportPDF(id) {
       (claspState[num] || []).forEach(function(c) {
         if (c.isTwin1) return;
         var lbl = (CN[c.type] || c.type) + (c.dir ? '-' + c.dir : '');
-        lbl += c.twinWith ? '(' + num + '<->' + c.twinWith + ')' : '(' + num + ')';
+        lbl += c.twinWith ? '（' + num + '↔' + c.twinWith + '）' : '（' + num + '）';
         items.push(lbl);
       });
     });
-    if (items.length) row('クラスプ配置', items.join(' / '));
+    if (items.length) row('クラスプ配置', items.join('　'));
   }
 
   // 人工歯・色調（入力時のみ）
@@ -108,17 +112,82 @@ function exportPDF(id) {
   // 備考（入力時のみ）
   if (order.remarks) {
     sect('備考');
-    doc.setFontSize(10);
-    const lines = doc.splitTextToSize(order.remarks, PW - 6);
-    lines.forEach(function(line) { doc.text(line, ML + 3, y); y += 6; });
+    lines.push('<div class="remarks">' + esc(order.remarks).replace(/\n/g, '<br>') + '</div>');
   }
 
-  // フッター
-  doc.setFontSize(8);
-  doc.setTextColor(150, 150, 150);
-  doc.text('※ 歯式図は別途添付 / システム出力', ML, 287);
+  const css = `
+    @page { size: A4; margin: 15mm; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Meiryo', 'Hiragino Kaku Gothic Pro', 'Yu Gothic', 'MS Gothic', sans-serif;
+      font-size: 10pt;
+      color: #000;
+      line-height: 1.6;
+    }
+    h1 {
+      text-align: center;
+      font-size: 16pt;
+      margin-bottom: 2mm;
+      padding-bottom: 3mm;
+      border-bottom: 1.5px solid #444;
+    }
+    .issue-date {
+      text-align: right;
+      font-size: 8pt;
+      color: #555;
+      margin-bottom: 5mm;
+    }
+    .sect {
+      background: #ccc;
+      padding: 1mm 2mm;
+      font-size: 9pt;
+      font-weight: bold;
+      margin: 5mm 0 1mm;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .row {
+      display: flex;
+      padding: 1.2mm 3mm;
+      border-bottom: 1px dotted #bbb;
+      min-height: 6mm;
+      align-items: baseline;
+    }
+    .lbl {
+      width: 30mm;
+      flex-shrink: 0;
+      color: #555;
+      font-size: 9pt;
+    }
+    .val { flex: 1; }
+    .remarks {
+      padding: 2mm 3mm;
+      line-height: 1.8;
+    }
+    .footer {
+      margin-top: 10mm;
+      padding-top: 2mm;
+      border-top: 1px solid #bbb;
+      font-size: 7pt;
+      color: #999;
+    }
+    @media print {
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+  `;
 
-  const fname = 'shijisho_' + (order.patientName || 'noname') + '_' + (order.deliveryDate || '').replace(/-/g, '') + '.pdf';
-  doc.save(fname);
-  showToast('PDFを出力しました');
+  return '<!DOCTYPE html>\n' +
+    '<html lang="ja">\n' +
+    '<head>\n' +
+    '<meta charset="UTF-8">\n' +
+    '<title>歯科技工指示書</title>\n' +
+    '<style>' + css + '</style>\n' +
+    '</head>\n' +
+    '<body>\n' +
+    '<h1>歯科技工指示書</h1>\n' +
+    '<div class="issue-date">発行日：' + esc(order.issueDate || '') + '</div>\n' +
+    lines.join('\n') + '\n' +
+    '<div class="footer">※ 歯式図は別途添付　／　システム出力</div>\n' +
+    '</body>\n' +
+    '</html>';
 }
