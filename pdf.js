@@ -6,7 +6,9 @@ function exportPDF(id) {
   const order = id ? state.orders.find(o => o.id === id) : collectFormData();
   if (!order) { showToast('PDF出力するデータがありません', 'error'); return; }
 
-  const html = _buildPrintHTML(order);
+  const chartWrap = document.querySelector('.chart-wrap');
+  const chartHtml = chartWrap ? chartWrap.outerHTML : '';
+  const html = _buildPrintHTML(order, chartHtml);
 
   const iframe = document.createElement('iframe');
   iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:0;height:0;border:0;';
@@ -29,7 +31,7 @@ function exportPDF(id) {
   showToast('印刷ダイアログを開きます');
 }
 
-function _buildPrintHTML(order) {
+function _buildPrintHTML(order, chartHtml) {
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;')
@@ -178,6 +180,22 @@ function _buildPrintHTML(order) {
       font-size: 6pt;
       color: #999;
     }
+    .print-body { display:flex; gap:4mm; align-items:flex-start; }
+    .chart-col { flex:0 0 55mm; }
+    .info-col { flex:1; min-width:0; }
+    .chart-wrap {
+      position:relative; display:block;
+      width:55mm; height:96.25mm;
+      overflow:hidden; border-radius:0;
+      background:#fff;
+      -webkit-print-color-adjust:exact; print-color-adjust:exact;
+    }
+    .chart-wrap img { display:block; width:55mm; height:96.25mm; }
+    .chart-wrap svg,
+    .chart-wrap .overlay-svg {
+      position:absolute; top:0; left:0;
+      width:55mm; height:96.25mm;
+    }
     @media print {
       body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
@@ -193,8 +211,11 @@ function _buildPrintHTML(order) {
     '<body>\n' +
     '<h1>歯科技工指示書</h1>\n' +
     '<div class="issue-date">発行日：' + esc(order.issueDate || '') + '</div>\n' +
-    lines.join('\n') + '\n' +
-    '<div class="footer">※ 歯式図は別途添付　／　システム出力</div>\n' +
+    '<div class="print-body">\n' +
+    (chartHtml ? '<div class="chart-col">' + chartHtml + '</div>\n' : '') +
+    '<div class="info-col">' + lines.join('\n') + '</div>\n' +
+    '</div>\n' +
+    '<div class="footer">システム出力</div>\n' +
     '</body>\n' +
     '</html>';
 }
