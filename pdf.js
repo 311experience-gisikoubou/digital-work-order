@@ -125,82 +125,99 @@ function _buildPrintHTML(order, chartHtml) {
   }
 
   const css = `
-    @page { size: A5; margin: 10mm; }
+    @page { size: A4 portrait; margin: 0; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'Meiryo', 'Hiragino Kaku Gothic Pro', 'Yu Gothic', 'MS Gothic', sans-serif;
-      font-size: 9pt;
-      color: #000;
-      line-height: 1.6;
-    }
-    h1 {
-      text-align: center;
-      font-size: 13pt;
-      margin-bottom: 2mm;
-      padding-bottom: 3mm;
-      border-bottom: 1.5px solid #444;
-    }
-    .issue-date {
-      text-align: right;
       font-size: 8pt;
-      color: #555;
-      margin-bottom: 3mm;
+      color: #000;
+      line-height: 1.5;
     }
+    .slip {
+      width: 210mm;
+      height: 148mm;
+      padding: 5mm 8mm 4mm;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .perforated {
+      border-top: 1px dashed #aaa;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .slip-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      padding-bottom: 2mm;
+      border-bottom: 1.5px solid #444;
+      margin-bottom: 2mm;
+      flex-shrink: 0;
+    }
+    h1 { font-size: 11pt; font-weight: bold; }
+    .issue-date { font-size: 7pt; color: #555; }
     .sect {
       background: #ccc;
-      padding: 1mm 2mm;
-      font-size: 8pt;
+      padding: 0.5mm 2mm;
+      font-size: 7pt;
       font-weight: bold;
-      margin: 3mm 0 1mm;
+      margin: 2mm 0 0.5mm;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
     .row {
       display: flex;
-      padding: 1mm 2mm;
+      padding: 0.5mm 2mm;
       border-bottom: 1px dotted #bbb;
-      min-height: 5mm;
+      min-height: 4mm;
       align-items: baseline;
     }
     .lbl {
-      width: 25mm;
+      width: 20mm;
       flex-shrink: 0;
       color: #555;
-      font-size: 8pt;
+      font-size: 7pt;
     }
     .val { flex: 1; }
-    .remarks {
-      padding: 2mm 3mm;
-      line-height: 1.8;
+    .remarks { padding: 1mm 3mm; line-height: 1.6; }
+    .print-body {
+      display: flex;
+      gap: 3mm;
+      align-items: flex-start;
+      flex: 1;
+      overflow: hidden;
     }
-    .footer {
-      margin-top: 10mm;
-      padding-top: 2mm;
-      border-top: 1px solid #bbb;
-      font-size: 6pt;
-      color: #999;
-    }
-    .print-body { display:flex; gap:4mm; align-items:flex-start; }
-    .chart-col { flex:0 0 55mm; }
-    .info-col { flex:1; min-width:0; }
+    .chart-col { flex: 0 0 52mm; }
+    .info-col { flex: 1; min-width: 0; overflow: hidden; }
     .chart-wrap {
-      position:relative; display:block;
-      width:55mm; height:96.25mm;
-      overflow:hidden; border-radius:0;
-      background:#fff;
-      -webkit-print-color-adjust:exact; print-color-adjust:exact;
+      position: relative; display: block;
+      width: 52mm; height: 88mm;
+      overflow: hidden; border-radius: 0;
+      background: #fff;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
-    .chart-wrap img { display:block !important; width:55mm !important; height:96.25mm !important; }
+    .chart-wrap img { display:block !important; width:52mm !important; height:88mm !important; }
     .chart-wrap svg,
     .chart-wrap .overlay-svg {
       position:absolute !important; top:0 !important; left:0 !important;
-      width:55mm !important; height:96.25mm !important;
+      width:52mm !important; height:88mm !important;
     }
     .tooth-el { fill:transparent; stroke:transparent; }
     @media print {
       body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
   `;
+
+  var slipInner =
+    '<div class="slip-header">' +
+    '<h1>歯科技工指示書</h1>' +
+    '<div class="issue-date">発行日：' + esc(order.issueDate || '') + '</div>' +
+    '</div>' +
+    '<div class="print-body">' +
+    (chartHtml ? '<div class="chart-col">' + chartHtml + '</div>' : '') +
+    '<div class="info-col">' + lines.join('\n') + '</div>' +
+    '</div>';
 
   return '<!DOCTYPE html>\n' +
     '<html lang="ja">\n' +
@@ -210,13 +227,9 @@ function _buildPrintHTML(order, chartHtml) {
     '<style>' + css + '</style>\n' +
     '</head>\n' +
     '<body>\n' +
-    '<h1>歯科技工指示書</h1>\n' +
-    '<div class="issue-date">発行日：' + esc(order.issueDate || '') + '</div>\n' +
-    '<div class="print-body">\n' +
-    (chartHtml ? '<div class="chart-col">' + chartHtml + '</div>\n' : '') +
-    '<div class="info-col">' + lines.join('\n') + '</div>\n' +
-    '</div>\n' +
-    '<div class="footer">システム出力</div>\n' +
+    '<div class="slip">' + slipInner + '</div>\n' +
+    '<div class="perforated"></div>\n' +
+    '<div class="slip">' + slipInner + '</div>\n' +
     '</body>\n' +
     '</html>';
 }
