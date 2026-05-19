@@ -39,15 +39,15 @@ function _buildPrintHTML(order, chartHtml) {
       .replace(/>/g, '&gt;');
   }
 
-  const lines = [];
+  const L = [];  // 左列
+  const R = [];  // 右列
 
-  function sect(label) {
-    lines.push('<div class="sect">' + esc(label) + '</div>');
+  function sect(arr, label) {
+    arr.push('<div class="sect">' + esc(label) + '</div>');
   }
-
-  function row(label, value) {
+  function row(arr, label, value) {
     if (value === null || value === undefined || value === '' || value === false) return;
-    lines.push(
+    arr.push(
       '<div class="row">' +
       '<span class="lbl">' + esc(label) + '</span>' +
       '<span class="val">' + esc(String(value)) + '</span>' +
@@ -55,33 +55,30 @@ function _buildPrintHTML(order, chartHtml) {
     );
   }
 
-  // 医院・患者情報
-  sect('医院・患者情報');
-  row('医院名', order.clinicName);
-  row('担当医', order.doctorName);
-  row('患者名', order.patientName);
+  // ── 左列：基本情報 ──────────────────────────
+  sect(L, '医院・患者情報');
+  row(L, '医院名', order.clinicName);
+  row(L, '担当医', order.doctorName);
+  row(L, '患者名', order.patientName);
   const ag = [order.patientAge ? order.patientAge + '歳' : '', order.patientGender].filter(Boolean).join('　');
-  if (ag) row('年齢・性別', ag);
+  if (ag) row(L, '年齢・性別', ag);
 
-  // 納期・優先度
-  sect('納期・優先度');
-  row('納期', [order.deliveryDate, order.ampm].filter(Boolean).join(' '));
-  if (order.priority && order.priority !== 'normal') row('優先度', order.priority);
+  sect(L, '納期・優先度');
+  row(L, '納期', [order.deliveryDate, order.ampm].filter(Boolean).join(' '));
+  if (order.priority && order.priority !== 'normal') row(L, '優先度', order.priority);
 
-  // 区分・発注形態
-  sect('区分・発注形態');
-  row('区分', order.insuranceType === 'insurance' ? '保険' : '自費');
-  if (order.orderTypes && order.orderTypes.length) row('発注形態', order.orderTypes.join(' / '));
-  if (order.repairDetail) row('修理詳細', order.repairDetail);
+  sect(L, '区分・発注形態');
+  row(L, '区分', order.insuranceType === 'insurance' ? '保険' : '自費');
+  if (order.orderTypes && order.orderTypes.length) row(L, '発注形態', order.orderTypes.join(' / '));
+  if (order.repairDetail) row(L, '修理詳細', order.repairDetail);
 
-  // 補綴物指示
-  sect('補綴物指示');
-  row('床種類', order.bedType);
-  if (order.devices && order.devices.length) row('装置', order.devices.join(' / '));
-  row('クラスプ', order.claspType);
-  if (order.barType) row('バー', order.barType + 'バー');
+  // ── 右列：補綴指示 ──────────────────────────
+  sect(R, '補綴物指示');
+  row(R, '床種類', order.bedType);
+  if (order.devices && order.devices.length) row(R, '装置', order.devices.join(' / '));
+  row(R, 'クラスプ', order.claspType);
+  if (order.barType) row(R, 'バー', order.barType + 'バー');
 
-  // クラスプ配置詳細（claspState グローバルから集計）
   if (typeof claspState !== 'undefined') {
     const CN = { W:'キャストE', E:'エーカース', T:'双子鉤', R:'レスト', H:'フック', C:'コンビ鉤', I:'バー' };
     const counts = {};
@@ -95,34 +92,29 @@ function _buildPrintHTML(order, chartHtml) {
       var unit = t === 'T' ? '組' : '本';
       return (CN[t] || t) + ' ' + counts[t] + unit;
     });
-    if (items.length) row('クラスプ配置', items.join('　'));
+    if (items.length) row(R, 'クラスプ配置', items.join('　'));
   }
 
-  // 人工歯・色調（入力時のみ）
   if (order.toothAnterior || order.toothPosterior || order.shadeGuide || order.shadeNumber) {
-    sect('人工歯・色調');
-    row('前歯', order.toothAnterior);
-    row('臼歯', order.toothPosterior);
+    sect(R, '人工歯・色調');
+    row(R, '前歯', order.toothAnterior);
+    row(R, '臼歯', order.toothPosterior);
     const shade = [order.shadeGuide, order.shadeNumber].filter(Boolean).join(' ');
-    if (shade) row('色調', shade);
+    if (shade) row(R, '色調', shade);
   }
 
-  // オプション（選択時のみ）
   if (order.hasMetalup || order.hasKyoko || order.goaFlag || order.hasArticulator) {
-    sect('オプション');
-    if (order.hasMetalup) row('メタルアップ', order.metalupDetail || 'あり');
-    if (order.hasKyoko) row('補強床', order.kyokoDetail || 'あり');
-    if (order.goaFlag) row('GOA', order.goaFlag);
+    sect(R, 'オプション');
+    if (order.hasMetalup) row(R, 'メタルアップ', order.metalupDetail || 'あり');
+    if (order.hasKyoko) row(R, '補強床', order.kyokoDetail || 'あり');
+    if (order.goaFlag) row(R, 'GOA', order.goaFlag);
     if (order.hasArticulator) {
-      row('咬合器', [order.articulatorType, order.articulatorDetail].filter(Boolean).join(' ') || 'あり');
+      row(R, '咬合器', [order.articulatorType, order.articulatorDetail].filter(Boolean).join(' ') || 'あり');
     }
   }
 
-  // 備考（入力時のみ）
-  if (order.remarks) {
-    sect('備考');
-    lines.push('<div class="remarks">' + esc(order.remarks).replace(/\n/g, '<br>') + '</div>');
-  }
+  sect(R, '備考');
+  R.push('<div class="remarks">' + (order.remarks ? esc(order.remarks).replace(/\n/g, '<br>') : '') + '</div>');
 
   const css = `
     @page { size: A4 portrait; margin: 0; }
@@ -174,13 +166,13 @@ function _buildPrintHTML(order, chartHtml) {
       align-items: baseline;
     }
     .lbl {
-      width: 20mm;
+      width: 16mm;
       flex-shrink: 0;
       color: #555;
       font-size: 7pt;
     }
     .val { flex: 1; }
-    .remarks { padding: 1mm 3mm; line-height: 1.8; min-height: 12mm; }
+    .remarks { padding: 1mm 2mm; line-height: 1.8; min-height: 12mm; }
     .print-body {
       display: flex;
       gap: 3mm;
@@ -189,7 +181,18 @@ function _buildPrintHTML(order, chartHtml) {
       overflow: hidden;
     }
     .chart-col { flex: 0 0 52mm; }
-    .info-col { flex: 1; min-width: 0; overflow: hidden; }
+    .info-2col {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      gap: 2mm;
+      overflow: hidden;
+    }
+    .info-left, .info-right {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+    }
     .chart-wrap {
       position: relative; display: block;
       width: 52mm; height: 88mm;
@@ -216,7 +219,10 @@ function _buildPrintHTML(order, chartHtml) {
     '</div>' +
     '<div class="print-body">' +
     (chartHtml ? '<div class="chart-col">' + chartHtml + '</div>' : '') +
-    '<div class="info-col">' + lines.join('\n') + '</div>' +
+    '<div class="info-2col">' +
+    '<div class="info-left">' + L.join('\n') + '</div>' +
+    '<div class="info-right">' + R.join('\n') + '</div>' +
+    '</div>' +
     '</div>';
 
   return '<!DOCTYPE html>\n' +
