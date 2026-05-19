@@ -180,7 +180,7 @@ function _buildPrintHTML(order, chartHtml) {
       font-size: 7pt;
     }
     .val { flex: 1; }
-    .remarks { padding: 1mm 3mm; line-height: 1.6; }
+    .remarks { padding: 1mm 3mm; line-height: 1.8; min-height: 12mm; }
     .print-body {
       display: flex;
       gap: 3mm;
