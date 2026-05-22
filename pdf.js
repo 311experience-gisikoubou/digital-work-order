@@ -121,20 +121,24 @@ function _buildPrintHTML(order, chartHtml) {
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'Meiryo', 'Hiragino Kaku Gothic Pro', 'Yu Gothic', 'MS Gothic', sans-serif;
-      font-size: 8pt;
+      font-size: 7.5pt;
       color: #000;
       line-height: 1.5;
     }
     .slip {
       width: 210mm;
       height: 148mm;
-      padding: 5mm 8mm 4mm;
+      padding: 4mm 6mm 3mm;
       overflow: hidden;
       display: flex;
       flex-direction: column;
+      border: 0.5mm solid #555;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
     }
     .perforated {
-      border-top: 1px dashed #aaa;
+      height: 1mm;
+      border-top: 0.5mm dashed #888;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
@@ -142,45 +146,50 @@ function _buildPrintHTML(order, chartHtml) {
       display: flex;
       align-items: baseline;
       justify-content: space-between;
-      padding-bottom: 2mm;
-      border-bottom: 1.5px solid #444;
+      padding-bottom: 1.5mm;
+      border-bottom: 0.8mm solid #333;
       margin-bottom: 2mm;
       flex-shrink: 0;
     }
-    h1 { font-size: 11pt; font-weight: bold; }
-    .issue-date { font-size: 7pt; color: #555; }
+    h1 { font-size: 10pt; font-weight: bold; letter-spacing: 0.05em; }
+    .issue-date { font-size: 6.5pt; color: #555; }
     .sect {
-      background: #ccc;
-      padding: 0.5mm 2mm;
-      font-size: 7pt;
+      background: #bbb;
+      padding: 0.3mm 1.5mm;
+      font-size: 6.5pt;
       font-weight: bold;
-      margin: 2mm 0 0.5mm;
+      margin: 1.5mm 0 0mm;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
     .row {
       display: flex;
-      padding: 0.5mm 2mm;
-      border-bottom: 1px dotted #bbb;
-      min-height: 4mm;
-      align-items: baseline;
+      padding: 0.3mm 1.5mm;
+      border-bottom: 0.3mm solid #ccc;
+      min-height: 4.5mm;
+      align-items: center;
     }
     .lbl {
-      width: 16mm;
+      width: 14mm;
       flex-shrink: 0;
-      color: #555;
-      font-size: 7pt;
+      color: #444;
+      font-size: 6.5pt;
     }
-    .val { flex: 1; }
-    .remarks { padding: 1mm 2mm; line-height: 1.8; min-height: 12mm; }
+    .val { flex: 1; font-size: 7.5pt; }
+    .remarks {
+      padding: 1mm 2mm;
+      line-height: 2.0;
+      min-height: 16mm;
+      border-top: 0.3mm solid #ccc;
+    }
     .print-body {
       display: flex;
-      gap: 3mm;
+      gap: 4mm;
       align-items: flex-start;
       flex: 1;
       overflow: hidden;
     }
-    .chart-col { flex: 0 0 52mm; }
+    .chart-col { flex: 0 0 68mm; }
     .info-2col {
       flex: 1;
       min-width: 0;
@@ -188,23 +197,20 @@ function _buildPrintHTML(order, chartHtml) {
       gap: 2mm;
       overflow: hidden;
     }
-    .info-left, .info-right {
-      flex: 1;
-      min-width: 0;
-      overflow: hidden;
-    }
+    .info-left { flex: 0 0 52mm; min-width: 0; overflow: hidden; }
+    .info-right { flex: 1; min-width: 0; overflow: hidden; }
     .chart-wrap {
       position: relative; display: block;
-      width: 52mm; height: 88mm;
+      width: 68mm; height: 110mm;
       overflow: hidden; border-radius: 0;
       background: #fff;
       -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
-    .chart-wrap img { display:block !important; width:52mm !important; height:88mm !important; }
+    .chart-wrap img { display:block !important; width:68mm !important; height:110mm !important; }
     .chart-wrap svg,
     .chart-wrap .overlay-svg {
       position:absolute !important; top:0 !important; left:0 !important;
-      width:52mm !important; height:88mm !important;
+      width:68mm !important; height:110mm !important;
     }
     .tooth-el { fill:transparent; stroke:transparent; }
     @media print {
