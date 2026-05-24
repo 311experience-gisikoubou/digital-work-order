@@ -74,6 +74,8 @@ function _buildPrintHTML(order, chartHtml) {
   if (order.devices && order.devices.length) row(R, '装置', order.devices.join(' / '));
   row(R, 'クラスプ', order.claspType);
   if (order.barType) row(R, 'バー', order.barType + 'バー');
+  const shade = [order.shadeGuide, order.shadeNumber].filter(Boolean).join(' ');
+  if (shade) row(R, 'シェード', shade);
 
   if (typeof claspState !== 'undefined') {
     const CN = { W:'キャストE', E:'エーカース', T:'双子鉤', R:'レスト', H:'フック', C:'コンビ鉤', I:'バー' };
@@ -92,12 +94,10 @@ function _buildPrintHTML(order, chartHtml) {
   }
 
   // ── 右列：低重要（dim） ───────────────────────
-  if (order.toothAnterior || order.toothPosterior || order.shadeGuide || order.shadeNumber) {
-    sect(R, '人工歯・色調', true);
+  if (order.toothAnterior || order.toothPosterior) {
+    sect(R, '人工歯', true);
     row(R, '前歯', order.toothAnterior, true);
     row(R, '臼歯', order.toothPosterior, true);
-    const shade = [order.shadeGuide, order.shadeNumber].filter(Boolean).join(' ');
-    if (shade) row(R, '色調', shade, true);
   }
 
   if (order.hasMetalup || order.hasKyoko || order.goaFlag || order.hasArticulator) {
@@ -264,6 +264,23 @@ function _buildPrintHTML(order, chartHtml) {
       width:68mm !important; height:110mm !important;
     }
     .tooth-el { fill:transparent; stroke:transparent; }
+    .tn-row {
+      display: flex;
+      width: 68mm;
+      font-size: 5.5pt;
+      color: #777;
+      padding: 0.3mm 0;
+    }
+    .tn-row span { flex: 1; text-align: center; }
+    .tn-row .tn-mid { flex: 0 0 auto; padding: 0 0.5mm; color: #333; }
+    .studio-sig {
+      text-align: right;
+      font-size: 5.5pt;
+      color: #aaa;
+      padding-top: 1mm;
+      line-height: 1.5;
+      flex-shrink: 0;
+    }
     @media print {
       body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
@@ -273,7 +290,7 @@ function _buildPrintHTML(order, chartHtml) {
     '<div class="key-bar">' +
     '<div class="key-item"><span class="key-lbl">医院名</span><span class="key-val">' + esc(order.clinicName || '—') + '</span></div>' +
     '<div class="key-item"><span class="key-lbl">患者名</span><span class="key-val">' + esc(order.patientName || '—') + '</span></div>' +
-    '<div class="key-item"><span class="key-lbl">納　期</span><span class="key-val">' + esc(keyDelivery || '—') + '</span></div>' +
+    '<div class="key-item"><span class="key-lbl">セット日</span><span class="key-val">' + esc(keyDelivery || '—') + '</span></div>' +
     '<div class="key-item"><span class="key-lbl">発注形態</span><span class="key-val">' + esc(keyOrderType || '—') + '</span></div>' +
     '</div>';
 
@@ -283,7 +300,13 @@ function _buildPrintHTML(order, chartHtml) {
     '<div class="issue-date">発行日：' + esc(order.issueDate || '') + '</div>' +
     '</div>' +
     '<div class="print-body">' +
-    (chartHtml ? '<div class="chart-col">' + chartHtml + '</div>' : '') +
+    (chartHtml ?
+      '<div class="chart-col">' +
+      '<div class="tn-row"><span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span><span class="tn-mid">│</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div>' +
+      chartHtml +
+      '<div class="tn-row"><span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span><span class="tn-mid">│</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div>' +
+      '</div>'
+    : '') +
     '<div class="info-wrap">' +
     keyBar +
     '<div class="info-2col">' +
@@ -291,7 +314,8 @@ function _buildPrintHTML(order, chartHtml) {
     '<div class="info-right">' + R.join('\n') + '</div>' +
     '</div>' +
     '</div>' +
-    '</div>';
+    '</div>' +
+    '<div class="studio-sig">咬み合わせ医療会　こよし技工房　金久健志</div>';
 
   return '<!DOCTYPE html>\n' +
     '<html lang="ja">\n' +
