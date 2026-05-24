@@ -119,7 +119,7 @@ function _buildPrintHTML(order, chartHtml) {
   // ── 右列：人工歯・色調（シェード常時表示）──────
   const shade = [order.shadeGuide, order.shadeNumber].filter(Boolean).join(' ');
   sect(R, '人工歯・色調');
-  row(R, 'シェード', shade || '\uff＿\uff＿\uff＿\uff＿');
+  row(R, 'シェード', shade || '＿＿＿＿');
   row(R, '前歯', order.toothAnterior, true);
   row(R, '臼歯', order.toothPosterior, true);
 
