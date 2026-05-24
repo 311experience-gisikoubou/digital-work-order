@@ -67,14 +67,31 @@ function _buildPrintHTML(order, chartHtml) {
   row(L, '区分', order.insuranceType === 'insurance' ? '保険' : '自費');
   if (order.priority && order.priority !== 'normal') row(L, '優先度', order.priority);
   if (order.repairDetail) row(L, '修理詳細', order.repairDetail);
-  // 歯式番号（左列下部）
-  var tnRow =
+
+  // ── 歯式番号欄（7番まで・欠損部を強調）─────────
+  var missingSet = new Set(order.selectedTeeth || []);
+  function tnSpan(fdiNum, posNum) {
+    var isMissing = missingSet.has(fdiNum);
+    return '<span class="tn-num' + (isMissing ? ' tn-missing' : '') + '">' + posNum + '</span>';
+  }
+  // 上顎：右側 17→11（位置7→1）、左側 21→27（位置1→7）
+  var upperRow =
     '<div class="tn-row">' +
-    '<span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span>' +
+    tnSpan(17,7) + tnSpan(16,6) + tnSpan(15,5) + tnSpan(14,4) + tnSpan(13,3) + tnSpan(12,2) + tnSpan(11,1) +
     '<span class="tn-mid">│</span>' +
-    '<span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span>' +
+    tnSpan(21,1) + tnSpan(22,2) + tnSpan(23,3) + tnSpan(24,4) + tnSpan(25,5) + tnSpan(26,6) + tnSpan(27,7) +
     '</div>';
-  L.push('<div class="tn-block">' + tnRow + '<div class="tn-sep"></div>' + tnRow + '</div>');
+  // 下顎：右側 47→41（位置7→1）、左側 31→37（位置1→7）
+  var lowerRow =
+    '<div class="tn-row">' +
+    tnSpan(47,7) + tnSpan(46,6) + tnSpan(45,5) + tnSpan(44,4) + tnSpan(43,3) + tnSpan(42,2) + tnSpan(41,1) +
+    '<span class="tn-mid">│</span>' +
+    tnSpan(31,1) + tnSpan(32,2) + tnSpan(33,3) + tnSpan(34,4) + tnSpan(35,5) + tnSpan(36,6) + tnSpan(37,7) +
+    '</div>';
+  L.push('<div class="tn-block">' + upperRow + '<div class="tn-sep"></div>' + lowerRow + '</div>');
+
+  // ── 左下：手書きスペース ──────────────────────
+  L.push('<div class="memo-box"><div class="memo-label">備考（手書き）</div></div>');
 
   // ── 右列：補綴指示 ───────────────────────────
   sect(R, '補綴物指示');
@@ -99,14 +116,12 @@ function _buildPrintHTML(order, chartHtml) {
     if (items.length) row(R, 'クラスプ配置', items.join('　'));
   }
 
-  // ── 右列：人工歯・色調（シェード中重要、前歯臼歯dim）──
+  // ── 右列：人工歯・色調（シェード常時表示）──────
   const shade = [order.shadeGuide, order.shadeNumber].filter(Boolean).join(' ');
-  if (shade || order.toothAnterior || order.toothPosterior) {
-    sect(R, '人工歯・色調');
-    if (shade) row(R, 'シェード', shade);
-    row(R, '前歯', order.toothAnterior, true);
-    row(R, '臼歯', order.toothPosterior, true);
-  }
+  sect(R, '人工歯・色調');
+  row(R, 'シェード', shade || '\uff＿\uff＿\uff＿\uff＿');
+  row(R, '前歯', order.toothAnterior, true);
+  row(R, '臼歯', order.toothPosterior, true);
 
   // ── 右列：オプション（dim）───────────────────
   if (order.hasMetalup || order.hasKyoko || order.goaFlag || order.hasArticulator) {
@@ -193,12 +208,15 @@ function _buildPrintHTML(order, chartHtml) {
     .row.dim .lbl { color: #888; font-size: 6pt; }
     .row.dim .val { font-size: 7.5pt; color: #666; }
     .tn-block { margin: 2mm 0 1mm; border: 0.3mm solid #ccc; padding: 1mm; }
-    .tn-row { display: flex; font-size: 5.5pt; color: #666; padding: 0.2mm 0; }
-    .tn-row span { flex: 1; text-align: center; }
-    .tn-row .tn-mid { flex: 0 0 auto; padding: 0 0.5mm; color: #333; font-weight: bold; }
+    .tn-row { display: flex; font-size: 5.5pt; padding: 0.2mm 0; }
+    .tn-num { flex: 1; text-align: center; color: #ddd; }
+    .tn-num.tn-missing { color: #000; font-weight: bold; }
+    .tn-mid { flex: 0 0 auto; padding: 0 0.5mm; color: #333; font-weight: bold; }
     .tn-sep { border-top: 0.3mm solid #ccc; margin: 0.5mm 0; }
+    .memo-box { margin-top: 1.5mm; border: 0.3mm solid #ccc; min-height: 14mm; }
+    .memo-label { font-size: 5pt; color: #bbb; padding: 0.5mm 1mm; }
     .remarks { padding: 1mm 2mm; line-height: 2.0; min-height: 16mm; border-top: 0.3mm solid #ccc; }
-    .studio-sig { text-align: right; font-size: 6pt; color: #999; padding-top: 1mm; line-height: 1.5; flex-shrink: 0; }
+    .studio-sig { text-align: right; font-size: 4pt; color: #aaa; padding-top: 1mm; line-height: 1.5; flex-shrink: 0; }
     .print-body { display: flex; gap: 4mm; align-items: flex-start; flex: 1; overflow: hidden; }
     .chart-col { flex: 0 0 68mm; }
     .info-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
@@ -240,7 +258,7 @@ function _buildPrintHTML(order, chartHtml) {
     '</div>' +
     '</div>' +
     '</div>' +
-    '<div class="studio-sig">咬み合わせ医療会　こよし技工房　金久健志</div>';
+    '<div class="studio-sig">咬み合わせ医療会　こよし技工房</div>';
 
   return '<!DOCTYPE html>\n<html lang="ja">\n<head>\n<meta charset="UTF-8">\n<title>歯科技工指示書</title>\n' +
     '<style>' + css + '</style>\n</head>\n<body>\n' +
