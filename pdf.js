@@ -39,8 +39,8 @@ function _buildPrintHTML(order, chartHtml) {
       .replace(/>/g, '&gt;');
   }
 
-  const L = [];  // 左列（補足情報）
-  const R = [];  // 右列（補綴指示）
+  const L = [];
+  const R = [];
 
   function sect(arr, label, dim) {
     arr.push('<div class="sect' + (dim ? ' dim' : '') + '">' + esc(label) + '</div>');
@@ -55,27 +55,33 @@ function _buildPrintHTML(order, chartHtml) {
     );
   }
 
-  // ── 最重要4項目（key-bar 用） ────────────────
+  // ── key-bar 用 ───────────────────────────────
   const keyDelivery = [order.deliveryDate, order.ampm].filter(Boolean).join(' ');
   const keyOrderType = order.orderTypes && order.orderTypes.length
     ? order.orderTypes.join(' / ') : '';
 
-  // ── 左列：補足情報（小さめ） ─────────────────
+  // ── 左列：補足情報 ───────────────────────────
   if (order.doctorName) row(L, '担当医', order.doctorName);
   const ag = [order.patientAge ? order.patientAge + '歳' : '', order.patientGender].filter(Boolean).join('　');
   if (ag) row(L, '年齢・性別', ag);
   row(L, '区分', order.insuranceType === 'insurance' ? '保険' : '自費');
   if (order.priority && order.priority !== 'normal') row(L, '優先度', order.priority);
   if (order.repairDetail) row(L, '修理詳細', order.repairDetail);
+  // 歯式番号（左列下部）
+  var tnRow =
+    '<div class="tn-row">' +
+    '<span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span>' +
+    '<span class="tn-mid">│</span>' +
+    '<span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span>' +
+    '</div>';
+  L.push('<div class="tn-block">' + tnRow + '<div class="tn-sep"></div>' + tnRow + '</div>');
 
-  // ── 右列：補綴指示（中重要） ─────────────────
+  // ── 右列：補綴指示 ───────────────────────────
   sect(R, '補綴物指示');
   row(R, '床種類', order.bedType);
   if (order.devices && order.devices.length) row(R, '装置', order.devices.join(' / '));
   row(R, 'クラスプ', order.claspType);
   if (order.barType) row(R, 'バー', order.barType + 'バー');
-  const shade = [order.shadeGuide, order.shadeNumber].filter(Boolean).join(' ');
-  if (shade) row(R, 'シェード', shade);
 
   if (typeof claspState !== 'undefined') {
     const CN = { W:'キャストE', E:'エーカース', T:'双子鉤', R:'レスト', H:'フック', C:'コンビ鉤', I:'バー' };
@@ -93,13 +99,16 @@ function _buildPrintHTML(order, chartHtml) {
     if (items.length) row(R, 'クラスプ配置', items.join('　'));
   }
 
-  // ── 右列：低重要（dim） ───────────────────────
-  if (order.toothAnterior || order.toothPosterior) {
-    sect(R, '人工歯', true);
+  // ── 右列：人工歯・色調（シェード中重要、前歯臼歯dim）──
+  const shade = [order.shadeGuide, order.shadeNumber].filter(Boolean).join(' ');
+  if (shade || order.toothAnterior || order.toothPosterior) {
+    sect(R, '人工歯・色調');
+    if (shade) row(R, 'シェード', shade);
     row(R, '前歯', order.toothAnterior, true);
     row(R, '臼歯', order.toothPosterior, true);
   }
 
+  // ── 右列：オプション（dim）───────────────────
   if (order.hasMetalup || order.hasKyoko || order.goaFlag || order.hasArticulator) {
     sect(R, 'オプション', true);
     if (order.hasMetalup) row(R, 'メタルアップ', order.metalupDetail || 'あり', true);
@@ -110,7 +119,7 @@ function _buildPrintHTML(order, chartHtml) {
     }
   }
 
-  // ── 右列：備考（常時） ───────────────────────
+  // ── 右列：備考（常時）───────────────────────
   sect(R, '備考');
   R.push('<div class="remarks">' + (order.remarks ? esc(order.remarks).replace(/\n/g, '<br>') : '') + '</div>');
 
@@ -151,7 +160,6 @@ function _buildPrintHTML(order, chartHtml) {
     }
     h1 { font-size: 10pt; font-weight: bold; letter-spacing: 0.05em; }
     .issue-date { font-size: 6.5pt; color: #555; }
-    /* ── key-bar: 最重要4項目 ── */
     .key-bar {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -164,149 +172,66 @@ function _buildPrintHTML(order, chartHtml) {
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
-    .key-item {
-      display: flex;
-      align-items: baseline;
-      gap: 1.5mm;
-      overflow: hidden;
-    }
-    .key-lbl {
-      font-size: 6pt;
-      color: #666;
-      flex-shrink: 0;
-      white-space: nowrap;
-    }
-    .key-val {
-      font-size: 9.5pt;
-      font-weight: bold;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    /* ── 通常行 ── */
+    .key-item { display: flex; align-items: baseline; gap: 1.5mm; overflow: hidden; }
+    .key-lbl { font-size: 6pt; color: #666; flex-shrink: 0; white-space: nowrap; }
+    .key-val { font-size: 9.5pt; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .date-val { font-size: 13pt; }
     .sect {
       background: #bbb;
       padding: 0.3mm 1.5mm;
       font-size: 6.5pt;
       font-weight: bold;
-      margin: 1.5mm 0 0mm;
+      margin: 1.5mm 0 0;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
-    .row {
-      display: flex;
-      padding: 0.3mm 1.5mm;
-      border-bottom: 0.3mm solid #ccc;
-      min-height: 4.5mm;
-      align-items: center;
-    }
-    .lbl {
-      width: 14mm;
-      flex-shrink: 0;
-      color: #444;
-      font-size: 6.5pt;
-    }
+    .row { display: flex; padding: 0.3mm 1.5mm; border-bottom: 0.3mm solid #ccc; min-height: 4.5mm; align-items: center; }
+    .lbl { width: 14mm; flex-shrink: 0; color: #444; font-size: 6.5pt; }
     .val { flex: 1; font-size: 7.5pt; }
-    /* ── dim: 低重要 ── */
-    .sect.dim {
-      background: #d4d4d4;
-      color: #666;
-      font-size: 6pt;
-    }
-    .row.dim {
-      min-height: 3.5mm;
-      border-bottom: 0.2mm solid #ddd;
-    }
+    .sect.dim { background: #d4d4d4; color: #666; font-size: 6pt; }
+    .row.dim { min-height: 3.5mm; border-bottom: 0.2mm solid #ddd; }
     .row.dim .lbl { color: #888; font-size: 6pt; }
-    .row.dim .val { font-size: 6.5pt; color: #555; }
-    /* ── 備考 ── */
-    .remarks {
-      padding: 1mm 2mm;
-      line-height: 2.0;
-      min-height: 16mm;
-      border-top: 0.3mm solid #ccc;
-    }
-    /* ── レイアウト ── */
-    .print-body {
-      display: flex;
-      gap: 4mm;
-      align-items: flex-start;
-      flex: 1;
-      overflow: hidden;
-    }
+    .row.dim .val { font-size: 7.5pt; color: #666; }
+    .tn-block { margin: 2mm 0 1mm; border: 0.3mm solid #ccc; padding: 1mm; }
+    .tn-row { display: flex; font-size: 5.5pt; color: #666; padding: 0.2mm 0; }
+    .tn-row span { flex: 1; text-align: center; }
+    .tn-row .tn-mid { flex: 0 0 auto; padding: 0 0.5mm; color: #333; font-weight: bold; }
+    .tn-sep { border-top: 0.3mm solid #ccc; margin: 0.5mm 0; }
+    .remarks { padding: 1mm 2mm; line-height: 2.0; min-height: 16mm; border-top: 0.3mm solid #ccc; }
+    .studio-sig { text-align: right; font-size: 6pt; color: #999; padding-top: 1mm; line-height: 1.5; flex-shrink: 0; }
+    .print-body { display: flex; gap: 4mm; align-items: flex-start; flex: 1; overflow: hidden; }
     .chart-col { flex: 0 0 68mm; }
-    .info-wrap {
-      flex: 1;
-      min-width: 0;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    .info-2col {
-      display: flex;
-      gap: 2mm;
-      flex: 1;
-      overflow: hidden;
-    }
-    .info-left { flex: 0 0 42mm; min-width: 0; overflow: hidden; }
+    .info-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+    .info-2col { display: flex; gap: 2mm; flex: 1; overflow: hidden; }
+    .info-left { flex: 1; min-width: 0; overflow: hidden; }
     .info-right { flex: 1; min-width: 0; overflow: hidden; }
     .chart-wrap {
       position: relative; display: block;
       width: 68mm; height: 110mm;
-      overflow: hidden; border-radius: 0;
-      background: #fff;
+      overflow: hidden; border-radius: 0; background: #fff;
       -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
     .chart-wrap img { display:block !important; width:68mm !important; height:110mm !important; }
-    .chart-wrap svg,
-    .chart-wrap .overlay-svg {
+    .chart-wrap svg, .chart-wrap .overlay-svg {
       position:absolute !important; top:0 !important; left:0 !important;
       width:68mm !important; height:110mm !important;
     }
     .tooth-el { fill:transparent; stroke:transparent; }
-    .tn-row {
-      display: flex;
-      width: 68mm;
-      font-size: 5.5pt;
-      color: #777;
-      padding: 0.3mm 0;
-    }
-    .tn-row span { flex: 1; text-align: center; }
-    .tn-row .tn-mid { flex: 0 0 auto; padding: 0 0.5mm; color: #333; }
-    .studio-sig {
-      text-align: right;
-      font-size: 5.5pt;
-      color: #aaa;
-      padding-top: 1mm;
-      line-height: 1.5;
-      flex-shrink: 0;
-    }
-    @media print {
-      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    }
+    @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
   `;
 
   var keyBar =
     '<div class="key-bar">' +
     '<div class="key-item"><span class="key-lbl">医院名</span><span class="key-val">' + esc(order.clinicName || '—') + '</span></div>' +
     '<div class="key-item"><span class="key-lbl">患者名</span><span class="key-val">' + esc(order.patientName || '—') + '</span></div>' +
-    '<div class="key-item"><span class="key-lbl">セット日</span><span class="key-val">' + esc(keyDelivery || '—') + '</span></div>' +
+    '<div class="key-item"><span class="key-lbl">セット日</span><span class="key-val date-val">' + esc(keyDelivery || '—') + '</span></div>' +
     '<div class="key-item"><span class="key-lbl">発注形態</span><span class="key-val">' + esc(keyOrderType || '—') + '</span></div>' +
     '</div>';
 
   var slipInner =
-    '<div class="slip-header">' +
-    '<h1>歯科技工指示書</h1>' +
-    '<div class="issue-date">発行日：' + esc(order.issueDate || '') + '</div>' +
-    '</div>' +
+    '<div class="slip-header"><h1>歯科技工指示書</h1><div class="issue-date">発行日：' + esc(order.issueDate || '') + '</div></div>' +
     '<div class="print-body">' +
-    (chartHtml ?
-      '<div class="chart-col">' +
-      '<div class="tn-row"><span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span><span class="tn-mid">│</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div>' +
-      chartHtml +
-      '<div class="tn-row"><span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span><span class="tn-mid">│</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div>' +
-      '</div>'
-    : '') +
+    (chartHtml ? '<div class="chart-col">' + chartHtml + '</div>' : '') +
     '<div class="info-wrap">' +
     keyBar +
     '<div class="info-2col">' +
@@ -317,17 +242,10 @@ function _buildPrintHTML(order, chartHtml) {
     '</div>' +
     '<div class="studio-sig">咬み合わせ医療会　こよし技工房　金久健志</div>';
 
-  return '<!DOCTYPE html>\n' +
-    '<html lang="ja">\n' +
-    '<head>\n' +
-    '<meta charset="UTF-8">\n' +
-    '<title>歯科技工指示書</title>\n' +
-    '<style>' + css + '</style>\n' +
-    '</head>\n' +
-    '<body>\n' +
+  return '<!DOCTYPE html>\n<html lang="ja">\n<head>\n<meta charset="UTF-8">\n<title>歯科技工指示書</title>\n' +
+    '<style>' + css + '</style>\n</head>\n<body>\n' +
     '<div class="slip">' + slipInner + '</div>\n' +
     '<div class="perforated"></div>\n' +
     '<div class="slip">' + slipInner + '</div>\n' +
-    '</body>\n' +
-    '</html>';
+    '</body>\n</html>';
 }
