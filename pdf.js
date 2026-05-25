@@ -216,7 +216,7 @@ function _buildPrintHTML(order, chartHtml) {
     .memo-box { margin-top: 1.5mm; border: 0.3mm solid #ccc; min-height: 14mm; }
     .memo-label { font-size: 5pt; color: #bbb; padding: 0.5mm 1mm; }
     .remarks { padding: 1mm 2mm; line-height: 2.0; min-height: 16mm; border-top: 0.3mm solid #ccc; }
-    .studio-sig { text-align: right; font-size: 4pt; color: #aaa; padding-top: 1mm; line-height: 1.5; flex-shrink: 0; }
+    .studio-sig { text-align: right; font-size: 6pt; color: #aaa; padding-top: 1mm; line-height: 1.5; flex-shrink: 0; }
     .print-body { display: flex; gap: 4mm; align-items: flex-start; flex: 1; overflow: hidden; }
     .chart-col { flex: 0 0 68mm; }
     .info-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }

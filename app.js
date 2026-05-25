@@ -161,6 +161,9 @@ function collectFormData() {
   const toothAnt  = ins === 'insurance' ? getToggleVal('tooth-ant-ins')  : getToggleVal('tooth-ant-jishi');
   const toothPost = ins === 'insurance' ? getToggleVal('tooth-post-ins') : getToggleVal('tooth-post-jishi');
 
+  // 色調（トグルボタン選択値を優先、「その他」または未選択時はテキスト入力を使用）
+  const shadeSel = ins === 'insurance' ? getToggleVal('shade') : getToggleVal('shade-jishi');
+
   return {
     // 患者・医院情報
     clinicName:   document.getElementById('clinic-name').value.trim(),
@@ -198,9 +201,13 @@ function collectFormData() {
     toothAnterior:  toothAnt,
     toothPosterior: toothPost,
 
-    // 色調
-    shadeGuide:   document.getElementById('shade-guide')?.value ?? '',
-    shadeNumber:  document.getElementById('shade-number')?.value ?? '',
+    // 色調（トグル選択値を優先、「その他」または未選択はテキスト入力を使用）
+    shadeGuide:   (shadeSel && shadeSel !== 'other')
+      ? shadeSel
+      : (document.getElementById('shade-guide')?.value ?? ''),
+    shadeNumber:  (shadeSel && shadeSel !== 'other')
+      ? ''
+      : (document.getElementById('shade-number')?.value ?? ''),
 
     // オプション
     goaFlag:      getToggleVal('goa'),

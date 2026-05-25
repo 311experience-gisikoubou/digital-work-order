@@ -52,7 +52,7 @@ function renderOrders() {
         ? '<span class="order-badge insurance">保険</span>'
         : '<span class="order-badge jishi">自費</span>';
       const statusChk = order.status === 'accepted'
-        ? '✅ 受付済み'
+        ? '<button class="act-btn check" onclick="cancelOrder(\'' + order.id + '\')" style="opacity:0.65" title="クリックで受付取り消し">✅ 受付済み</button>'
         : '<button class="act-btn check" onclick="acceptOrder(\'' + order.id + '\')" >受付</button>';
 
       html += `
@@ -87,5 +87,15 @@ function acceptOrder(id) {
     // TODO: Firestore更新
     renderOrders();
     showToast('受付済みにしました');
+  }
+}
+
+function cancelOrder(id) {
+  const order = state.orders.find(o => o.id === id);
+  if (order) {
+    order.status = 'pending';
+    // TODO: Firestore更新
+    renderOrders();
+    showToast('受付を取り消しました');
   }
 }
