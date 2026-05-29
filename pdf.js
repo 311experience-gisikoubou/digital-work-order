@@ -91,9 +91,6 @@ function _buildPrintHTML(order, chartHtml) {
     '</div>';
   L.push('<div class="tn-block">' + upperRow + '<div class="tn-sep"></div>' + lowerRow + '</div>');
 
-  // ── 左下：手書きスペース ──────────────────────
-  L.push('<div class="memo-box"><div class="memo-label">備考（手書き）</div></div>');
-
   // ── 右列：補綴指示 ───────────────────────────
   sect(R, '補綴物指示');
   row(R, '床種類', order.bedType);
@@ -190,7 +187,7 @@ function _buildPrintHTML(order, chartHtml) {
     }
     .key-item { display: flex; align-items: baseline; gap: 1.5mm; overflow: hidden; }
     .key-lbl { font-size: 6pt; color: #666; flex-shrink: 0; white-space: nowrap; }
-    .key-val { font-size: 8pt; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .key-val { font-size: 11pt; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .key-val-primary { font-size: 11pt; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .sect {
       background: #bbb;
@@ -214,12 +211,10 @@ function _buildPrintHTML(order, chartHtml) {
     .tn-num.tn-missing { color: #000; font-weight: bold; }
     .tn-mid { flex: 0 0 auto; padding: 0 0.5mm; color: #333; font-weight: bold; }
     .tn-sep { border-top: 0.3mm solid #ccc; margin: 0.5mm 0; }
-    .memo-box { margin-top: 1.5mm; border: 0.3mm solid #ccc; min-height: 14mm; }
-    .memo-label { font-size: 5pt; color: #bbb; padding: 0.5mm 1mm; }
     .remarks { padding: 1mm 2mm; line-height: 2.0; min-height: 16mm; border-top: 0.3mm solid #ccc; }
-    .studio-sig { text-align: right; font-size: 6pt; color: #aaa; padding-top: 1mm; line-height: 1.5; flex-shrink: 0; }
+    .studio-sig { text-align: right; font-size: 9pt; font-weight: bold; color: #555; padding-top: 1mm; line-height: 1.5; flex-shrink: 0; }
     .print-body { display: flex; gap: 4mm; align-items: flex-start; flex: 1; overflow: hidden; }
-    .chart-col { flex: 0 0 68mm; }
+    .chart-col { flex: 0 0 68mm; align-self: center; }
     .info-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
     .info-2col { display: flex; gap: 2mm; flex: 1; overflow: hidden; }
     .info-left { flex: 1; min-width: 0; overflow: hidden; }
