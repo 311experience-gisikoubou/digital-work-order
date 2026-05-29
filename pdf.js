@@ -55,8 +55,11 @@ function _buildPrintHTML(order, chartHtml) {
     );
   }
 
-  // ── key-bar 用 ───────────────────────────────
-  const keyDelivery = [order.deliveryDate, order.ampm].filter(Boolean).join(' ');
+  // ── key-bar 用：元号変換済みセット日・発注形態 ────────
+  const keyDelivery = [
+    order.deliveryDate ? formatJapaneseEraDate(order.deliveryDate) : '',
+    order.ampm
+  ].filter(Boolean).join(' ');
   const keyOrderType = order.orderTypes && order.orderTypes.length
     ? order.orderTypes.join(' / ') : '';
 
@@ -74,14 +77,12 @@ function _buildPrintHTML(order, chartHtml) {
     var isMissing = missingSet.has(fdiNum);
     return '<span class="tn-num' + (isMissing ? ' tn-missing' : '') + '">' + posNum + '</span>';
   }
-  // 上顎：右側 17→11（位置7→1）、左側 21→27（位置1→7）
   var upperRow =
     '<div class="tn-row">' +
     tnSpan(17,7) + tnSpan(16,6) + tnSpan(15,5) + tnSpan(14,4) + tnSpan(13,3) + tnSpan(12,2) + tnSpan(11,1) +
     '<span class="tn-mid">│</span>' +
     tnSpan(21,1) + tnSpan(22,2) + tnSpan(23,3) + tnSpan(24,4) + tnSpan(25,5) + tnSpan(26,6) + tnSpan(27,7) +
     '</div>';
-  // 下顎：右側 47→41（位置7→1）、左側 31→37（位置1→7）
   var lowerRow =
     '<div class="tn-row">' +
     tnSpan(47,7) + tnSpan(46,6) + tnSpan(45,5) + tnSpan(44,4) + tnSpan(43,3) + tnSpan(42,2) + tnSpan(41,1) +
@@ -174,11 +175,11 @@ function _buildPrintHTML(order, chartHtml) {
       flex-shrink: 0;
     }
     h1 { font-size: 10pt; font-weight: bold; letter-spacing: 0.05em; }
-    .issue-date { font-size: 6.5pt; color: #555; }
+    .issue-date { font-size: 6pt; color: #888; }
     .key-bar {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 0.5mm 3mm;
+      gap: 1mm 3mm;
       padding: 1.5mm 2mm;
       background: #e8e8e8;
       border: 0.5mm solid #444;
@@ -189,8 +190,8 @@ function _buildPrintHTML(order, chartHtml) {
     }
     .key-item { display: flex; align-items: baseline; gap: 1.5mm; overflow: hidden; }
     .key-lbl { font-size: 6pt; color: #666; flex-shrink: 0; white-space: nowrap; }
-    .key-val { font-size: 9.5pt; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .date-val { font-size: 13pt; }
+    .key-val { font-size: 8pt; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .key-val-primary { font-size: 11pt; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .sect {
       background: #bbb;
       padding: 0.3mm 1.5mm;
@@ -238,16 +239,19 @@ function _buildPrintHTML(order, chartHtml) {
     @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
   `;
 
+  // 主役：患者名（key-val-primary）・セット日（key-val-primary）→ 第1行
+  // 補助：医院名（key-val）・発注形態（key-val）→ 第2行
   var keyBar =
     '<div class="key-bar">' +
+    '<div class="key-item"><span class="key-lbl">患者名</span><span class="key-val-primary">' + esc(order.patientName || '—') + '</span></div>' +
+    '<div class="key-item"><span class="key-lbl">セット日</span><span class="key-val-primary">' + esc(keyDelivery || '—') + '</span></div>' +
     '<div class="key-item"><span class="key-lbl">医院名</span><span class="key-val">' + esc(order.clinicName || '—') + '</span></div>' +
-    '<div class="key-item"><span class="key-lbl">患者名</span><span class="key-val">' + esc(order.patientName || '—') + '</span></div>' +
-    '<div class="key-item"><span class="key-lbl">セット日</span><span class="key-val date-val">' + esc(keyDelivery || '—') + '</span></div>' +
     '<div class="key-item"><span class="key-lbl">発注形態</span><span class="key-val">' + esc(keyOrderType || '—') + '</span></div>' +
     '</div>';
 
   var slipInner =
-    '<div class="slip-header"><h1>歯科技工指示書</h1><div class="issue-date">発行日：' + esc(order.issueDate || '') + '</div></div>' +
+    '<div class="slip-header"><h1>歯科技工指示書</h1>' +
+    '<div class="issue-date">発行日：' + esc(order.issueDate ? formatJapaneseEraDate(order.issueDate) : '') + '</div></div>' +
     '<div class="print-body">' +
     (chartHtml ? '<div class="chart-col">' + chartHtml + '</div>' : '') +
     '<div class="info-wrap">' +

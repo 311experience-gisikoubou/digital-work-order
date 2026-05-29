@@ -15,3 +15,25 @@ function formatDateLabel(dateStr) {
     return base;
   } catch { return dateStr; }
 }
+
+// YYYY-MM-DD 形式の日付を元号表示に変換（曜日付き）
+function formatJapaneseEraDate(dateStr) {
+  if (!dateStr) return '';
+  try {
+    var parts = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!parts) return dateStr;
+    var y = parseInt(parts[1], 10), m = parseInt(parts[2], 10), day = parseInt(parts[3], 10);
+    var d = new Date(y, m - 1, day);
+    var weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+    var wd = weekdays[d.getDay()];
+    var eraName, eraYear;
+    if (y > 2019 || (y === 2019 && m >= 5)) {
+      eraName = '令和'; eraYear = y - 2018;
+    } else if (y > 1989 || (y === 1989 && m >= 1)) {
+      eraName = '平成'; eraYear = y - 1988;
+    } else {
+      eraName = '昭和'; eraYear = y - 1925;
+    }
+    return eraName + eraYear + '年' + m + '月' + day + '日(' + wd + ')';
+  } catch (e) { return dateStr; }
+}
