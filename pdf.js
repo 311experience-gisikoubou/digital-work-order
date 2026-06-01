@@ -205,8 +205,8 @@ function _buildPrintHTML(order1, chartHtml, order2) {
       margin-bottom: 2mm;
       flex-shrink: 0;
     }
-    h1 { font-size: 10pt; font-weight: bold; letter-spacing: 0.05em; }
-    .issue-date { font-size: 6pt; color: #888; }
+    h1 { font-size: 12pt; font-weight: bold; letter-spacing: 0.05em; flex-shrink: 0; }
+    .issue-date { font-size: 8pt; color: #555; }
     .key-bar {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -247,7 +247,7 @@ function _buildPrintHTML(order1, chartHtml, order2) {
     .tn-sep { border-top: 0.3mm solid #ccc; margin: 0.5mm 0; }
     .remarks { padding: 1mm 2mm; line-height: 2.0; min-height: 16mm; border-top: 0.3mm solid #ccc; }
     .slip-empty { flex: 1; }
-    .studio-sig { text-align: right; font-size: 9pt; font-weight: bold; color: #555; padding-top: 1mm; line-height: 1.5; flex-shrink: 0; }
+    .studio-sig { text-align: right; font-size: 14pt; font-weight: bold; color: #555; padding-top: 1mm; line-height: 1.5; flex-shrink: 0; }
     .print-body { display: flex; gap: 4mm; align-items: flex-start; flex: 1; overflow: hidden; }
     .chart-col { flex: 0 0 68mm; align-self: center; }
     .info-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
