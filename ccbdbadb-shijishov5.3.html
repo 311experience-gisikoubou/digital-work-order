@@ -83,6 +83,12 @@
       </div>
     </div>
     <div class="form-row">
+      <div class="form-group">
+        <label>次回アポイント</label>
+        <input type="datetime-local" id="next-appt">
+      </div>
+    </div>
+    <div class="form-row">
       <div class="form-group" style="max-width:200px">
         <label>発行日</label>
         <input type="date" id="issue-date">
@@ -758,6 +764,23 @@
     <div class="toggle-group">
       <button class="toggle-btn" data-group="goa" data-val="あり">あり</button>
       <button class="toggle-btn" data-group="goa" data-val="なし">なし</button>
+    </div>
+
+    <div class="section-divider"></div>
+    <div class="sub-title">添付資料確認</div>
+    <div class="check-group">
+      <label class="check-item">
+        <input type="checkbox" id="chk-taigoha"><span class="check-box"></span>
+        <span class="check-label">対合歯</span>
+      </label>
+      <label class="check-item">
+        <input type="checkbox" id="chk-bite"><span class="check-box"></span>
+        <span class="check-label">バイト</span>
+      </label>
+      <label class="check-item">
+        <input type="checkbox" id="chk-goa"><span class="check-box"></span>
+        <span class="check-label">GoA</span>
+      </label>
     </div>
 
     <div class="section-divider"></div>

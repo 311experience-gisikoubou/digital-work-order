@@ -19,11 +19,18 @@ function exportPDF(id) {
   doc.setFontSize(10);
   doc.text(`Patient: ${order.patientName}`, 20, 35);
   doc.text(`Clinic: ${order.clinicName}`, 20, 45);
-  doc.text(`Delivery: ${order.deliveryDate} ${order.ampm}`, 20, 55);
-  doc.text(`Type: ${order.insuranceType === 'insurance' ? 'Insurance' : 'Self-pay'}`, 20, 65);
-  doc.text(`Bed: ${order.bedType || '-'}`, 20, 75);
+  if (order.nextAppt) {
+    doc.text(`次回アポイント: ${order.nextAppt.replace('T', ' ')}`, 20, 53);
+  }
+  doc.text(`Delivery: ${order.deliveryDate} ${order.ampm}`, 20, 61);
+  doc.text(`Type: ${order.insuranceType === 'insurance' ? 'Insurance' : 'Self-pay'}`, 20, 69);
+  doc.text(`Bed: ${order.bedType || '-'}`, 20, 77);
   doc.text(`Clasp: ${order.claspType || '-'}`, 20, 85);
-  doc.text(`Bar: ${order.barType ? order.barType + ' Bar' : '-'}`, 20, 95);
+  doc.text(`Bar: ${order.barType ? order.barType + ' Bar' : '-'}`, 20, 93);
+  const attachments = [order.hasTaigoha && '対合歯', order.hasBite && 'バイト', order.hasGoaChk && 'GoA'].filter(Boolean);
+  if (attachments.length) {
+    doc.text(`添付資料: ${attachments.join(' / ')}`, 20, 101);
+  }
   doc.save(`order_${order.patientName}_${order.deliveryDate}.pdf`);
   showToast('PDFを出力しました');
 }

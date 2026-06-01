@@ -279,8 +279,14 @@ function collectFormData() {
     shadeGuide:   document.getElementById('shade-guide').value,
     shadeNumber:  document.getElementById('shade-number').value,
 
+    // 次回アポイント
+    nextAppt:     document.getElementById('next-appt').value,
+
     // オプション
     goaFlag:      getToggleVal('goa'),
+    hasTaigoha:   document.getElementById('chk-taigoha').checked,
+    hasBite:      document.getElementById('chk-bite').checked,
+    hasGoaChk:    document.getElementById('chk-goa').checked,
     hasArticulator: document.getElementById('chk-articulator').checked,
     articulatorType:  document.getElementById('articulator-type').value,
     articulatorDetail:document.getElementById('articulator-detail').value,
@@ -496,7 +502,9 @@ function showDetail(id) {
         ${row('人工歯 前歯', order.toothAnterior)}
         ${row('人工歯 臼歯', order.toothPosterior)}
         ${row('色調', `${order.shadeGuide || ''} ${order.shadeNumber || ''}`)}
+        ${order.nextAppt ? row('次回アポイント', order.nextAppt.replace('T', ' ')) : ''}
         ${row('GoA描記版', order.goaFlag)}
+        ${(() => { const items = [order.hasTaigoha && '対合歯', order.hasBite && 'バイト', order.hasGoaChk && 'GoA'].filter(Boolean); return items.length ? row('添付資料', items.join(' / ')) : ''; })()}
         ${row('納期', `${order.deliveryDate} ${order.ampm}`)}
         ${row('優先度', order.priority === 'urgent' ? '🚨 急ぎ' : '通常')}
         ${order.remarks ? row('備考', order.remarks) : ''}
