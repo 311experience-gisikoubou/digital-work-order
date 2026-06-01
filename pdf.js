@@ -22,7 +22,7 @@ function exportPDF(id) {
   if (order.nextAppt) {
     doc.text(`次回アポイント: ${order.nextAppt.replace('T', ' ')}`, 20, 53);
   }
-  doc.text(`Delivery: ${order.deliveryDate} ${order.ampm}`, 20, 61);
+  doc.text(`Delivery: ${order.deliveryDate}`, 20, 61);
   doc.text(`Type: ${order.insuranceType === 'insurance' ? 'Insurance' : 'Self-pay'}`, 20, 69);
   doc.text(`Bed: ${order.bedType || '-'}`, 20, 77);
   doc.text(`Clasp: ${order.claspType || '-'}`, 20, 85);

@@ -4,7 +4,6 @@
 const state = {
   selectedTeeth: new Set(),
   insuranceType: 'insurance',   // 'insurance' | 'jishi'
-  ampm: 'AM',
   priority: 'normal',
   orders: []  // Firebaseから取得予定
 };
@@ -182,17 +181,6 @@ document.querySelectorAll('.toggle-btn[data-group="shade-jishi"]').forEach(btn =
 });
 
 // ============================================================
-//  AM/PM トグル
-// ============================================================
-document.querySelectorAll('.ampm-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    state.ampm = btn.dataset.val;
-    document.querySelectorAll('.ampm-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-  });
-});
-
-// ============================================================
 //  優先度トグル
 // ============================================================
 document.querySelectorAll('.priority-btn').forEach(btn => {
@@ -293,7 +281,6 @@ function collectFormData() {
 
     // 納期
     deliveryDate: document.getElementById('delivery-date').value,
-    ampm:         state.ampm,
     priority:     state.priority,
     remarks:      document.getElementById('remarks').value,
 
@@ -417,7 +404,7 @@ function renderOrders() {
           <div class="order-info">
             <div class="order-patient">${order.patientName || '患者名未設定'} ${badge}</div>
             <div class="order-meta">
-              ${order.clinicName || ''} ／ ${order.deliveryDate || ''} ${order.ampm || ''}
+              ${order.clinicName || ''} ／ ${order.deliveryDate || ''}
               ${order.priority === 'urgent' ? '🚨急ぎ' : ''}
               ${order.bedType ? '｜' + order.bedType : ''}
             </div>
@@ -505,7 +492,7 @@ function showDetail(id) {
         ${order.nextAppt ? row('次回アポイント', order.nextAppt.replace('T', ' ')) : ''}
         ${row('GoA描記版', order.goaFlag)}
         ${(() => { const items = [order.hasTaigoha && '対合歯', order.hasBite && 'バイト', order.hasGoaChk && 'GoA'].filter(Boolean); return items.length ? row('添付資料', items.join(' / ')) : ''; })()}
-        ${row('納期', `${order.deliveryDate} ${order.ampm}`)}
+        ${row('納期', order.deliveryDate)}
         ${row('優先度', order.priority === 'urgent' ? '🚨 急ぎ' : '通常')}
         ${order.remarks ? row('備考', order.remarks) : ''}
       </tbody>
