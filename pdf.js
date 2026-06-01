@@ -67,10 +67,15 @@ function _buildPrintHTML(order1, chartHtml, order2) {
     var L = [];
     var R = [];
 
-    var keyDelivery = [
-      order.deliveryDate ? formatJapaneseEraDate(order.deliveryDate) : '',
-      order.ampm
-    ].filter(Boolean).join(' ');
+    var keyDelivery = order.deliveryDate ? formatJapaneseEraDate(order.deliveryDate) : '';
+
+    var nextApStr = '';
+    if (order.nextAppointment) {
+      var naParts = order.nextAppointment.split('T');
+      var naDate = naParts[0] ? formatJapaneseEraDate(naParts[0]) : '';
+      var naTime = naParts[1] ? naParts[1].slice(0, 5) : '';
+      nextApStr = [naDate, naTime].filter(Boolean).join(' ');
+    }
     var keyOrderType = order.orderTypes && order.orderTypes.length
       ? order.orderTypes.join(' / ') : '';
 
@@ -153,6 +158,7 @@ function _buildPrintHTML(order1, chartHtml, order2) {
       '<div class="key-item"><span class="key-lbl">セット日</span><span class="key-val-primary">' + esc(keyDelivery || '—') + '</span></div>' +
       '<div class="key-item"><span class="key-lbl">医院名</span><span class="key-val">' + esc(order.clinicName || '—') + '</span></div>' +
       '<div class="key-item"><span class="key-lbl">発注形態</span><span class="key-val">' + esc(keyOrderType || '—') + '</span></div>' +
+      (nextApStr ? '<div class="key-item key-next-ap"><span class="key-lbl">次回Ap</span><span class="key-val">' + esc(nextApStr) + '</span></div>' : '') +
       '</div>';
 
     return '<div class="slip-header"><h1>歯科技工指示書</h1>' +
@@ -220,6 +226,7 @@ function _buildPrintHTML(order1, chartHtml, order2) {
       print-color-adjust: exact;
     }
     .key-item { display: flex; align-items: baseline; gap: 1.5mm; overflow: hidden; }
+    .key-next-ap { grid-column: 1 / -1; }
     .key-lbl { font-size: 6pt; color: #666; flex-shrink: 0; white-space: nowrap; }
     .key-val { font-size: 11pt; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     .key-val-primary { font-size: 11pt; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }

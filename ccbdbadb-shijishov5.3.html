@@ -87,13 +87,6 @@
         <label>発行日</label>
         <input type="date" id="issue-date">
       </div>
-      <div class="form-group" style="max-width:220px">
-        <label>時間帯</label>
-        <div class="ampm-group">
-          <button class="ampm-btn active" data-val="AM">AM</button>
-          <button class="ampm-btn" data-val="PM">PM</button>
-        </div>
-      </div>
     </div>
 
     <!-- 納期カレンダーシステム -->
@@ -157,6 +150,12 @@
 
       <!-- セット日（非表示） -->
       <input type="hidden" id="delivery-date">
+    </div>
+
+    <!-- 次回予約日時 -->
+    <div class="form-group" style="max-width:280px;margin-top:8px;">
+      <label>次回予約日時（次回Ap）</label>
+      <input type="datetime-local" id="next-appointment">
     </div>
   </div>
 

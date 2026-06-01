@@ -4,7 +4,6 @@
 const state = {
   selectedTeeth: new Set(),
   insuranceType: 'insurance',   // 'insurance' | 'jishi'
-  ampm: 'AM',
   priority: 'normal',
   orders: []  // Firebaseから取得予定
 };
@@ -100,17 +99,6 @@ document.querySelectorAll('.toggle-btn[data-group="shade-jishi"]').forEach(btn =
   btn.addEventListener('click', () => {
     const area = document.getElementById('shade-jishi-other-area');
     area.classList.toggle('open', btn.dataset.val === 'other' && btn.classList.contains('active'));
-  });
-});
-
-// ============================================================
-//  AM/PM トグル
-// ============================================================
-document.querySelectorAll('.ampm-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    state.ampm = btn.dataset.val;
-    document.querySelectorAll('.ampm-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
   });
 });
 
@@ -216,9 +204,9 @@ function collectFormData() {
     articulatorDetail:document.getElementById('articulator-detail').value,
 
     // 納期
-    deliveryDate: document.getElementById('delivery-date').value,
-    ampm:         state.ampm,
-    priority:     state.priority,
+    deliveryDate:    document.getElementById('delivery-date').value,
+    nextAppointment: document.getElementById('next-appointment').value,
+    priority:        state.priority,
     remarks:      document.getElementById('remarks').value,
 
     // メタデータ
@@ -259,7 +247,7 @@ document.getElementById('submit-btn').addEventListener('click', async () => {
 function resetForm() {
   // テキスト入力リセット
   ['clinic-name','doctor-name','patient-name','patient-age','patient-gender',
-   'shade-guide','shade-number','delivery-date','remarks',
+   'shade-guide','shade-number','delivery-date','next-appointment','remarks',
    'repair-detail','metalup-ins-detail','kyoko-ins-detail',
    'metalup-jishi-detail','kyoko-jishi-detail',
    'articulator-type','articulator-detail'
