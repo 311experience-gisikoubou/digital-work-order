@@ -221,8 +221,8 @@ function _buildPrintHTML(order1, chartHtml, order2) {
     }
     .key-item { display: flex; align-items: baseline; gap: 1.5mm; overflow: hidden; }
     .key-lbl { font-size: 6pt; color: #666; flex-shrink: 0; white-space: nowrap; }
-    .key-val { font-size: 11pt; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .key-val-primary { font-size: 11pt; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .key-val { font-size: 11pt; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .key-val-primary { font-size: 11pt; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     .sect {
       background: #bbb;
       padding: 0.3mm 1.5mm;
@@ -245,7 +245,7 @@ function _buildPrintHTML(order1, chartHtml, order2) {
     .tn-num.tn-missing { color: #000; font-weight: bold; }
     .tn-mid { flex: 0 0 auto; padding: 0 0.5mm; color: #333; font-weight: bold; }
     .tn-sep { border-top: 0.3mm solid #ccc; margin: 0.5mm 0; }
-    .remarks { padding: 1mm 2mm; line-height: 2.0; min-height: 16mm; border-top: 0.3mm solid #ccc; }
+    .remarks { padding: 1mm 2mm; line-height: 2.0; min-height: 16mm; border-top: 0.3mm solid #ccc; overflow: hidden; }
     .slip-empty { flex: 1; }
     .studio-sig { text-align: right; font-size: 14pt; font-weight: bold; color: #555; padding-top: 1mm; line-height: 1.5; flex-shrink: 0; }
     .print-body { display: flex; gap: 4mm; align-items: flex-start; flex: 1; overflow: hidden; }
