@@ -197,8 +197,10 @@ function collectFormData() {
       ? ''
       : (document.getElementById('shade-number')?.value ?? ''),
 
-    // オプション
-    goaFlag:      getToggleVal('goa'),
+    // オプション（対合歯・バイト・GoA）
+    taigoha:      document.getElementById('chk-taigoha')?.checked ?? false,
+    bite:         document.getElementById('chk-bite')?.checked ?? false,
+    goaFlag:      document.getElementById('chk-goa-opt')?.checked ?? false,
     hasArticulator: document.getElementById('chk-articulator').checked,
     articulatorType:  document.getElementById('articulator-type').value,
     articulatorDetail:document.getElementById('articulator-detail').value,

@@ -153,11 +153,13 @@ function _buildPrintHTML(order1, chartHtml, order2) {
     row(R, '臼歯', order.toothPosterior, true);
 
     // ── 右列：オプション（dim）─────────────────────
-    if (order.hasMetalup || order.hasKyoko || order.goaFlag || order.hasArticulator) {
+    if (order.hasMetalup || order.hasKyoko || order.taigoha || order.bite || order.goaFlag || order.hasArticulator) {
       sect(R, 'オプション', true);
       if (order.hasMetalup) row(R, 'メタルアップ', order.metalupDetail || 'あり', true);
       if (order.hasKyoko) row(R, '補強床', order.kyokoDetail || 'あり', true);
-      if (order.goaFlag) row(R, 'GOA', order.goaFlag, true);
+      if (order.taigoha) row(R, '対合歯', 'あり', true);
+      if (order.bite)    row(R, 'バイト',  'あり', true);
+      if (order.goaFlag) row(R, 'GoA',    'あり', true);
       if (order.hasArticulator) {
         row(R, '咬合器', [order.articulatorType, order.articulatorDetail].filter(Boolean).join(' ') || 'あり', true);
       }
