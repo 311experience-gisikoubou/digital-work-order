@@ -233,12 +233,12 @@ function collectFormData() {
 
   return {
     // 患者・医院情報
-    clinicName:   document.getElementById('clinic-name').value.trim(),
-    doctorName:   document.getElementById('doctor-name').value.trim(),
-    patientName:  document.getElementById('patient-name').value.trim(),
-    patientAge:   document.getElementById('patient-age').value,
-    patientGender:document.getElementById('patient-gender').value,
-    issueDate:    document.getElementById('issue-date').value || new Date().toISOString().slice(0,10),
+    clinicName:   document.getElementById('clinic-name')?.value.trim() ?? '',
+    doctorName:   document.getElementById('doctor-name')?.value.trim() ?? '',
+    patientName:  document.getElementById('patient-name')?.value.trim() ?? '',
+    patientAge:   document.getElementById('patient-age')?.value ?? '',
+    patientGender:document.getElementById('patient-gender')?.value ?? '',
+    issueDate:    document.getElementById('issue-date')?.value || new Date().toISOString().slice(0,10),
 
     // 歯式
     selectedTeeth: [...state.selectedTeeth].sort((a,b)=>a-b),
@@ -248,7 +248,7 @@ function collectFormData() {
 
     // 発注形態
     orderTypes,
-    repairDetail: document.getElementById('repair-detail').value,
+    repairDetail: document.getElementById('repair-detail')?.value ?? '',
 
     // 補綴物
     bedType:      getToggleVal(ins === 'insurance' ? 'bed-insurance' : 'bed-jishi'),
@@ -269,24 +269,24 @@ function collectFormData() {
     toothPosterior: toothPost,
 
     // 色調
-    shadeGuide:   document.getElementById('shade-guide').value,
-    shadeNumber:  document.getElementById('shade-number').value,
+    shadeGuide:   getToggleVal(ins === 'insurance' ? 'shade' : 'shade-jishi') || '',
+    shadeNumber:  document.getElementById(ins === 'insurance' ? 'shade-other-input' : 'shade-jishi-other-input')?.value || '',
 
     // 次回アポイント
-    nextAppt:     document.getElementById('next-appt').value,
+    nextAppt:     document.getElementById('next-appt')?.value ?? '',
 
     // オプション
-    hasTaigoha:   document.getElementById('chk-taigoha').checked,
-    hasBite:      document.getElementById('chk-bite').checked,
-    hasGoaChk:    document.getElementById('chk-goa').checked,
-    hasArticulator: document.getElementById('chk-articulator').checked,
-    articulatorType:  document.getElementById('articulator-type').value,
-    articulatorDetail:document.getElementById('articulator-detail').value,
+    hasTaigoha:   document.getElementById('chk-taigoha')?.checked ?? false,
+    hasBite:      document.getElementById('chk-bite')?.checked ?? false,
+    hasGoaChk:    document.getElementById('chk-goa')?.checked ?? false,
+    hasArticulator: document.getElementById('chk-articulator')?.checked ?? false,
+    articulatorType:  document.getElementById('articulator-type')?.value ?? '',
+    articulatorDetail:document.getElementById('articulator-detail')?.value ?? '',
 
     // 納期
-    deliveryDate: document.getElementById('delivery-date').value,
+    deliveryDate: document.getElementById('delivery-date')?.value ?? '',
     priority:     state.priority,
-    remarks:      document.getElementById('remarks').value,
+    remarks:      document.getElementById('remarks')?.value ?? '',
 
     // メタデータ
     status:       'pending',   // 未受付
