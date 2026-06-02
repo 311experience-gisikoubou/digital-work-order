@@ -157,8 +157,8 @@ function _buildPrintHTML(order1, chartHtml, order2) {
       '<div class="key-item"><span class="key-lbl">患者名</span><span class="key-val-primary">' + esc(order.patientName || '—') + '</span></div>' +
       '<div class="key-item"><span class="key-lbl">納品日</span><span class="key-val-primary">' + esc(keyDelivery || '—') + '</span></div>' +
       '<div class="key-item"><span class="key-lbl">医院名</span><span class="key-val">' + esc(order.clinicName || '—') + '</span></div>' +
-      (nextApStr ? '<div class="key-item"><span class="key-lbl">次回Ap</span><span class="key-val">' + esc(nextApStr) + '</span></div>' : '<div class="key-item"></div>') +
-      '<div class="key-item key-col-span"><span class="key-lbl">発注形態</span><span class="key-val">' + esc(keyOrderType || '—') + '</span></div>' +
+      '<div class="key-item"><span class="key-lbl">発注形態</span><span class="key-val">' + esc(keyOrderType || '—') + '</span></div>' +
+      (nextApStr ? '<div class="key-item key-next-ap"><span class="key-lbl">次回Ap</span><span class="key-val">' + esc(nextApStr) + '</span></div>' : '') +
       '</div>';
 
     return '<div class="slip-header"><h1>歯科技工指示書</h1>' +
@@ -226,7 +226,7 @@ function _buildPrintHTML(order1, chartHtml, order2) {
       print-color-adjust: exact;
     }
     .key-item { display: flex; align-items: baseline; gap: 1.5mm; overflow: hidden; }
-    .key-col-span { grid-column: 1 / -1; }
+    .key-next-ap { grid-column: 1 / -1; }
     .key-lbl { font-size: 6pt; color: #666; flex-shrink: 0; white-space: nowrap; }
     .key-val { font-size: 11pt; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     .key-val-primary { font-size: 11pt; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
