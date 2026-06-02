@@ -111,6 +111,8 @@ function setInsurance(type) {
   document.getElementById('btn-jishi').classList.toggle('active', type === 'jishi');
   document.getElementById('prosthetics-insurance').style.display = type === 'insurance' ? '' : 'none';
   document.getElementById('prosthetics-jishi').style.display = type === 'jishi' ? '' : 'none';
+  // 区分変更時に納期を再計算（active更新後に実行）
+  if (typeof onShippingDateChange === 'function') onShippingDateChange();
 }
 
 // ============================================================

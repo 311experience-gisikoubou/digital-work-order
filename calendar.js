@@ -223,15 +223,7 @@ function vcalNext() {
   renderVcal();
 }
 
-// 保険/自費切替連動
 document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('submit-btn').disabled = true;
   fetchHolidays();
-  setTimeout(function() {
-    document.querySelectorAll('.ins-btn').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        setTimeout(onShippingDateChange, 50);
-      });
-    });
-  }, 500);
 });
