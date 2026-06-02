@@ -273,7 +273,7 @@ function collectFormData() {
     shadeNumber:  document.getElementById(ins === 'insurance' ? 'shade-other-input' : 'shade-jishi-other-input')?.value || '',
 
     // 次回アポイント
-    nextAppt:     document.getElementById('next-appt')?.value ?? '',
+    nextAppointment: document.getElementById('next-appt')?.value ?? '',
 
     // オプション
     hasTaigoha:   document.getElementById('chk-taigoha')?.checked ?? false,
@@ -493,7 +493,7 @@ function showDetail(id) {
         ${row('人工歯 前歯', order.toothAnterior)}
         ${row('人工歯 臼歯', order.toothPosterior)}
         ${row('色調', `${order.shadeGuide || ''} ${order.shadeNumber || ''}`)}
-        ${order.nextAppt ? row('次回アポイント', order.nextAppt.replace('T', ' ')) : ''}
+        ${order.nextAppointment ? row('次回アポイント', order.nextAppointment.replace('T', ' ')) : ''}
         ${(() => { const items = [order.hasTaigoha && '対合歯', order.hasBite && 'バイト', order.hasGoaChk && 'GoA'].filter(Boolean); return items.length ? row('添付資料', items.join(' / ')) : ''; })()}
         ${row('納期', order.deliveryDate)}
         ${row('優先度', order.priority === 'urgent' ? '🚨 急ぎ' : '通常')}
