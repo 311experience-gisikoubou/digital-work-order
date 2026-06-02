@@ -273,7 +273,7 @@ function _buildPrintHTML(order1, chartHtml, order2) {
     .tn-block { margin: 2mm 0 1mm; border: 0.3mm solid #ccc; padding: 1mm; }
     .tn-row { display: flex; font-size: 5.5pt; padding: 0.2mm 0; }
     .tn-num { flex: 1; text-align: center; color: #ddd; }
-    .tn-num.tn-missing { color: #c00; font-weight: bold; }
+    .tn-num.tn-missing { color: #000; }
     .tn-mid { flex: 0 0 auto; padding: 0 0.5mm; color: #333; font-weight: bold; }
     .tn-sep { border-top: 0.3mm solid #ccc; margin: 0.5mm 0; }
     .remarks { padding: 1mm 2mm; line-height: 2.0; min-height: 16mm; border-top: 0.3mm solid #ccc; overflow: hidden; }
@@ -297,6 +297,10 @@ function _buildPrintHTML(order1, chartHtml, order2) {
       width:68mm !important; height:110mm !important;
     }
     .tooth-el { fill:transparent; stroke:transparent; }
+    .tooth-el.missing { fill: rgba(204,34,34,0.28); stroke: #c00; stroke-width: 2.5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .tooth-stamp { font-size: 18px; text-anchor: middle; dominant-baseline: middle; font-weight: 900; opacity: 0; }
+    .tooth-stamp.show { opacity: 1; }
+    .tooth-stamp.missing { fill: #aa1a1a; }
     @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
   `;
 
