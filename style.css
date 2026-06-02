@@ -692,3 +692,22 @@ body.edit-active .tooth-num { display:none; }
 .clasp-handle.br { cursor: nwse-resize; }
 .clasp-handle.rot { fill: #fff; stroke: #cc2222; cursor: crosshair; }
 .rot-line { stroke: #cc2222; stroke-width: 1.5; stroke-dasharray: 2 2; }
+
+/* ============================================================
+   印刷時：欠損歯を赤で確実に表示
+   ============================================================ */
+@media print {
+  .tooth-el.missing {
+    fill: rgba(200,40,40,0.35) !important;
+    stroke: #cc2222 !important;
+    stroke-width: 2.5 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .tooth-stamp.missing {
+    fill: #cc2222 !important;
+    opacity: 1 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
