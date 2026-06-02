@@ -228,6 +228,9 @@ function collectFormData() {
   const toothAnt  = ins === 'insurance' ? getToggleVal('tooth-ant-ins')  : getToggleVal('tooth-ant-jishi');
   const toothPost = ins === 'insurance' ? getToggleVal('tooth-post-ins') : getToggleVal('tooth-post-jishi');
 
+  // 保険=ins / 自費=jishi のID略形
+  const sfx = ins === 'insurance' ? 'ins' : 'jishi';
+
   return {
     // 患者・医院情報
     clinicName:   document.getElementById('clinic-name').value.trim(),
@@ -254,12 +257,12 @@ function collectFormData() {
     barType,
 
     // メタルアップ
-    hasMetalup:   document.getElementById(`chk-metalup-${ins}`).checked,
-    metalupDetail:document.getElementById(`metalup-${ins}-detail`).value,
+    hasMetalup:   document.getElementById(`chk-metalup-${sfx}`)?.checked ?? false,
+    metalupDetail:document.getElementById(`metalup-${sfx}`)?.value ?? '',
 
     // 補強床
-    hasKyoko:     document.getElementById(`chk-kyoko-${ins}`).checked,
-    kyokoDetail:  document.getElementById(`kyoko-${ins}-detail`).value,
+    hasKyoko:     document.getElementById(`chk-kyoko-${sfx}`)?.checked ?? false,
+    kyokoDetail:  document.getElementById(`kyoko-${sfx}-detail`)?.value ?? '',
 
     // 人工歯
     toothAnterior:  toothAnt,
