@@ -155,10 +155,10 @@ function _buildPrintHTML(order1, chartHtml, order2) {
     var keyBar =
       '<div class="key-bar">' +
       '<div class="key-item"><span class="key-lbl">患者名</span><span class="key-val-primary">' + esc(order.patientName || '—') + '</span></div>' +
-      '<div class="key-item"><span class="key-lbl">セット日</span><span class="key-val-primary">' + esc(keyDelivery || '—') + '</span></div>' +
+      '<div class="key-item"><span class="key-lbl">納品日</span><span class="key-val-primary">' + esc(keyDelivery || '—') + '</span></div>' +
       '<div class="key-item"><span class="key-lbl">医院名</span><span class="key-val">' + esc(order.clinicName || '—') + '</span></div>' +
-      '<div class="key-item"><span class="key-lbl">発注形態</span><span class="key-val">' + esc(keyOrderType || '—') + '</span></div>' +
-      (nextApStr ? '<div class="key-item key-next-ap"><span class="key-lbl">次回Ap</span><span class="key-val">' + esc(nextApStr) + '</span></div>' : '') +
+      (nextApStr ? '<div class="key-item"><span class="key-lbl">次回Ap</span><span class="key-val">' + esc(nextApStr) + '</span></div>' : '<div class="key-item"></div>') +
+      '<div class="key-item key-col-span"><span class="key-lbl">発注形態</span><span class="key-val">' + esc(keyOrderType || '—') + '</span></div>' +
       '</div>';
 
     return '<div class="slip-header"><h1>歯科技工指示書</h1>' +
@@ -226,7 +226,7 @@ function _buildPrintHTML(order1, chartHtml, order2) {
       print-color-adjust: exact;
     }
     .key-item { display: flex; align-items: baseline; gap: 1.5mm; overflow: hidden; }
-    .key-next-ap { grid-column: 1 / -1; }
+    .key-col-span { grid-column: 1 / -1; }
     .key-lbl { font-size: 6pt; color: #666; flex-shrink: 0; white-space: nowrap; }
     .key-val { font-size: 11pt; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     .key-val-primary { font-size: 11pt; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -249,7 +249,7 @@ function _buildPrintHTML(order1, chartHtml, order2) {
     .tn-block { margin: 2mm 0 1mm; border: 0.3mm solid #ccc; padding: 1mm; }
     .tn-row { display: flex; font-size: 5.5pt; padding: 0.2mm 0; }
     .tn-num { flex: 1; text-align: center; color: #ddd; }
-    .tn-num.tn-missing { color: #000; font-weight: bold; }
+    .tn-num.tn-missing { color: #c00; font-weight: bold; }
     .tn-mid { flex: 0 0 auto; padding: 0 0.5mm; color: #333; font-weight: bold; }
     .tn-sep { border-top: 0.3mm solid #ccc; margin: 0.5mm 0; }
     .remarks { padding: 1mm 2mm; line-height: 2.0; min-height: 16mm; border-top: 0.3mm solid #ccc; overflow: hidden; }
