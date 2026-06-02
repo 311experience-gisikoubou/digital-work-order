@@ -56,6 +56,19 @@ function _buildPrintHTML(order1, chartHtml, order2) {
     );
   }
 
+  // 月日曜日のみの日付フォーマット（PDF内の納品日・次回Ap用）
+  function formatMonthDay(dateStr) {
+    if (!dateStr) return '';
+    try {
+      var parts = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!parts) return dateStr;
+      var m = parseInt(parts[2], 10), day = parseInt(parts[3], 10);
+      var d = new Date(parseInt(parts[1], 10), m - 1, day);
+      var weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+      return m + '月' + day + '日(' + weekdays[d.getDay()] + ')';
+    } catch (e) { return dateStr; }
+  }
+
   // ── 1件分のスリップHTMLを生成（orderがnullなら空スリップ）──
   function buildSlip(order) {
     if (!order) {
@@ -67,15 +80,16 @@ function _buildPrintHTML(order1, chartHtml, order2) {
     var L = [];
     var R = [];
 
-    var keyDelivery = order.deliveryDate ? formatJapaneseEraDate(order.deliveryDate) : '';
+    var keyDelivery = order.deliveryDate ? formatMonthDay(order.deliveryDate) : '';
 
-    var nextApStr = '';
+    var nextApDate = '';
+    var nextApTime = '';
     if (order.nextAppointment) {
       var naParts = order.nextAppointment.split('T');
-      var naDate = naParts[0] ? formatJapaneseEraDate(naParts[0]) : '';
-      var naTime = naParts[1] ? naParts[1].slice(0, 5) : '';
-      nextApStr = [naDate, naTime].filter(Boolean).join(' ');
+      nextApDate = naParts[0] ? formatMonthDay(naParts[0]) : '';
+      nextApTime = naParts[1] ? naParts[1].slice(0, 5) : '';
     }
+    var hasNextAp = nextApDate || nextApTime;
     var keyOrderType = order.orderTypes && order.orderTypes.length
       ? order.orderTypes.join(' / ') : '';
 
@@ -83,6 +97,7 @@ function _buildPrintHTML(order1, chartHtml, order2) {
     if (order.doctorName) row(L, '担当医', order.doctorName);
     var ag = [order.patientAge ? order.patientAge + '歳' : '', order.patientGender].filter(Boolean).join('　');
     if (ag) row(L, '年齢・性別', ag);
+    if (keyOrderType) row(L, '発注形態', keyOrderType);
     row(L, '区分', order.insuranceType === 'insurance' ? '保険' : '自費');
     if (order.priority && order.priority !== 'normal') row(L, '優先度', order.priority);
     if (order.repairDetail) row(L, '修理詳細', order.repairDetail);
@@ -156,9 +171,15 @@ function _buildPrintHTML(order1, chartHtml, order2) {
       '<div class="key-bar">' +
       '<div class="key-item"><span class="key-lbl">患者名</span><span class="key-val-primary">' + esc(order.patientName || '—') + '</span></div>' +
       '<div class="key-item"><span class="key-lbl">納品日</span><span class="key-val-primary">' + esc(keyDelivery || '—') + '</span></div>' +
-      '<div class="key-item"><span class="key-lbl">医院名</span><span class="key-val">' + esc(order.clinicName || '—') + '</span></div>' +
-      '<div class="key-item"><span class="key-lbl">発注形態</span><span class="key-val">' + esc(keyOrderType || '—') + '</span></div>' +
-      (nextApStr ? '<div class="key-item key-next-ap"><span class="key-lbl">次回Ap</span><span class="key-val">' + esc(nextApStr) + '</span></div>' : '') +
+      (hasNextAp
+        ? '<div class="key-item"><span class="key-lbl">医院名</span><span class="key-val">' + esc(order.clinicName || '—') + '</span></div>' +
+          '<div class="key-item key-next-ap"><span class="key-lbl">次回Ap</span>' +
+          '<div class="key-val-stack">' +
+          (nextApDate ? '<span class="key-val">' + esc(nextApDate) + '</span>' : '') +
+          (nextApTime ? '<span class="key-time">' + esc(nextApTime) + '</span>' : '') +
+          '</div></div>'
+        : '<div class="key-item key-full"><span class="key-lbl">医院名</span><span class="key-val">' + esc(order.clinicName || '—') + '</span></div>'
+      ) +
       '</div>';
 
     return '<div class="slip-header"><h1>歯科技工指示書</h1>' +
@@ -226,7 +247,10 @@ function _buildPrintHTML(order1, chartHtml, order2) {
       print-color-adjust: exact;
     }
     .key-item { display: flex; align-items: baseline; gap: 1.5mm; overflow: hidden; }
-    .key-next-ap { grid-column: 1 / -1; }
+    .key-next-ap { align-items: flex-start; }
+    .key-full { grid-column: 1 / -1; }
+    .key-val-stack { display: flex; flex-direction: column; line-height: 1.4; min-width: 0; }
+    .key-time { font-size: 9pt; font-weight: bold; color: #555; }
     .key-lbl { font-size: 6pt; color: #666; flex-shrink: 0; white-space: nowrap; }
     .key-val { font-size: 11pt; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     .key-val-primary { font-size: 11pt; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
