@@ -633,16 +633,16 @@ body.edit-active .tooth-num { display:none; }
 
 
 /* ===== ビジュアルカレンダー ===== */
-.vcal-wrap { margin-top:12px; }
-.vcal-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
-.vcal-nav { background:none; border:1px solid var(--border-color); border-radius:6px; padding:4px 10px; cursor:pointer; color:var(--text-secondary); font-size:14px; }
+.vcal-wrap { margin-top:7px; }
+.vcal-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:5px; }
+.vcal-nav { background:none; border:1px solid var(--border-color); border-radius:4px; padding:2px 6px; cursor:pointer; color:var(--text-secondary); font-size:8px; }
 .vcal-nav:hover { background:var(--navy-mid); }
-.vcal-month { font-size:14px; font-weight:700; color:var(--text-primary); }
-.vcal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; }
-.vcal-dow { text-align:center; font-size:10px; font-weight:700; color:var(--text-muted); padding:4px 0; }
+.vcal-month { font-size:8px; font-weight:700; color:var(--text-primary); }
+.vcal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; }
+.vcal-dow { text-align:center; font-size:6px; font-weight:700; color:var(--text-muted); padding:2px 0; }
 .vcal-day {
   aspect-ratio:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
-  border-radius:8px; cursor:pointer; font-size:12px; font-weight:600;
+  border-radius:5px; cursor:pointer; font-size:7px; font-weight:600;
   transition:all 0.15s; position:relative; border:2px solid transparent;
 }
 .vcal-day.empty { background:transparent; cursor:default; }
@@ -653,19 +653,19 @@ body.edit-active .tooth-num { display:none; }
   background:rgba(34,170,80,0.15); color:#1a8040; border-color:rgba(34,170,80,0.5);
   font-weight:800;
 }
-.vcal-day.std-delivery::after { content:'推薦'; position:absolute; bottom:2px; font-size:8px; color:#1a8040; }
+.vcal-day.std-delivery::after { content:'推薦'; position:absolute; bottom:1px; font-size:5px; color:#1a8040; }
 .vcal-day.mild-urgent {
   background:rgba(230,200,0,0.15); color:#8a6f00;
 }
-.vcal-day.mild-urgent::after { content:'料金加算'; position:absolute; bottom:1px; font-size:7px; color:#8a6f00; }
+.vcal-day.mild-urgent::after { content:'料金加算'; position:absolute; bottom:1px; font-size:5px; color:#8a6f00; }
 .vcal-day.hard-urgent {
   background:rgba(230,110,0,0.15); color:#b85000;
 }
-.vcal-day.hard-urgent::after { content:'緊急対応！'; position:absolute; bottom:1px; font-size:7px; color:#b85000; font-weight:800; }
+.vcal-day.hard-urgent::after { content:'緊急対応！'; position:absolute; bottom:1px; font-size:5px; color:#b85000; font-weight:800; }
 .vcal-day.no-accept {
   background:rgba(204,34,34,0.1); color:#cc2222;
 }
-.vcal-day.no-accept::after { content:'要確認'; position:absolute; bottom:1px; font-size:7px; color:#cc2222; }
+.vcal-day.no-accept::after { content:'要確認'; position:absolute; bottom:1px; font-size:5px; color:#cc2222; }
 .vcal-day.selected {
   border-color:var(--accent-blue) !important; box-shadow:0 0 0 3px rgba(37,99,168,0.25);
 }
@@ -676,8 +676,8 @@ body.edit-active .tooth-num { display:none; }
 .vcal-today { font-weight:900 !important; text-decoration:underline; }
 
 /* カレンダー凡例（新） */
-.cal-legend-new { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
-.cln-item { display:flex; align-items:center; gap:5px; font-size:10px; font-weight:600; padding:3px 8px; border-radius:12px; }
+.cal-legend-new { display:flex; gap:5px; flex-wrap:wrap; margin-top:6px; }
+.cln-item { display:flex; align-items:center; gap:3px; font-size:6px; font-weight:600; padding:2px 5px; border-radius:7px; }
 .cln-item.green  { background:rgba(34,170,80,0.12);  color:#1a8040; }
 .cln-item.yellow { background:rgba(230,200,0,0.15);  color:#8a6f00; }
 .cln-item.orange { background:rgba(230,110,0,0.15);  color:#b85000; }
