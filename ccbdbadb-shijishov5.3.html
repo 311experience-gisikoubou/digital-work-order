@@ -3,3 +3,31 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light only">
+<title>デジタルワークオーダー</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+<header class="app-header">
+  <div class="logo">
+    <div class="logo-icon">🦷</div>
+    <div>
+      <div>デジタルワークオーダー</div>
+      <div class="logo-sub">Dental Lab Work Order System</div>
+    </div>
+  </div>
+  <nav class="tab-nav">
+    <button class="tab-btn active" onclick="switchTab('order')">発注フォーム</button>
+    <button class="tab-btn" onclick="switchTab('manage')">受注管理</button>
+  </nav>
+</header>
+</div>
+<script src="app.js"></script>
+<script src="orders.js"></script>
+<script src="modal.js"></script>
+<script src="pdf.js"></script>
+<script src="calendar.js"></script>
+
+</body>
+</html>
