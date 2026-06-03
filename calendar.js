@@ -21,7 +21,7 @@ function isHoliday(dateStr, holidays) {
   if (holidays[dateStr]) return true;
   var d = new Date(dateStr + 'T00:00:00');
   var day = d.getDay();
-  if (day === 0 || day === 4 || day === 6) return true;
+  if (day === 0) return true;
   var md = dateStr.slice(5);
   if (md >= '08-13' && md <= '08-16') return true;
   if (md >= '12-28' || md <= '01-04') return true;
