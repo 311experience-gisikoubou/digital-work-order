@@ -112,7 +112,7 @@
       <!-- ビジュアルカレンダー -->
       <div class="vcal-wrap" id="vcalWrap" style="display:none;">
         <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">
-          希望納品日を選択（クリックで選択・標準納期推奨）
+          希望納品日を選択（推薦納品日は緑で表示）
         </div>
         <div class="vcal-header">
           <button class="vcal-nav" onclick="vcalPrev()">◀</button>
@@ -123,7 +123,7 @@
 
         <!-- 凡例 -->
         <div class="cal-legend-new">
-          <div class="cln-item green">🟢 標準納期（推奨）</div>
+          <div class="cln-item green">🟢 推薦納品日</div>
           <div class="cln-item yellow">🟡 急ぎ（料金加算あり）</div>
           <div class="cln-item orange">🟠 緊急対応！（料金加算大）</div>
           <div class="cln-item red">🔴 対応不可</div>
@@ -135,7 +135,7 @@
       <div class="delivery-result empty" id="deliveryResult" style="margin-top:10px;">
         <div class="dr-main">
           <div class="dr-date-wrap">
-            <span class="dr-label">決定納期</span>
+            <span class="dr-label">推薦納品日</span>
             <span class="dr-date" id="drDate">— 発送日を入力してください</span>
             <span class="dr-biz-days" id="drBizDays"></span>
           </div>
