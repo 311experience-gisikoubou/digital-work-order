@@ -153,8 +153,7 @@ async function renderVcal() {
       if (biz <= 1) cls += ' no-accept';
       else if (biz <= 3) cls += ' hard-urgent';
       else if (biz < stdDays) cls += ' mild-urgent';
-      else if (dateStr === stdDeliveryDate) cls += ' std-delivery';
-      else cls += ' future-ok';
+      else cls += ' std-delivery';
     }
     el.className = cls;
     if (dateStr === selectedDeliveryDate) el.classList.add('selected');
