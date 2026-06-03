@@ -6,6 +6,7 @@ var vcalYear = 0, vcalMonth = 0;
 var selectedDeliveryDate = null;
 var stdDeliveryDate = null;
 var shippingDateGlobal = null;
+var nextApDateGlobal = null;
 
 async function fetchHolidays() {
   if (HOLIDAYS_CACHE) return HOLIDAYS_CACHE;
@@ -20,7 +21,7 @@ function isHoliday(dateStr, holidays) {
   if (holidays[dateStr]) return true;
   var d = new Date(dateStr + 'T00:00:00');
   var day = d.getDay();
-  if (day === 0 || day === 6) return true;
+  if (day === 0 || day === 4 || day === 6) return true;
   var md = dateStr.slice(5);
   if (md >= '08-13' && md <= '08-16') return true;
   if (md >= '12-28' || md <= '01-04') return true;
@@ -65,6 +66,22 @@ function formatDateJP(dateStr) {
 function getStdDays() {
   var insBtn = document.getElementById('btn-insurance');
   return (!insBtn || insBtn.classList.contains('active')) ? 11 : 14;
+}
+
+async function onNextApChange() {
+  var el = document.getElementById('next-appointment');
+  if (!el || !el.value) {
+    nextApDateGlobal = null;
+  } else {
+    nextApDateGlobal = el.value.slice(0, 10);
+  }
+  if (shippingDateGlobal) {
+    await renderVcal();
+    if (selectedDeliveryDate) {
+      var hols = await fetchHolidays();
+      await applyDelivery(selectedDeliveryDate, hols);
+    }
+  }
 }
 
 async function onShippingDateChange() {
@@ -129,6 +146,8 @@ async function renderVcal() {
       cls += ' holiday';
     } else if (dateStr < today) {
       cls += ' past';
+    } else if (nextApDateGlobal && dateStr >= nextApDateGlobal) {
+      cls += ' after-nextap';
     } else if (shippingDateGlobal) {
       var biz = countBizDays(shippingDateGlobal, dateStr, holidays);
       if (biz <= 1) cls += ' no-accept';
@@ -140,9 +159,9 @@ async function renderVcal() {
     el.className = cls;
     if (dateStr === selectedDeliveryDate) el.classList.add('selected');
 
-    (function(ds, isHol, isPast) {
+    (function(ds, isHol, isPast, isAfterAp) {
       el.addEventListener('click', async function() {
-        if (isHol || isPast) return;
+        if (isHol || isPast || isAfterAp) return;
         var hols = await fetchHolidays();
         var biz = shippingDateGlobal ? countBizDays(shippingDateGlobal, ds, hols) : 999;
         if (biz <= 1) {
@@ -152,7 +171,7 @@ async function renderVcal() {
         await renderVcal();
         await applyDelivery(ds, hols);
       });
-    })(dateStr, isHoliday(dateStr, holidays), dateStr < today);
+    })(dateStr, isHoliday(dateStr, holidays), dateStr < today, nextApDateGlobal && dateStr >= nextApDateGlobal);
 
     grid.appendChild(el);
   }
