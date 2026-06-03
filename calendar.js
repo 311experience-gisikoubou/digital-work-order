@@ -192,7 +192,7 @@ async function applyDelivery(dateStr, holidays) {
   var isStd = (dateStr === stdDeliveryDate);
 
   drDate.textContent = formatDateJP(dateStr);
-  drBiz.textContent = '発送後 ' + bizDays + ' 営業日' + (isStd ? '（標準納期）' : '');
+  drBiz.textContent = '発送後 ' + bizDays + ' 営業日' + (isStd ? '（推薦納品日）' : '');
   saveMsg.className = 'save-msg';
 
   var fee = 0;
