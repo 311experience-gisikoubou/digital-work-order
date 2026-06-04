@@ -142,12 +142,15 @@ async function renderVcal() {
     if (dateStr === today) el.classList.add('vcal-today');
 
     var cls = 'vcal-day';
+    var dow = new Date(dateStr + 'T00:00:00').getDay();
     if (isHoliday(dateStr, holidays)) {
       cls += ' holiday';
     } else if (dateStr < today) {
       cls += ' past';
     } else if (nextApDateGlobal && dateStr >= nextApDateGlobal) {
       cls += ' after-nextap';
+    } else if (dow === 4) {
+      cls += ' thu';
     } else if (shippingDateGlobal) {
       var biz = countBizDays(shippingDateGlobal, dateStr, holidays);
       if (biz <= 1) cls += ' no-accept';
