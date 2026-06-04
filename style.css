@@ -576,6 +576,19 @@ body.edit-active .tooth-num { display:none; }
 #claspList { display:flex; flex-direction:column; gap:4px; }
 .btn-clasp-reset { margin-top:10px; padding:7px 18px; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer; transition:all 0.15s; border:1px solid #cc2222; background:#fff; color:#cc2222; }
 .btn-clasp-reset:hover { background:#cc2222; color:#fff; }
+
+/* クラスプ種類ボタン：2列グリッド（iPad タップ操作向け） */
+#clasp-insurance-types,
+#clasp-jishi-types {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+#clasp-insurance-types .toggle-btn,
+#clasp-jishi-types .toggle-btn {
+  padding: 12px 8px;
+  text-align: center;
+}
 .twin-hint { display:none; font-size:11px; color:#8844cc; background:rgba(136,68,204,0.08); border:1px solid rgba(136,68,204,0.25); padding:5px 12px; border-radius:6px; margin-bottom:8px; }
 .twin-hint.show { display:block; }
 
