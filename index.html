@@ -82,6 +82,11 @@
         </select>
       </div>
     </div>
+    <!-- 次回予約日時 -->
+    <div class="form-group" style="max-width:280px;margin-top:8px;">
+      <label>次回予約日時（次回Ap）</label>
+      <input type="datetime-local" id="next-appointment" onchange="onNextApChange()">
+    </div>
     <div class="form-row">
       <div class="form-group" style="max-width:200px">
         <label>発行日</label>
@@ -150,12 +155,6 @@
 
       <!-- セット日（非表示） -->
       <input type="hidden" id="delivery-date">
-    </div>
-
-    <!-- 次回予約日時 -->
-    <div class="form-group" style="max-width:280px;margin-top:8px;">
-      <label>次回予約日時（次回Ap）</label>
-      <input type="datetime-local" id="next-appointment" onchange="onNextApChange()">
     </div>
   </div>
 
