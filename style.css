@@ -585,8 +585,8 @@ body.edit-active .tooth-num { display:none; }
 .delivery-system .ds-title { font-size:12px; font-weight:700; color:var(--text-secondary); letter-spacing:0.08em; text-transform:uppercase; margin-bottom:12px; }
 
 /* 発送日選択 */
-.shipping-row { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px; }
-.shipping-input-wrap { flex:1; min-width:160px; }
+.shipping-row { display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap; margin-bottom:12px; }
+.shipping-input-wrap { flex:1; min-width:160px; max-width:340px; }
 .shipping-input-wrap label { font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:4px; display:block; }
 .shipping-input-wrap input[type="date"] { width:100%; padding:8px 12px; border:1.5px solid var(--border-color); border-radius:var(--radius-sm); background:var(--input-bg); color:var(--text-primary); font-size:14px; }
 .shipping-input-wrap input[type="date"]:focus { outline:none; border-color:var(--accent-blue); }
