@@ -530,7 +530,7 @@ textarea { resize: vertical; min-height: 80px; }
 .edit-hint { display:none; font-size:11px; color:#22aa66; background:rgba(34,170,102,0.08); border:1px solid rgba(34,170,102,0.25); padding:5px 12px; border-radius:6px; margin-bottom:8px; }
 .edit-hint.show { display:block; }
 .chart-wrap { position:relative; display:inline-block; background:#fff; border-radius:10px; overflow:hidden; }
-.overlay-svg { position:absolute; top:0; left:0; width:300px; height:525px; }
+.overlay-svg { position:absolute; top:0; left:0; width:360px; height:630px; }
 .tooth-el { fill:transparent; stroke:transparent; stroke-width:2; cursor:pointer; transition:fill 0.12s,stroke 0.12s; }
 .tooth-el:hover { fill:rgba(200,60,60,0.08); stroke:rgba(200,60,60,0.25); }
 .tooth-el.missing { fill:rgba(204,34,34,0.28); stroke:#cc2222; stroke-width:2.5; }
