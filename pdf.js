@@ -130,7 +130,7 @@ function _buildPrintHTML(order1, chartHtml, order2) {
     if (order.barType) row(R, 'バー', order.barType + 'バー');
 
     if (typeof claspState !== 'undefined') {
-      var CN = { W:'ワイヤークラスプ', E:'キャスト鉤', T:'双子鉤', R:'レスト', H:'フック', C:'CMコンビ鉤', I:'Iバー', WI:'ワイヤーIバー' };
+      var CN = { W:'W ワイヤークラスプ', E:'C キャスト鉤', T:'双子鉤', R:'レスト', H:'フック', C:'CMコンビ鉤', I:'Iバー', WI:'ワイヤーIバー' };
       var counts = {};
       Object.keys(claspState).forEach(function(num) {
         (claspState[num] || []).forEach(function(c) {

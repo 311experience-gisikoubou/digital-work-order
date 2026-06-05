@@ -432,7 +432,7 @@ function updateClaspList(){
     claspState[t.num].forEach(function(c){
       if(c.isTwin1) return;
       var color=CLASP_COLORS[c.type]||"#555";
-      var CLASP_NAMES={"W":"ワイヤークラスプ","E":"キャスト鉤","T":"双子鉤","R":"レスト","H":"フック","C":"CMコンビ鉤","I":"Iバー","WI":"ワイヤーIバー"};
+      var CLASP_NAMES={"W":"W ワイヤークラスプ","E":"C キャスト鉤","T":"双子鉤","R":"レスト","H":"フック","C":"CMコンビ鉤","I":"Iバー","WI":"ワイヤーIバー"};
       var label=(CLASP_NAMES[c.type]||c.type)+(c.dir?"-"+c.dir:"");
       if(c.twinWith) label+="("+t.num+"↔"+c.twinWith+")";
       else label+="("+t.num+")";
