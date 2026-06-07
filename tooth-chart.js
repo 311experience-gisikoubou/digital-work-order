@@ -232,6 +232,7 @@ function getSavedTransform(num, type) {
 }
 
 function applyClaspToTooth(num){
+  if(drawMode) return;
   if(!claspMode) return;
   var type=claspMode.type;
 
@@ -458,6 +459,7 @@ function buildSVG(){
 
   // SVG背景クリックでクラスプ選択解除
   svgEl.addEventListener("mousedown", function(e){
+    if(drawMode) return;
     if(e.target === svgEl || e.target.classList.contains("overlay-svg")) {
       if(activeClaspUid) {
         activeClaspUid = null;
@@ -468,6 +470,7 @@ function buildSVG(){
 }
 
 function clickTooth(num){
+  if(drawMode) return;
   if(currentMode==="edit"||drag.moved)return;
 
   if(claspMode){
@@ -519,6 +522,7 @@ function syncToShijiChart(num, isSelected) {
 }
 
 function onMD(e,num){
+  if(drawMode) return;
   if(currentMode!=="edit")return;
   var pt=getSVGPt(e);
   drag.active=true;drag.moved=false;drag.num=num;
@@ -634,6 +638,175 @@ function resetAll(){
 buildToothChart();
 buildSVG();
 initClasp();
+initDrawing();
+
+// ===== 手書き機能 =====
+var drawMode = false;
+var drawCurrentColor = '#cc2222';
+var drawCurrentWidth = 6;
+var drawStrokes = [];
+var drawActive = false;
+var drawPts = [];
+var drawPathEl = null;
+
+function getSVGCoord(e, svgEl) {
+  var pt = svgEl.createSVGPoint();
+  pt.x = e.clientX;
+  pt.y = e.clientY;
+  return pt.matrixTransform(svgEl.getScreenCTM().inverse());
+}
+
+function buildPathD(pts) {
+  if (pts.length === 1) {
+    return 'M ' + pts[0].x.toFixed(1) + ' ' + pts[0].y.toFixed(1) +
+           ' l 0.1 0';
+  }
+  var d = 'M ' + pts[0].x.toFixed(1) + ' ' + pts[0].y.toFixed(1);
+  for (var i = 1; i < pts.length - 1; i++) {
+    var mx = ((pts[i].x + pts[i + 1].x) / 2).toFixed(1);
+    var my = ((pts[i].y + pts[i + 1].y) / 2).toFixed(1);
+    d += ' Q ' + pts[i].x.toFixed(1) + ' ' + pts[i].y.toFixed(1) + ' ' + mx + ' ' + my;
+  }
+  var last = pts[pts.length - 1];
+  d += ' L ' + last.x.toFixed(1) + ' ' + last.y.toFixed(1);
+  return d;
+}
+
+function initDrawing() {
+  var svgEl = document.getElementById('toothSvg');
+
+  svgEl.addEventListener('pointerdown', function(e) {
+    if (!drawMode) return;
+    e.preventDefault();
+    e.stopPropagation();
+    drawActive = true;
+    drawPts = [getSVGCoord(e, svgEl)];
+    drawPathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    drawPathEl.setAttribute('class', 'draw-path');
+    drawPathEl.setAttribute('fill', 'none');
+    drawPathEl.setAttribute('stroke', drawCurrentColor);
+    drawPathEl.setAttribute('stroke-width', String(drawCurrentWidth));
+    drawPathEl.setAttribute('stroke-linecap', 'round');
+    drawPathEl.setAttribute('stroke-linejoin', 'round');
+    drawPathEl.setAttribute('d', 'M ' + drawPts[0].x.toFixed(1) + ' ' + drawPts[0].y.toFixed(1));
+    document.getElementById('freeLineLayer').appendChild(drawPathEl);
+    try { svgEl.setPointerCapture(e.pointerId); } catch(err) {}
+  });
+
+  svgEl.addEventListener('pointermove', function(e) {
+    if (!drawMode || !drawActive || !drawPathEl) return;
+    e.preventDefault();
+    var pt = getSVGCoord(e, svgEl);
+    var last = drawPts[drawPts.length - 1];
+    var dx = pt.x - last.x, dy = pt.y - last.y;
+    if (dx * dx + dy * dy < 9) return;
+    drawPts.push(pt);
+    drawPathEl.setAttribute('d', buildPathD(drawPts));
+  });
+
+  function endDraw() {
+    if (!drawActive) return;
+    drawActive = false;
+    if (drawPts.length > 1 && drawPathEl) {
+      drawStrokes.push({
+        color: drawCurrentColor,
+        width: String(drawCurrentWidth),
+        d: drawPathEl.getAttribute('d')
+      });
+      saveDrawing();
+    } else if (drawPathEl) {
+      try { document.getElementById('freeLineLayer').removeChild(drawPathEl); } catch(err) {}
+    }
+    drawPathEl = null;
+    drawPts = [];
+  }
+
+  svgEl.addEventListener('pointerup', endDraw);
+  svgEl.addEventListener('pointercancel', function() {
+    drawActive = false;
+    if (drawPathEl) {
+      try { document.getElementById('freeLineLayer').removeChild(drawPathEl); } catch(err) {}
+    }
+    drawPathEl = null;
+    drawPts = [];
+  });
+
+  loadDrawing();
+}
+
+function saveDrawing() {
+  try {
+    localStorage.setItem('dwo_drawing_v1', JSON.stringify({ strokes: drawStrokes }));
+  } catch(e) {}
+}
+
+function loadDrawing() {
+  try {
+    var raw = localStorage.getItem('dwo_drawing_v1');
+    if (!raw) return;
+    var data = JSON.parse(raw);
+    if (!data.strokes) return;
+    drawStrokes = data.strokes;
+    renderDrawing();
+  } catch(e) {}
+}
+
+function renderDrawing() {
+  var layer = document.getElementById('freeLineLayer');
+  Array.from(layer.querySelectorAll('.draw-path')).forEach(function(el) {
+    layer.removeChild(el);
+  });
+  drawStrokes.forEach(function(s) {
+    var p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('class', 'draw-path');
+    p.setAttribute('fill', 'none');
+    p.setAttribute('stroke', s.color);
+    p.setAttribute('stroke-width', String(s.width));
+    p.setAttribute('stroke-linecap', 'round');
+    p.setAttribute('stroke-linejoin', 'round');
+    p.setAttribute('d', s.d);
+    layer.appendChild(p);
+  });
+}
+
+function clearDrawing() {
+  if (!confirm('手書きをすべて消去しますか？')) return;
+  drawStrokes = [];
+  renderDrawing();
+  saveDrawing();
+}
+
+function toggleDrawMode() {
+  drawMode = !drawMode;
+  var btn = document.getElementById('drawToggleBtn');
+  var opts = document.getElementById('drawOptions');
+  var svgEl = document.getElementById('toothSvg');
+  if (drawMode) {
+    btn.textContent = '✏️ 手書き ON';
+    btn.classList.add('draw-mode-on');
+    if (opts) opts.style.display = 'flex';
+    svgEl.style.cursor = 'crosshair';
+    svgEl.style.touchAction = 'none';
+  } else {
+    btn.textContent = '✏️ 手書き OFF';
+    btn.classList.remove('draw-mode-on');
+    if (opts) opts.style.display = 'none';
+    svgEl.style.cursor = '';
+    svgEl.style.touchAction = '';
+  }
+}
+
+function setDrawColor(btn) {
+  drawCurrentColor = btn.getAttribute('data-color');
+  document.querySelectorAll('.draw-color-btn').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+}
+
+function setDrawWidth(btn) {
+  drawCurrentWidth = parseInt(btn.getAttribute('data-width'), 10);
+  document.querySelectorAll('.draw-width-btn').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+}
 
 function selectUpperDenture() {
   [17,16,15,14,13,12,11,21,22,23,24,25,26,27].forEach(function(num) {

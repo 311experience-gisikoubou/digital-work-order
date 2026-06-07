@@ -683,6 +683,25 @@
     <svg class="overlay-svg" id="toothSvg" viewBox="0 0 600 1070"></svg>
   </div>
 
+  <!-- 手書きツールバー -->
+  <div class="draw-toolbar">
+    <button class="draw-toggle-btn" id="drawToggleBtn" onclick="toggleDrawMode()">✏️ 手書き OFF</button>
+    <div class="draw-options" id="drawOptions" style="display:none;">
+      <div class="draw-option-group">
+        <button class="draw-color-btn active" data-color="#cc2222" onclick="setDrawColor(this)" title="赤"></button>
+        <button class="draw-color-btn" data-color="#2563a8" onclick="setDrawColor(this)" title="青"></button>
+        <button class="draw-color-btn" data-color="#222222" onclick="setDrawColor(this)" title="黒"></button>
+      </div>
+      <div class="draw-option-group">
+        <button class="draw-width-btn" data-width="3" onclick="setDrawWidth(this)">細</button>
+        <button class="draw-width-btn active" data-width="6" onclick="setDrawWidth(this)">中</button>
+        <button class="draw-width-btn" data-width="10" onclick="setDrawWidth(this)">太</button>
+        <button class="draw-width-btn" data-width="18" onclick="setDrawWidth(this)">極太</button>
+      </div>
+      <button class="draw-clear-btn" onclick="clearDrawing()">全消去</button>
+    </div>
+  </div>
+
   <!-- 記録パネル -->
   <div class="tooth-result-panel">
     <div class="result-title">記録された歯</div>
