@@ -768,6 +768,30 @@ function initDrawing() {
     if (dx * dx + dy * dy < 9) return;
     drawPts.push(pt);
     drawPathEl.setAttribute('d', buildPathD(drawPts));
+
+    // 25点ごとにストロークを分割保存（部分消しのため）
+    if (drawPts.length >= 25) {
+      var layer = document.getElementById('freeLineLayer');
+      drawStrokes.push({
+        color: drawCurrentColor,
+        width: String(drawCurrentWidth),
+        d: drawPathEl.getAttribute('d')
+      });
+      saveDrawing();
+      // 最後の点を引き継いで新しいパスを開始（継ぎ目なし）
+      var carryPt = drawPts[drawPts.length - 1];
+      try { layer.removeChild(drawPathEl); } catch(err) {}
+      drawPts = [carryPt];
+      drawPathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      drawPathEl.setAttribute('class', 'draw-path');
+      drawPathEl.setAttribute('fill', 'none');
+      drawPathEl.setAttribute('stroke', drawCurrentColor);
+      drawPathEl.setAttribute('stroke-width', String(drawCurrentWidth));
+      drawPathEl.setAttribute('stroke-linecap', 'round');
+      drawPathEl.setAttribute('stroke-linejoin', 'round');
+      drawPathEl.setAttribute('d', 'M ' + carryPt.x.toFixed(1) + ' ' + carryPt.y.toFixed(1));
+      layer.appendChild(drawPathEl);
+    }
   });
 
   function endDraw() {
