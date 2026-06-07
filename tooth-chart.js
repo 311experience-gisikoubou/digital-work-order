@@ -696,10 +696,13 @@ function eraseAtPoint(pt) {
       var p = paths[i];
       var idx = parseInt(p.getAttribute('data-idx'), 10);
       dbg("⑤ checking path", idx);
+      dbg("outerHTML", p.outerHTML.slice(0, 120));
       var bbox = p.getBBox();
-      dbg("bbox x=" + bbox.x.toFixed(0) + " y=" + bbox.y.toFixed(0) + " w=" + bbox.width.toFixed(0) + " h=" + bbox.height.toFixed(0) + " pt=" + pt.x.toFixed(0) + "," + pt.y.toFixed(0));
+      dbg("bbox x=" + bbox.x.toFixed(1) + " y=" + bbox.y.toFixed(1) + " w=" + bbox.width.toFixed(1) + " h=" + bbox.height.toFixed(1));
+      dbg("pt x=" + pt.x.toFixed(1) + " y=" + pt.y.toFixed(1));
       var hit = (pt.x >= bbox.x - margin && pt.x <= bbox.x + bbox.width + margin &&
                  pt.y >= bbox.y - margin && pt.y <= bbox.y + bbox.height + margin);
+      dbg("hit=" + hit);
       if (hit) {
         if (!isNaN(idx) && idx >= 0 && idx < drawStrokes.length) {
           dbg("⑥ stroke removed", idx);
