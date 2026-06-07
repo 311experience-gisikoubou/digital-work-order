@@ -659,6 +659,7 @@ var drawStrokes = [];
 var drawActive = false;
 var drawPts = [];
 var drawPathEl = null;
+var eraserMode = false;
 
 function getSVGCoord(e, svgEl) {
   var pt = svgEl.createSVGPoint();
@@ -690,6 +691,20 @@ function initDrawing() {
     if (!drawMode) return;
     e.preventDefault();
     e.stopPropagation();
+
+    // 消しゴムモード：タップしたストロークを削除
+    if (eraserMode) {
+      if (e.target && e.target.classList.contains('draw-path')) {
+        var idx = parseInt(e.target.getAttribute('data-idx'), 10);
+        if (!isNaN(idx) && idx >= 0 && idx < drawStrokes.length) {
+          drawStrokes.splice(idx, 1);
+          renderDrawing();
+          saveDrawing();
+        }
+      }
+      return;
+    }
+
     drawActive = true;
     drawPts = [getSVGCoord(e, svgEl)];
     drawPathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -772,14 +787,16 @@ function renderDrawing() {
   Array.from(layer.querySelectorAll('.draw-path')).forEach(function(el) {
     layer.removeChild(el);
   });
-  drawStrokes.forEach(function(s) {
+  drawStrokes.forEach(function(s, i) {
     var p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     p.setAttribute('class', 'draw-path');
+    p.setAttribute('data-idx', String(i));
     p.setAttribute('fill', 'none');
     p.setAttribute('stroke', s.color);
     p.setAttribute('stroke-width', String(s.width));
     p.setAttribute('stroke-linecap', 'round');
     p.setAttribute('stroke-linejoin', 'round');
+    p.style.pointerEvents = 'stroke';
     p.setAttribute('d', s.d);
     layer.appendChild(p);
   });
@@ -815,6 +832,27 @@ function toggleDrawMode() {
     svgEl.style.touchAction = '';
     if (chartWrap) chartWrap.style.touchAction = '';
     if (hitArea) hitArea.style.pointerEvents = 'none';
+    // 消しゴムモードもリセット
+    eraserMode = false;
+    var eraserBtn = document.getElementById('eraserBtn');
+    if (eraserBtn) eraserBtn.classList.remove('active');
+  }
+}
+
+function toggleEraserMode() {
+  eraserMode = !eraserMode;
+  var eraserBtn = document.getElementById('eraserBtn');
+  var hitArea = document.getElementById('drawHitArea');
+  var svgEl = document.getElementById('toothSvg');
+  if (eraserMode) {
+    if (eraserBtn) eraserBtn.classList.add('active');
+    svgEl.style.cursor = 'cell';
+    // 消しゴムモード：hitAreaを透過してdraw-pathに直接タップを届かせる
+    if (hitArea) hitArea.style.pointerEvents = 'none';
+  } else {
+    if (eraserBtn) eraserBtn.classList.remove('active');
+    svgEl.style.cursor = 'crosshair';
+    if (hitArea) hitArea.style.pointerEvents = 'all';
   }
 }
 

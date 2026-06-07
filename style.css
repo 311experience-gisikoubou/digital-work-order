@@ -723,6 +723,8 @@ body.edit-active .tooth-num { display:none; }
 .draw-color-btn.active { box-shadow:0 0 0 3px rgba(255,255,255,0.9), 0 0 0 5px currentColor; transform:scale(1.15); }
 .draw-width-btn { padding:4px 9px; border-radius:6px; border:1px solid var(--border-color); background:#fff; cursor:pointer; font-size:11px; font-weight:700; color:var(--text-secondary); transition:all 0.12s; }
 .draw-width-btn.active { background:#1a2a3a; border-color:#1a2a3a; color:#fff; }
+.draw-eraser-btn { padding:4px 12px; border-radius:6px; border:1px solid var(--border-color); background:#fff; cursor:pointer; font-size:11px; font-weight:700; color:var(--text-secondary); transition:all 0.12s; }
+.draw-eraser-btn.active { background:#e67e22; border-color:#e67e22; color:#fff; }
 .draw-clear-btn { padding:4px 12px; border-radius:6px; border:1px solid #e0a0a0; background:#fff8f8; cursor:pointer; font-size:11px; font-weight:700; color:#c03030; transition:all 0.12s; }
 .draw-clear-btn:hover { background:#ffe0e0; }
 .rot-line { stroke: #cc2222; stroke-width: 1.5; stroke-dasharray: 2 2; }
