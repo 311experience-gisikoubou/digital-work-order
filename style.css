@@ -569,7 +569,8 @@ body.edit-active .tooth-num { display:none; }
 .dir-item { padding:10px 16px; font-size:12px; font-weight:700; cursor:pointer; color:#1a2a3a; display:flex; align-items:center; gap:8px; transition:background 0.1s; }
 .dir-item:hover { background:#f0f4f8; }
 .dir-dot { width:8px; height:8px; border-radius:50%; }
-.clasp-label { font-size:11px; text-anchor:middle; dominant-baseline:middle; pointer-events:none; font-weight:900; }
+.clasp-label { font-size:18px; text-anchor:middle; dominant-baseline:middle; font-weight:900; cursor:move; }
+.clasp-sel-rect { fill:rgba(37,99,168,0.12); stroke:#2563a8; stroke-width:1.5; stroke-dasharray:4 3; pointer-events:none; }
 .clasp-dir-label { font-size:7px; text-anchor:middle; dominant-baseline:middle; pointer-events:none; font-weight:700; }
 .clasp-result { background:#fff; border:1px solid var(--border-color); border-radius:10px; padding:12px 14px; }
 .clasp-result-title { font-size:10px; font-weight:700; color:#7a90a8; letter-spacing:.08em; text-transform:uppercase; margin-bottom:8px; }
