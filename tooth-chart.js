@@ -684,6 +684,28 @@ function buildPathD(pts) {
   return d;
 }
 
+function eraseAtPoint(pt) {
+  var margin = 15;
+  var layer = document.getElementById('freeLineLayer');
+  if (!layer) return;
+  var paths = Array.from(layer.querySelectorAll('path.draw-path'));
+  for (var i = 0; i < paths.length; i++) {
+    try {
+      var bbox = paths[i].getBBox();
+      if (pt.x >= bbox.x - margin && pt.x <= bbox.x + bbox.width + margin &&
+          pt.y >= bbox.y - margin && pt.y <= bbox.y + bbox.height + margin) {
+        var idx = parseInt(paths[i].getAttribute('data-idx'), 10);
+        if (!isNaN(idx) && idx >= 0 && idx < drawStrokes.length) {
+          drawStrokes.splice(idx, 1);
+          renderDrawing();
+          saveDrawing();
+          return;
+        }
+      }
+    } catch(err) {}
+  }
+}
+
 function initDrawing() {
   var svgEl = document.getElementById('toothSvg');
 
@@ -694,14 +716,8 @@ function initDrawing() {
 
     // 消しゴムモード：タップしたストロークを削除
     if (eraserMode) {
-      if (e.target && e.target.classList.contains('draw-path')) {
-        var idx = parseInt(e.target.getAttribute('data-idx'), 10);
-        if (!isNaN(idx) && idx >= 0 && idx < drawStrokes.length) {
-          drawStrokes.splice(idx, 1);
-          renderDrawing();
-          saveDrawing();
-        }
-      }
+      eraseAtPoint(getSVGCoord(e, svgEl));
+      drawActive = true;
       return;
     }
 
@@ -720,8 +736,13 @@ function initDrawing() {
   });
 
   svgEl.addEventListener('pointermove', function(e) {
-    if (!drawMode || !drawActive || !drawPathEl) return;
+    if (!drawMode || !drawActive) return;
     e.preventDefault();
+    if (eraserMode) {
+      eraseAtPoint(getSVGCoord(e, svgEl));
+      return;
+    }
+    if (!drawPathEl) return;
     var pt = getSVGCoord(e, svgEl);
     var last = drawPts[drawPts.length - 1];
     var dx = pt.x - last.x, dy = pt.y - last.y;
