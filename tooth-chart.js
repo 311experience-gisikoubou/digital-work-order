@@ -686,8 +686,7 @@ function buildPathD(pts) {
 
 function eraseAtPoint(pt) {
   dbg("③ eraseAtPoint entered");
-  var hitRadius = 22;
-  var sampleStep = 8;
+  var margin = 30;
   var layer = document.getElementById('freeLineLayer');
   if (!layer) return;
   var paths = Array.from(layer.querySelectorAll('path.draw-path'));
@@ -697,19 +696,10 @@ function eraseAtPoint(pt) {
       var p = paths[i];
       var idx = parseInt(p.getAttribute('data-idx'), 10);
       dbg("⑤ checking path", idx);
-      var total = p.getTotalLength();
-      var hit = false;
-      var steps = Math.max(1, Math.floor(total / sampleStep));
-      for (var s = 0; s <= steps; s++) {
-        var len = (s / steps) * total;
-        var svgPt = p.getPointAtLength(len);
-        var dx = svgPt.x - pt.x;
-        var dy = svgPt.y - pt.y;
-        if (dx * dx + dy * dy <= hitRadius * hitRadius) {
-          hit = true;
-          break;
-        }
-      }
+      var bbox = p.getBBox();
+      dbg("bbox x=" + bbox.x.toFixed(0) + " y=" + bbox.y.toFixed(0) + " w=" + bbox.width.toFixed(0) + " h=" + bbox.height.toFixed(0) + " pt=" + pt.x.toFixed(0) + "," + pt.y.toFixed(0));
+      var hit = (pt.x >= bbox.x - margin && pt.x <= bbox.x + bbox.width + margin &&
+                 pt.y >= bbox.y - margin && pt.y <= bbox.y + bbox.height + margin);
       if (hit) {
         if (!isNaN(idx) && idx >= 0 && idx < drawStrokes.length) {
           dbg("⑥ stroke removed", idx);
