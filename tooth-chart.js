@@ -686,7 +686,7 @@ function buildPathD(pts) {
 
 function eraseAtPoint(pt) {
   dbg("③ eraseAtPoint entered");
-  var margin = 50;
+  var margin = 100;
   var layer = document.getElementById('freeLineLayer');
   if (!layer) return;
   var paths = Array.from(layer.querySelectorAll('path.draw-path'));
