@@ -660,6 +660,9 @@ var drawActive = false;
 var drawPts = [];
 var drawPathEl = null;
 var eraserMode = false;
+var drawHistory = [];
+var drawRedoStack = [];
+var drawSnapshot = null;
 
 function getSVGCoord(e, svgEl) {
   var pt = svgEl.createSVGPoint();
@@ -740,6 +743,8 @@ function initDrawing() {
       return;
     }
 
+    // 描画開始時にスナップショット保存（Undo用）
+    drawSnapshot = JSON.parse(JSON.stringify(drawStrokes));
     drawActive = true;
     drawPts = [getSVGCoord(e, svgEl)];
     drawPathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -803,6 +808,13 @@ function initDrawing() {
         width: String(drawCurrentWidth),
         d: drawPathEl.getAttribute('d')
       });
+      // Undo履歴に登録（描画開始時のスナップショットを保存）
+      if (drawSnapshot !== null) {
+        drawHistory.push(drawSnapshot);
+        drawRedoStack = [];
+        drawSnapshot = null;
+        updateUndoRedoBtns();
+      }
       saveDrawing();
     } else if (drawPathEl) {
       try { document.getElementById('freeLineLayer').removeChild(drawPathEl); } catch(err) {}
@@ -866,6 +878,31 @@ function renderDrawing() {
   });
 }
 
+function undoDrawing() {
+  if (drawHistory.length === 0) return;
+  drawRedoStack.push(JSON.parse(JSON.stringify(drawStrokes)));
+  drawStrokes = drawHistory.pop();
+  renderDrawing();
+  saveDrawing();
+  updateUndoRedoBtns();
+}
+
+function redoDrawing() {
+  if (drawRedoStack.length === 0) return;
+  drawHistory.push(JSON.parse(JSON.stringify(drawStrokes)));
+  drawStrokes = drawRedoStack.pop();
+  renderDrawing();
+  saveDrawing();
+  updateUndoRedoBtns();
+}
+
+function updateUndoRedoBtns() {
+  var undoBtn = document.getElementById('undoBtn');
+  var redoBtn = document.getElementById('redoBtn');
+  if (undoBtn) undoBtn.disabled = drawHistory.length === 0;
+  if (redoBtn) redoBtn.disabled = drawRedoStack.length === 0;
+}
+
 function clearDrawing() {
   if (!confirm('手書きをすべて消去しますか？')) return;
   drawStrokes = [];
@@ -888,6 +925,7 @@ function toggleDrawMode() {
     svgEl.style.touchAction = 'none';
     if (chartWrap) chartWrap.style.touchAction = 'none';
     if (hitArea) hitArea.style.pointerEvents = 'all';
+    updateUndoRedoBtns();
   } else {
     btn.textContent = '✏️ 手書き OFF';
     btn.classList.remove('draw-mode-on');
