@@ -865,5 +865,23 @@
 <script src="pdf.js"></script>
 <script src="calendar.js"></script>
 
+<!-- DEBUG PANEL (削除予定) -->
+<div id="debugPanel" style="position:fixed;bottom:0;right:0;width:320px;max-height:220px;overflow-y:auto;background:rgba(0,0,0,0.82);color:#0f0;font-size:11px;font-family:monospace;padding:6px 8px;z-index:99999;border-top-left-radius:8px;line-height:1.5;">
+  <div style="color:#ff0;font-weight:bold;margin-bottom:4px;">🔍 DEBUG LOG <button onclick="document.getElementById('debugLog').innerHTML=''" style="font-size:10px;padding:1px 6px;margin-left:8px;">CLR</button></div>
+  <div id="debugLog"></div>
+</div>
+<script>
+function dbg() {
+  var msg = Array.from(arguments).map(function(a){ return typeof a === 'object' ? JSON.stringify(a) : String(a); }).join(' ');
+  var el = document.getElementById('debugLog');
+  if (!el) return;
+  var line = document.createElement('div');
+  line.textContent = msg;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+  console.log(msg);
+}
+</script>
+
 </body>
 </html>

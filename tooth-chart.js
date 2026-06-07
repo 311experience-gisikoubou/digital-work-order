@@ -685,18 +685,18 @@ function buildPathD(pts) {
 }
 
 function eraseAtPoint(pt) {
-  console.log("eraseAtPoint entered");
+  dbg("③ eraseAtPoint entered");
   var hitRadius = 22;
   var sampleStep = 8;
   var layer = document.getElementById('freeLineLayer');
   if (!layer) return;
   var paths = Array.from(layer.querySelectorAll('path.draw-path'));
-  console.log("path count", paths.length);
+  dbg("④ path count", paths.length);
   for (var i = paths.length - 1; i >= 0; i--) {
     try {
       var p = paths[i];
       var idx = parseInt(p.getAttribute('data-idx'), 10);
-      console.log("checking path", idx);
+      dbg("⑤ checking path", idx);
       var total = p.getTotalLength();
       var hit = false;
       var steps = Math.max(1, Math.floor(total / sampleStep));
@@ -712,25 +712,24 @@ function eraseAtPoint(pt) {
       }
       if (hit) {
         if (!isNaN(idx) && idx >= 0 && idx < drawStrokes.length) {
-          console.log("stroke removed", idx);
+          dbg("⑥ stroke removed", idx);
           drawStrokes.splice(idx, 1);
           renderDrawing();
           saveDrawing();
-          console.log("drawing saved");
+          dbg("⑦ drawing saved");
           return;
         }
       }
-    } catch(err) {}
+    } catch(err) { dbg("err", String(err)); }
   }
+  dbg("no hit");
 }
 
 function initDrawing() {
   var svgEl = document.getElementById('toothSvg');
 
   svgEl.addEventListener('pointerdown', function(e) {
-    console.log("pointerdown");
-    console.log("drawMode", drawMode);
-    console.log("eraserMode", eraserMode);
+    dbg("② pointerdown drawMode=" + drawMode + " eraserMode=" + eraserMode);
     if (!drawMode) return;
     e.preventDefault();
     e.stopPropagation();
@@ -883,9 +882,7 @@ function toggleDrawMode() {
 
 function toggleEraserMode() {
   eraserMode = !eraserMode;
-  console.log("eraser button clicked");
-  console.log("drawMode", drawMode);
-  console.log("eraserMode", eraserMode);
+  dbg("① eraser clicked drawMode=" + drawMode + " eraserMode=" + eraserMode);
   var eraserBtn = document.getElementById('eraserBtn');
   var hitArea = document.getElementById('drawHitArea');
   var svgEl = document.getElementById('toothSvg');
