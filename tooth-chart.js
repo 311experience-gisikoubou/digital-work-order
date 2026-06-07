@@ -686,17 +686,16 @@ function buildPathD(pts) {
 
 function eraseAtPoint(pt) {
   dbg("③ eraseAtPoint entered");
-  var margin = 30;
+  var margin = 50;
   var layer = document.getElementById('freeLineLayer');
   if (!layer) return;
   var paths = Array.from(layer.querySelectorAll('path.draw-path'));
-  dbg("④ path count", paths.length);
+  dbg("④ path count", paths.length, "drawStrokes", drawStrokes.length);
   for (var i = paths.length - 1; i >= 0; i--) {
     try {
       var p = paths[i];
       var idx = parseInt(p.getAttribute('data-idx'), 10);
-      dbg("⑤ checking path", idx);
-      dbg("outerHTML", p.outerHTML.slice(0, 120));
+      dbg("⑤ checking path idx=" + idx);
       var bbox = p.getBBox();
       dbg("bbox x=" + bbox.x.toFixed(1) + " y=" + bbox.y.toFixed(1) + " w=" + bbox.width.toFixed(1) + " h=" + bbox.height.toFixed(1));
       dbg("pt x=" + pt.x.toFixed(1) + " y=" + pt.y.toFixed(1));
@@ -704,6 +703,7 @@ function eraseAtPoint(pt) {
                  pt.y >= bbox.y - margin && pt.y <= bbox.y + bbox.height + margin);
       dbg("hit=" + hit);
       if (hit) {
+        dbg("hit! idx=" + idx + " isNaN=" + isNaN(idx) + " drawStrokes.len=" + drawStrokes.length);
         if (!isNaN(idx) && idx >= 0 && idx < drawStrokes.length) {
           dbg("⑥ stroke removed", idx);
           drawStrokes.splice(idx, 1);
@@ -711,6 +711,8 @@ function eraseAtPoint(pt) {
           saveDrawing();
           dbg("⑦ drawing saved");
           return;
+        } else {
+          dbg("inner check FAILED idx=" + idx + " drawStrokes.length=" + drawStrokes.length);
         }
       }
     } catch(err) { dbg("err", String(err)); }
