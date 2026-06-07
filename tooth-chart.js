@@ -383,6 +383,17 @@ function buildSVG(){
   svg.appendChild(claspLayer);
   svg.appendChild(freeLineLayer);
 
+  // 手書きモード用の全面ヒットエリア（OFF時は pointer-events:none で無害）
+  var hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  hitArea.id = 'drawHitArea';
+  hitArea.setAttribute('x', '0');
+  hitArea.setAttribute('y', '0');
+  hitArea.setAttribute('width', '600');
+  hitArea.setAttribute('height', '1070');
+  hitArea.setAttribute('fill', 'transparent');
+  hitArea.style.pointerEvents = 'none';
+  freeLineLayer.appendChild(hitArea);
+
   upperTeeth.concat(lowerTeeth).forEach(function(t){
     toothState[t.num]=null;
     coords[t.num]={cx:t.cx,cy:t.cy,rx:t.rx,ry:t.ry};
@@ -721,6 +732,11 @@ function initDrawing() {
     drawPts = [];
   }
 
+  // passive:false を明示してスクロール抑制を確実に行う
+  svgEl.addEventListener('pointermove', function(e) {
+    if (drawMode) e.preventDefault();
+  }, {passive: false});
+
   svgEl.addEventListener('pointerup', endDraw);
   svgEl.addEventListener('pointercancel', function() {
     drawActive = false;
@@ -781,18 +797,24 @@ function toggleDrawMode() {
   var btn = document.getElementById('drawToggleBtn');
   var opts = document.getElementById('drawOptions');
   var svgEl = document.getElementById('toothSvg');
+  var chartWrap = svgEl.closest ? svgEl.closest('.chart-wrap') : svgEl.parentElement;
+  var hitArea = document.getElementById('drawHitArea');
   if (drawMode) {
     btn.textContent = '✏️ 手書き ON';
     btn.classList.add('draw-mode-on');
     if (opts) opts.style.display = 'flex';
     svgEl.style.cursor = 'crosshair';
     svgEl.style.touchAction = 'none';
+    if (chartWrap) chartWrap.style.touchAction = 'none';
+    if (hitArea) hitArea.style.pointerEvents = 'all';
   } else {
     btn.textContent = '✏️ 手書き OFF';
     btn.classList.remove('draw-mode-on');
     if (opts) opts.style.display = 'none';
     svgEl.style.cursor = '';
     svgEl.style.touchAction = '';
+    if (chartWrap) chartWrap.style.touchAction = '';
+    if (hitArea) hitArea.style.pointerEvents = 'none';
   }
 }
 
