@@ -685,16 +685,31 @@ function buildPathD(pts) {
 }
 
 function eraseAtPoint(pt) {
-  var margin = 15;
+  var hitRadius = 22;
+  var sampleStep = 8;
   var layer = document.getElementById('freeLineLayer');
   if (!layer) return;
+  // 後ろから走査（最後に描いた線を優先して消す）
   var paths = Array.from(layer.querySelectorAll('path.draw-path'));
-  for (var i = 0; i < paths.length; i++) {
+  for (var i = paths.length - 1; i >= 0; i--) {
     try {
-      var bbox = paths[i].getBBox();
-      if (pt.x >= bbox.x - margin && pt.x <= bbox.x + bbox.width + margin &&
-          pt.y >= bbox.y - margin && pt.y <= bbox.y + bbox.height + margin) {
-        var idx = parseInt(paths[i].getAttribute('data-idx'), 10);
+      var p = paths[i];
+      var total = p.getTotalLength();
+      var hit = false;
+      // 点が少ない場合でも最低1点は調べる
+      var steps = Math.max(1, Math.floor(total / sampleStep));
+      for (var s = 0; s <= steps; s++) {
+        var len = (s / steps) * total;
+        var svgPt = p.getPointAtLength(len);
+        var dx = svgPt.x - pt.x;
+        var dy = svgPt.y - pt.y;
+        if (dx * dx + dy * dy <= hitRadius * hitRadius) {
+          hit = true;
+          break;
+        }
+      }
+      if (hit) {
+        var idx = parseInt(p.getAttribute('data-idx'), 10);
         if (!isNaN(idx) && idx >= 0 && idx < drawStrokes.length) {
           drawStrokes.splice(idx, 1);
           renderDrawing();
@@ -868,8 +883,8 @@ function toggleEraserMode() {
   if (eraserMode) {
     if (eraserBtn) eraserBtn.classList.add('active');
     svgEl.style.cursor = 'cell';
-    // 消しゴムモード：hitAreaを透過してdraw-pathに直接タップを届かせる
-    if (hitArea) hitArea.style.pointerEvents = 'none';
+    // hitAreaは常にallのまま（座標走査で判定するため無効化しない）
+    if (hitArea) hitArea.style.pointerEvents = 'all';
   } else {
     if (eraserBtn) eraserBtn.classList.remove('active');
     svgEl.style.cursor = 'crosshair';
