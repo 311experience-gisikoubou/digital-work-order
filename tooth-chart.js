@@ -688,34 +688,38 @@ function eraseAtPoint(pt) {
   dbg("③ eraseAtPoint entered");
   var margin = 100;
   var layer = document.getElementById('freeLineLayer');
-  if (!layer) return;
+  if (!layer) { dbg("no layer"); return; }
   var paths = Array.from(layer.querySelectorAll('path.draw-path'));
-  dbg("④ path count", paths.length, "drawStrokes", drawStrokes.length);
+  dbg("④ path count=" + paths.length + " drawStrokes=" + drawStrokes.length);
   for (var i = paths.length - 1; i >= 0; i--) {
     try {
       var p = paths[i];
       var idx = parseInt(p.getAttribute('data-idx'), 10);
-      dbg("⑤ checking path idx=" + idx);
+      dbg("⑤ i=" + i + " idx=" + idx);
       var bbox = p.getBBox();
       dbg("bbox x=" + bbox.x.toFixed(1) + " y=" + bbox.y.toFixed(1) + " w=" + bbox.width.toFixed(1) + " h=" + bbox.height.toFixed(1));
       dbg("pt x=" + pt.x.toFixed(1) + " y=" + pt.y.toFixed(1));
-      var hit = (pt.x >= bbox.x - margin && pt.x <= bbox.x + bbox.width + margin &&
-                 pt.y >= bbox.y - margin && pt.y <= bbox.y + bbox.height + margin);
+      var hit = (
+        pt.x >= bbox.x - margin &&
+        pt.x <= bbox.x + bbox.width + margin &&
+        pt.y >= bbox.y - margin &&
+        pt.y <= bbox.y + bbox.height + margin
+      );
       dbg("hit=" + hit);
       if (hit) {
-        dbg("hit! idx=" + idx + " isNaN=" + isNaN(idx) + " drawStrokes.len=" + drawStrokes.length);
-        if (!isNaN(idx) && idx >= 0 && idx < drawStrokes.length) {
-          dbg("⑥ stroke removed", idx);
-          drawStrokes.splice(idx, 1);
+        dbg("hit! i=" + i + " idx=" + idx + " len=" + drawStrokes.length);
+        if (i >= 0 && i < drawStrokes.length) {
+          dbg("⑥ splice i=" + i);
+          drawStrokes.splice(i, 1);
           renderDrawing();
           saveDrawing();
           dbg("⑦ drawing saved");
           return;
         } else {
-          dbg("inner check FAILED idx=" + idx + " drawStrokes.length=" + drawStrokes.length);
+          dbg("inner check FAILED i=" + i + " len=" + drawStrokes.length);
         }
       }
-    } catch(err) { dbg("err", String(err)); }
+    } catch(err) { dbg("err " + String(err)); }
   }
   dbg("no hit");
 }
