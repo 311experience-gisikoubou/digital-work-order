@@ -688,9 +688,14 @@ function eraseAtPoint(pt) {
   var hitRadius = 22;
   var sampleStep = 8;
   var layer = document.getElementById('freeLineLayer');
-  if (!layer) return;
+  console.log('[ERASE] eraseAtPoint called', pt, 'drawStrokes:', drawStrokes.length);
+  if (!layer) { console.log('[ERASE] layer not found'); return; }
   // 後ろから走査（最後に描いた線を優先して消す）
   var paths = Array.from(layer.querySelectorAll('path.draw-path'));
+  console.log('[ERASE] paths found:', paths.length);
+  paths.forEach(function(p, i) {
+    console.log('[ERASE] path[' + i + '] data-idx=' + p.getAttribute('data-idx') + ' class=' + p.getAttribute('class'));
+  });
   for (var i = paths.length - 1; i >= 0; i--) {
     try {
       var p = paths[i];
@@ -710,6 +715,7 @@ function eraseAtPoint(pt) {
       }
       if (hit) {
         var idx = parseInt(p.getAttribute('data-idx'), 10);
+        console.log('[ERASE] HIT path idx=' + idx);
         if (!isNaN(idx) && idx >= 0 && idx < drawStrokes.length) {
           drawStrokes.splice(idx, 1);
           renderDrawing();
@@ -717,14 +723,16 @@ function eraseAtPoint(pt) {
           return;
         }
       }
-    } catch(err) {}
+    } catch(err) { console.log('[ERASE] error', err); }
   }
+  console.log('[ERASE] no hit');
 }
 
 function initDrawing() {
   var svgEl = document.getElementById('toothSvg');
 
   svgEl.addEventListener('pointerdown', function(e) {
+    console.log('[DRAW] pointerdown drawMode=' + drawMode + ' eraserMode=' + eraserMode + ' target=' + (e.target && e.target.id || e.target && e.target.tagName));
     if (!drawMode) return;
     e.preventDefault();
     e.stopPropagation();
@@ -877,6 +885,7 @@ function toggleDrawMode() {
 
 function toggleEraserMode() {
   eraserMode = !eraserMode;
+  console.log('[ERASE] toggleEraserMode eraserMode=' + eraserMode + ' drawMode=' + drawMode);
   var eraserBtn = document.getElementById('eraserBtn');
   var hitArea = document.getElementById('drawHitArea');
   var svgEl = document.getElementById('toothSvg');
