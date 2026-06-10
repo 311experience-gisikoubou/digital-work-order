@@ -692,12 +692,13 @@ function eraseAtPoint(pt) {
   var margin = 100;
   var layer = document.getElementById('freeLineLayer');
   if (!layer) { dbg("no layer"); return; }
-  var paths = Array.from(layer.querySelectorAll('path.draw-path'));
+  var paths = Array.from(layer.querySelectorAll('.draw-path[data-draw-index]'));
   dbg("④ path count=" + paths.length + " drawStrokes=" + drawStrokes.length);
   for (var i = paths.length - 1; i >= 0; i--) {
     try {
       var p = paths[i];
-      var idx = parseInt(p.getAttribute('data-idx'), 10);
+      var idx = parseInt(p.getAttribute('data-draw-index'), 10);
+      if (isNaN(idx)) continue;
       dbg("⑤ i=" + i + " idx=" + idx);
       var bbox = p.getBBox();
       dbg("bbox x=" + bbox.x.toFixed(1) + " y=" + bbox.y.toFixed(1) + " w=" + bbox.width.toFixed(1) + " h=" + bbox.height.toFixed(1));
@@ -767,58 +768,43 @@ function initDrawing() {
       eraseAtPoint(getSVGCoord(e, svgEl));
       return;
     }
-    if (!drawPathEl) { dbg("MOVE drawPathEl=null!"); return; }
+    if (!drawPathEl) return;
     var pt = getSVGCoord(e, svgEl);
     var last = drawPts[drawPts.length - 1];
     var dx = pt.x - last.x, dy = pt.y - last.y;
     if (dx * dx + dy * dy < 9) return;
     drawPts.push(pt);
     drawPathEl.setAttribute('d', buildPathD(drawPts));
-
-    // 25点ごとにストロークを分割保存（部分消しのため）
-    if (drawPts.length >= 25) {
-      var layer = document.getElementById('freeLineLayer');
-      drawStrokes.push({
-        color: drawCurrentColor,
-        width: String(drawCurrentWidth),
-        d: drawPathEl.getAttribute('d')
-      });
-      saveDrawing();
-      // renderDrawing()で確定済みセグメントをDOMに反映（drawPathElも削除される）
-      drawPathEl = null;
-      renderDrawing();
-      // 最後の点を引き継いで新しいパスを開始（継ぎ目なし）
-      var carryPt = drawPts[drawPts.length - 1];
-      drawPts = [carryPt];
-      drawPathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      drawPathEl.setAttribute('class', 'draw-path');
-      drawPathEl.setAttribute('fill', 'none');
-      drawPathEl.setAttribute('stroke', drawCurrentColor);
-      drawPathEl.setAttribute('stroke-width', String(drawCurrentWidth));
-      drawPathEl.setAttribute('stroke-linecap', 'round');
-      drawPathEl.setAttribute('stroke-linejoin', 'round');
-      drawPathEl.setAttribute('d', 'M ' + carryPt.x.toFixed(1) + ' ' + carryPt.y.toFixed(1));
-      layer.appendChild(drawPathEl);
-    }
   });
 
   function endDraw() {
     if (!drawActive) return;
     drawActive = false;
-    dbg("UP pts=" + drawPts.length + " strokes=" + drawStrokes.length + " pathEl=" + (drawPathEl ? "ok" : "null"));
     if (drawPts.length > 1 && drawPathEl) {
-      drawStrokes.push({
-        color: drawCurrentColor,
-        width: String(drawCurrentWidth),
-        d: drawPathEl.getAttribute('d')
-      });
-      // Undo履歴に登録（描画開始時のスナップショットを保存）
+      // drawPtsを25点単位に分割してdrawStrokesへ push
+      var chunkSize = 25;
+      for (var start = 0; start < drawPts.length; start += chunkSize) {
+        var end = Math.min(start + chunkSize, drawPts.length);
+        // 継ぎ目が切れないよう次チャンクの先頭に末尾点を含める
+        var chunk = drawPts.slice(start, end);
+        if (start > 0) chunk.unshift(drawPts[start - 1]);
+        if (chunk.length < 2) continue;
+        drawStrokes.push({
+          color: drawCurrentColor,
+          width: String(drawCurrentWidth),
+          d: buildPathD(chunk)
+        });
+      }
+      // Undo履歴に登録
       if (drawSnapshot !== null) {
         drawHistory.push(drawSnapshot);
         drawRedoStack = [];
         drawSnapshot = null;
         updateUndoRedoBtns();
       }
+      // 描画中pathを削除してrenderDrawingで正式に描画
+      try { document.getElementById('freeLineLayer').removeChild(drawPathEl); } catch(err) {}
+      renderDrawing();
       saveDrawing();
     } else if (drawPathEl) {
       try { document.getElementById('freeLineLayer').removeChild(drawPathEl); } catch(err) {}
@@ -834,12 +820,16 @@ function initDrawing() {
 
   svgEl.addEventListener('pointerup', endDraw);
   svgEl.addEventListener('pointercancel', function() {
-    drawActive = false;
-    if (drawPathEl) {
-      try { document.getElementById('freeLineLayer').removeChild(drawPathEl); } catch(err) {}
+    if (drawActive && drawPts.length > 1 && drawPathEl) {
+      endDraw();
+    } else {
+      drawActive = false;
+      if (drawPathEl) {
+        try { document.getElementById('freeLineLayer').removeChild(drawPathEl); } catch(err) {}
+      }
+      drawPathEl = null;
+      drawPts = [];
     }
-    drawPathEl = null;
-    drawPts = [];
   });
 
   loadDrawing();
@@ -871,6 +861,7 @@ function renderDrawing() {
     var p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     p.setAttribute('class', 'draw-path');
     p.setAttribute('data-idx', String(i));
+    p.setAttribute('data-draw-index', String(i));
     p.setAttribute('fill', 'none');
     p.setAttribute('stroke', s.color);
     p.setAttribute('stroke-width', String(s.width));
@@ -880,6 +871,7 @@ function renderDrawing() {
     p.setAttribute('d', s.d);
     layer.appendChild(p);
   });
+  dbg("RENDER drawStrokes=" + drawStrokes.length + " DOMpaths=" + layer.querySelectorAll('.draw-path[data-draw-index]').length);
 }
 
 function undoDrawing() {
