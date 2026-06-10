@@ -776,11 +776,6 @@ function initDrawing() {
     e.preventDefault();
     if (eraserMode) {
       var pt = getSVGCoord(e, svgEl);
-      if (eraserCursorEl) {
-        eraserCursorEl.setAttribute('cx', pt.x.toFixed(1));
-        eraserCursorEl.setAttribute('cy', pt.y.toFixed(1));
-        dbg("ERASER CURSOR x=" + pt.x.toFixed(1) + " y=" + pt.y.toFixed(1) + " visible=" + eraserCursorEl.style.display + " parent=" + (eraserCursorEl.parentNode ? eraserCursorEl.parentNode.id : 'none'));
-      }
       eraseAtPoint(pt);
       return;
     }
@@ -833,6 +828,17 @@ function initDrawing() {
   svgEl.addEventListener('pointermove', function(e) {
     if (drawMode) e.preventDefault();
   }, {passive: false});
+
+  // 消しゴムカーソル追従：drawActive不要、SVG内の全pointermoveで更新
+  svgEl.addEventListener('pointermove', function(e) {
+    if (!drawMode || !eraserMode) return;
+    var pt = getSVGCoord(e, svgEl);
+    if (eraserCursorEl) {
+      eraserCursorEl.setAttribute('cx', pt.x.toFixed(1));
+      eraserCursorEl.setAttribute('cy', pt.y.toFixed(1));
+    }
+    dbg("ERASER MOVE target=" + (e.target.getAttribute ? (e.target.getAttribute('class') || e.target.tagName) : e.target.tagName) + " x=" + pt.x.toFixed(1) + " y=" + pt.y.toFixed(1));
+  });
 
   svgEl.addEventListener('pointerup', endDraw);
   svgEl.addEventListener('pointercancel', function() {
@@ -929,6 +935,9 @@ function toggleDrawMode() {
   var svgEl = document.getElementById('toothSvg');
   var chartWrap = svgEl.closest ? svgEl.closest('.chart-wrap') : svgEl.parentElement;
   var hitArea = document.getElementById('drawHitArea');
+  var toothLayer = document.getElementById('toothLayer');
+  var claspLayer = document.getElementById('claspLayer');
+  var outlineLayer = document.getElementById('outlineLayer');
   if (drawMode) {
     btn.textContent = '✏️ 手書き ON';
     btn.classList.add('draw-mode-on');
@@ -937,6 +946,10 @@ function toggleDrawMode() {
     svgEl.style.touchAction = 'none';
     if (chartWrap) chartWrap.style.touchAction = 'none';
     if (hitArea) hitArea.style.pointerEvents = 'all';
+    // 手書き中は歯・クラスプレイヤーのイベントを抑制してpointermoveを確実に取得
+    if (toothLayer) toothLayer.style.pointerEvents = 'none';
+    if (claspLayer) claspLayer.style.pointerEvents = 'none';
+    if (outlineLayer) outlineLayer.style.pointerEvents = 'none';
     updateUndoRedoBtns();
   } else {
     btn.textContent = '✏️ 手書き OFF';
@@ -946,10 +959,17 @@ function toggleDrawMode() {
     svgEl.style.touchAction = '';
     if (chartWrap) chartWrap.style.touchAction = '';
     if (hitArea) hitArea.style.pointerEvents = 'none';
+    // 手書きOFF時にレイヤーのpointer-eventsを元に戻す
+    if (toothLayer) toothLayer.style.pointerEvents = '';
+    if (claspLayer) claspLayer.style.pointerEvents = '';
+    if (outlineLayer) outlineLayer.style.pointerEvents = '';
     // 消しゴムモードもリセット
     eraserMode = false;
     var eraserBtn = document.getElementById('eraserBtn');
     if (eraserBtn) eraserBtn.classList.remove('active');
+    if (eraserCursorEl) eraserCursorEl.style.display = 'none';
+    var sizeGroup = document.getElementById('eraserSizeGroup');
+    if (sizeGroup) sizeGroup.style.display = 'none';
   }
 }
 
