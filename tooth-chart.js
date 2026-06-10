@@ -660,6 +660,8 @@ var drawActive = false;
 var drawPts = [];
 var drawPathEl = null;
 var eraserMode = false;
+var eraserRadius = 14;
+var eraserCursorEl = null;
 var drawHistory = [];
 var drawRedoStack = [];
 var drawSnapshot = null;
@@ -688,48 +690,53 @@ function buildPathD(pts) {
 }
 
 function eraseAtPoint(pt) {
-  dbg("③ eraseAtPoint entered");
-  var margin = 100;
   var layer = document.getElementById('freeLineLayer');
-  if (!layer) { dbg("no layer"); return; }
+  if (!layer) return;
   var paths = Array.from(layer.querySelectorAll('.draw-path[data-draw-index]'));
-  dbg("④ path count=" + paths.length + " drawStrokes=" + drawStrokes.length);
+  var beforeCount = drawStrokes.length;
   for (var i = paths.length - 1; i >= 0; i--) {
     try {
       var p = paths[i];
       var idx = parseInt(p.getAttribute('data-draw-index'), 10);
-      if (isNaN(idx)) continue;
-      dbg("⑤ i=" + i + " idx=" + idx);
-      var bbox = p.getBBox();
-      dbg("bbox x=" + bbox.x.toFixed(1) + " y=" + bbox.y.toFixed(1) + " w=" + bbox.width.toFixed(1) + " h=" + bbox.height.toFixed(1));
-      dbg("pt x=" + pt.x.toFixed(1) + " y=" + pt.y.toFixed(1));
-      var hit = (
-        pt.x >= bbox.x - margin &&
-        pt.x <= bbox.x + bbox.width + margin &&
-        pt.y >= bbox.y - margin &&
-        pt.y <= bbox.y + bbox.height + margin
-      );
-      dbg("hit=" + hit);
-      if (hit) {
-        dbg("hit! i=" + i + " idx=" + idx + " len=" + drawStrokes.length);
-        if (i >= 0 && i < drawStrokes.length) {
-          dbg("⑥ splice i=" + i);
-          drawStrokes.splice(i, 1);
-          renderDrawing();
-          saveDrawing();
-          dbg("⑦ drawing saved");
-          return;
-        } else {
-          dbg("inner check FAILED i=" + i + " len=" + drawStrokes.length);
-        }
+      if (isNaN(idx) || idx < 0 || idx >= drawStrokes.length) continue;
+      var strokeWidth = parseFloat(drawStrokes[idx].width) || 6;
+      var threshold = eraserRadius + strokeWidth / 2;
+      var total = p.getTotalLength();
+      if (total === 0) continue;
+      var step = 5;
+      var hit = false;
+      for (var len = 0; len <= total + step; len += step) {
+        var svgPt = p.getPointAtLength(Math.min(len, total));
+        var dx = svgPt.x - pt.x;
+        var dy = svgPt.y - pt.y;
+        if (dx * dx + dy * dy <= threshold * threshold) { hit = true; break; }
       }
-    } catch(err) { dbg("err " + String(err)); }
+      if (hit) {
+        drawStrokes.splice(idx, 1);
+        renderDrawing();
+        saveDrawing();
+        dbg("ERASE radius=" + eraserRadius + " before=" + beforeCount + " after=" + drawStrokes.length + " removed=" + (beforeCount - drawStrokes.length));
+        return;
+      }
+    } catch(err) {}
   }
-  dbg("no hit");
 }
 
 function initDrawing() {
   var svgEl = document.getElementById('toothSvg');
+
+  // 消しゴムカーソル circle を freeLineLayer に追加
+  var layer = document.getElementById('freeLineLayer');
+  eraserCursorEl = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  eraserCursorEl.setAttribute('class', 'eraser-cursor');
+  eraserCursorEl.setAttribute('r', String(eraserRadius));
+  eraserCursorEl.setAttribute('fill', 'none');
+  eraserCursorEl.setAttribute('stroke', '#555');
+  eraserCursorEl.setAttribute('stroke-width', '1.5');
+  eraserCursorEl.setAttribute('stroke-dasharray', '4 3');
+  eraserCursorEl.style.pointerEvents = 'none';
+  eraserCursorEl.style.display = 'none';
+  layer.appendChild(eraserCursorEl);
 
   svgEl.addEventListener('pointerdown', function(e) {
     dbg("② pointerdown drawMode=" + drawMode + " eraserMode=" + eraserMode);
@@ -765,7 +772,12 @@ function initDrawing() {
     if (!drawMode || !drawActive) return;
     e.preventDefault();
     if (eraserMode) {
-      eraseAtPoint(getSVGCoord(e, svgEl));
+      var pt = getSVGCoord(e, svgEl);
+      if (eraserCursorEl) {
+        eraserCursorEl.setAttribute('cx', pt.x.toFixed(1));
+        eraserCursorEl.setAttribute('cy', pt.y.toFixed(1));
+      }
+      eraseAtPoint(pt);
       return;
     }
     if (!drawPathEl) return;
@@ -945,14 +957,29 @@ function toggleEraserMode() {
   var svgEl = document.getElementById('toothSvg');
   if (eraserMode) {
     if (eraserBtn) eraserBtn.classList.add('active');
-    svgEl.style.cursor = 'cell';
-    // hitAreaは常にallのまま（座標走査で判定するため無効化しない）
+    svgEl.style.cursor = 'none';
     if (hitArea) hitArea.style.pointerEvents = 'all';
+    if (eraserCursorEl) {
+      eraserCursorEl.setAttribute('r', String(eraserRadius));
+      eraserCursorEl.style.display = '';
+    }
+    var sizeGroup = document.getElementById('eraserSizeGroup');
+    if (sizeGroup) sizeGroup.style.display = 'flex';
   } else {
     if (eraserBtn) eraserBtn.classList.remove('active');
     svgEl.style.cursor = 'crosshair';
     if (hitArea) hitArea.style.pointerEvents = 'all';
+    if (eraserCursorEl) eraserCursorEl.style.display = 'none';
+    var sizeGroup = document.getElementById('eraserSizeGroup');
+    if (sizeGroup) sizeGroup.style.display = 'none';
   }
+}
+
+function setEraserRadius(r, btn) {
+  eraserRadius = r;
+  if (eraserCursorEl) eraserCursorEl.setAttribute('r', String(eraserRadius));
+  document.querySelectorAll('.eraser-size-btn').forEach(function(b) { b.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
 }
 
 function setDrawColor(btn) {

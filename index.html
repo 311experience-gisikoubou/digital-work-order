@@ -699,6 +699,11 @@
         <button class="draw-width-btn" data-width="18" onclick="setDrawWidth(this)">極太</button>
       </div>
       <button class="draw-eraser-btn" id="eraserBtn" onclick="toggleEraserMode()">消しゴム</button>
+      <div class="draw-option-group eraser-size-group" id="eraserSizeGroup" style="display:none;">
+        <button class="eraser-size-btn" data-r="8" onclick="setEraserRadius(8,this)">小</button>
+        <button class="eraser-size-btn active" data-r="14" onclick="setEraserRadius(14,this)">中</button>
+        <button class="eraser-size-btn" data-r="22" onclick="setEraserRadius(22,this)">大</button>
+      </div>
       <button class="draw-undo-btn" id="undoBtn" onclick="undoDrawing()" disabled>↩ Undo</button>
       <button class="draw-undo-btn" id="redoBtn" onclick="redoDrawing()" disabled>↪ Redo</button>
       <button class="draw-clear-btn" onclick="clearDrawing()">全消去</button>
