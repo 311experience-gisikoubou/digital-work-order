@@ -725,18 +725,21 @@ function eraseAtPoint(pt) {
 function initDrawing() {
   var svgEl = document.getElementById('toothSvg');
 
-  // 消しゴムカーソル circle を freeLineLayer に追加
-  var layer = document.getElementById('freeLineLayer');
+  // 消しゴムカーソル circle を SVG最前面の専用レイヤーに追加
+  var eraserLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  eraserLayer.id = 'eraserLayer';
+  eraserLayer.style.pointerEvents = 'none';
+  svgEl.appendChild(eraserLayer);
   eraserCursorEl = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
   eraserCursorEl.setAttribute('class', 'eraser-cursor');
   eraserCursorEl.setAttribute('r', String(eraserRadius));
-  eraserCursorEl.setAttribute('fill', 'none');
-  eraserCursorEl.setAttribute('stroke', '#555');
+  eraserCursorEl.setAttribute('fill', 'rgba(255,255,255,0.3)');
+  eraserCursorEl.setAttribute('stroke', '#333');
   eraserCursorEl.setAttribute('stroke-width', '1.5');
   eraserCursorEl.setAttribute('stroke-dasharray', '4 3');
   eraserCursorEl.style.pointerEvents = 'none';
   eraserCursorEl.style.display = 'none';
-  layer.appendChild(eraserCursorEl);
+  eraserLayer.appendChild(eraserCursorEl);
 
   svgEl.addEventListener('pointerdown', function(e) {
     dbg("② pointerdown drawMode=" + drawMode + " eraserMode=" + eraserMode);
@@ -776,6 +779,7 @@ function initDrawing() {
       if (eraserCursorEl) {
         eraserCursorEl.setAttribute('cx', pt.x.toFixed(1));
         eraserCursorEl.setAttribute('cy', pt.y.toFixed(1));
+        dbg("ERASER CURSOR x=" + pt.x.toFixed(1) + " y=" + pt.y.toFixed(1) + " visible=" + eraserCursorEl.style.display + " parent=" + (eraserCursorEl.parentNode ? eraserCursorEl.parentNode.id : 'none'));
       }
       eraseAtPoint(pt);
       return;
