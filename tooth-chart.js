@@ -747,6 +747,7 @@ function initDrawing() {
     drawSnapshot = JSON.parse(JSON.stringify(drawStrokes));
     drawActive = true;
     drawPts = [getSVGCoord(e, svgEl)];
+    dbg("DOWN pts=" + drawPts.length + " strokes=" + drawStrokes.length);
     drawPathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     drawPathEl.setAttribute('class', 'draw-path');
     drawPathEl.setAttribute('fill', 'none');
@@ -766,7 +767,7 @@ function initDrawing() {
       eraseAtPoint(getSVGCoord(e, svgEl));
       return;
     }
-    if (!drawPathEl) return;
+    if (!drawPathEl) { dbg("MOVE drawPathEl=null!"); return; }
     var pt = getSVGCoord(e, svgEl);
     var last = drawPts[drawPts.length - 1];
     var dx = pt.x - last.x, dy = pt.y - last.y;
@@ -776,6 +777,7 @@ function initDrawing() {
 
     // 25点ごとにストロークを分割保存（部分消しのため）
     if (drawPts.length >= 25) {
+      dbg("SPLIT pts=" + drawPts.length + " strokes=" + drawStrokes.length);
       var layer = document.getElementById('freeLineLayer');
       drawStrokes.push({
         color: drawCurrentColor,
@@ -783,9 +785,11 @@ function initDrawing() {
         d: drawPathEl.getAttribute('d')
       });
       saveDrawing();
+      dbg("SPLIT after push strokes=" + drawStrokes.length + " DOMpaths=" + layer.querySelectorAll('path.draw-path').length);
       // 最後の点を引き継いで新しいパスを開始（継ぎ目なし）
       var carryPt = drawPts[drawPts.length - 1];
       try { layer.removeChild(drawPathEl); } catch(err) {}
+      dbg("SPLIT after remove DOMpaths=" + layer.querySelectorAll('path.draw-path').length);
       drawPts = [carryPt];
       drawPathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       drawPathEl.setAttribute('class', 'draw-path');
@@ -796,12 +800,14 @@ function initDrawing() {
       drawPathEl.setAttribute('stroke-linejoin', 'round');
       drawPathEl.setAttribute('d', 'M ' + carryPt.x.toFixed(1) + ' ' + carryPt.y.toFixed(1));
       layer.appendChild(drawPathEl);
+      dbg("SPLIT after new path DOMpaths=" + layer.querySelectorAll('path.draw-path').length);
     }
   });
 
   function endDraw() {
     if (!drawActive) return;
     drawActive = false;
+    dbg("UP pts=" + drawPts.length + " strokes=" + drawStrokes.length + " pathEl=" + (drawPathEl ? "ok" : "null"));
     if (drawPts.length > 1 && drawPathEl) {
       drawStrokes.push({
         color: drawCurrentColor,
