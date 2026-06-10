@@ -732,10 +732,10 @@ function initDrawing() {
   svgEl.appendChild(eraserLayer);
   eraserCursorEl = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
   eraserCursorEl.setAttribute('class', 'eraser-cursor');
-  eraserCursorEl.setAttribute('r', String(eraserRadius));
-  eraserCursorEl.setAttribute('fill', 'rgba(255,255,255,0.3)');
-  eraserCursorEl.setAttribute('stroke', '#333');
-  eraserCursorEl.setAttribute('stroke-width', '1.5');
+  eraserCursorEl.setAttribute('r', '40');
+  eraserCursorEl.setAttribute('fill', 'none');
+  eraserCursorEl.setAttribute('stroke', 'red');
+  eraserCursorEl.setAttribute('stroke-width', '4');
   eraserCursorEl.setAttribute('stroke-dasharray', '4 3');
   eraserCursorEl.style.pointerEvents = 'none';
   eraserCursorEl.style.display = 'none';
@@ -833,11 +833,16 @@ function initDrawing() {
   svgEl.addEventListener('pointermove', function(e) {
     if (!drawMode || !eraserMode) return;
     var pt = getSVGCoord(e, svgEl);
+    if (!svgEl._vbLogged) {
+      dbg("SVG viewBox=" + svgEl.getAttribute('viewBox'));
+      svgEl._vbLogged = true;
+    }
     if (eraserCursorEl) {
       eraserCursorEl.setAttribute('cx', pt.x.toFixed(1));
       eraserCursorEl.setAttribute('cy', pt.y.toFixed(1));
     }
-    dbg("ERASER MOVE target=" + (e.target.getAttribute ? (e.target.getAttribute('class') || e.target.tagName) : e.target.tagName) + " x=" + pt.x.toFixed(1) + " y=" + pt.y.toFixed(1));
+    // ERASER MOVE は上書き更新
+    dbg("ERASER MOVE target=" + (e.target.getAttribute ? (e.target.getAttribute('class') || e.target.tagName) : e.target.tagName) + " SVGpt=(" + pt.x.toFixed(0) + "," + pt.y.toFixed(0) + ") cx=" + (eraserCursorEl ? eraserCursorEl.getAttribute('cx') : '-'));
   });
 
   svgEl.addEventListener('pointerup', endDraw);
