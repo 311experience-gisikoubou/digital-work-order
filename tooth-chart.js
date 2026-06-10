@@ -833,16 +833,20 @@ function initDrawing() {
   svgEl.addEventListener('pointermove', function(e) {
     if (!drawMode || !eraserMode) return;
     var pt = getSVGCoord(e, svgEl);
+    dbg("SVG POINT x=" + pt.x.toFixed(1) + " y=" + pt.y.toFixed(1));
     if (!svgEl._vbLogged) {
       dbg("SVG viewBox=" + svgEl.getAttribute('viewBox'));
+      var rect = svgEl.getBoundingClientRect();
+      dbg("SVG rect w=" + rect.width.toFixed(0) + " h=" + rect.height.toFixed(0) + " top=" + rect.top.toFixed(0));
       svgEl._vbLogged = true;
     }
     if (eraserCursorEl) {
       eraserCursorEl.setAttribute('cx', pt.x.toFixed(1));
       eraserCursorEl.setAttribute('cy', pt.y.toFixed(1));
+      dbg("CURSOR cx=" + eraserCursorEl.getAttribute('cx') + " cy=" + eraserCursorEl.getAttribute('cy'));
     }
-    // ERASER MOVE は上書き更新
-    dbg("ERASER MOVE target=" + (e.target.getAttribute ? (e.target.getAttribute('class') || e.target.tagName) : e.target.tagName) + " SVGpt=(" + pt.x.toFixed(0) + "," + pt.y.toFixed(0) + ") cx=" + (eraserCursorEl ? eraserCursorEl.getAttribute('cx') : '-'));
+    dbg("clientXY=" + e.clientX.toFixed(0) + "," + e.clientY.toFixed(0));
+    dbg("ERASER MOVE target=" + (e.target.getAttribute ? (e.target.getAttribute('class') || e.target.tagName) : e.target.tagName));
   });
 
   svgEl.addEventListener('pointerup', endDraw);
