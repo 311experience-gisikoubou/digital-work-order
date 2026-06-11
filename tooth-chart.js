@@ -1115,6 +1115,20 @@ function initMemoDrawing() {
   var svgEl = document.getElementById('memoSvg');
   if (!svgEl) return;
 
+  // Safari向けCSS: スタイルシートだけでは効かない場合があるためインライン直接設定
+  svgEl.style.touchAction = 'none';
+  svgEl.style.userSelect = 'none';
+  svgEl.style.webkitUserSelect = 'none';
+  svgEl.style.webkitTouchCallout = 'none';
+  svgEl.style.webkitTapHighlightColor = 'transparent';
+  var memoWrap = svgEl.parentElement;
+  if (memoWrap) {
+    memoWrap.style.touchAction = 'none';
+    memoWrap.style.userSelect = 'none';
+    memoWrap.style.webkitUserSelect = 'none';
+    memoWrap.style.webkitTouchCallout = 'none';
+  }
+
   // レイヤー構造
   var freeLineLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   freeLineLayer.id = 'memoFreeLineLayer';
@@ -1145,13 +1159,19 @@ function initMemoDrawing() {
   memoEraserCursorEl.style.display = 'none';
   eraserLayer.appendChild(memoEraserCursorEl);
 
-  // pointerdown: 常時 passive:false で preventDefault を確実に呼ぶ
+  // Safari: TouchEvent も直接抑制（PointerEventと並走してコンテキストメニューを起動させない）
+  svgEl.addEventListener('touchstart', function(e) { e.preventDefault(); }, {passive: false});
+  svgEl.addEventListener('touchmove',  function(e) { e.preventDefault(); }, {passive: false});
+  svgEl.addEventListener('touchend',   function(e) { e.preventDefault(); }, {passive: false});
+
+  // pointerdown: setPointerCapture を drawMode チェックより先に実行（ブラウザに奪わせない）
   svgEl.addEventListener('pointerdown', function(e) {
     e.preventDefault();
     e.stopPropagation();
+    // drawMode に関わらず即キャプチャ
+    try { svgEl.setPointerCapture(e.pointerId); } catch(err) {}
     if (!drawMode) return;
     lastActiveZone = 'memo';
-    try { svgEl.setPointerCapture(e.pointerId); } catch(err) {}
     if (eraserMode) {
       eraseAtPointMemo(getSVGCoord(e, svgEl));
       memoDrawActive = true;
