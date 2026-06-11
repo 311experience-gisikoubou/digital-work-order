@@ -650,6 +650,7 @@ buildToothChart();
 buildSVG();
 initClasp();
 initDrawing();
+initMemoDrawing();
 
 // ===== 手書き機能 =====
 var drawMode = false;
@@ -665,6 +666,17 @@ var eraserCursorEl = null;
 var drawHistory = [];
 var drawRedoStack = [];
 var drawSnapshot = null;
+
+// ===== 手書きメモ欄（右側）変数 =====
+var memoStrokes = [];
+var memoDrawActive = false;
+var memoDrawPts = [];
+var memoDrawPathEl = null;
+var memoEraserCursorEl = null;
+var memoHistory = [];
+var memoRedoStack = [];
+var memoSnapshot = null;
+var lastActiveZone = 'chart';
 
 function getSVGCoord(e, svgEl) {
   var pt = svgEl.createSVGPoint();
@@ -855,7 +867,7 @@ function initDrawing() {
 
 function saveDrawing() {
   try {
-    localStorage.setItem('dwo_drawing_v1', JSON.stringify({ strokes: drawStrokes }));
+    localStorage.setItem('dwo_drawing_v1', JSON.stringify({ strokes: drawStrokes, memoStrokes: memoStrokes }));
   } catch(e) {}
 }
 
@@ -864,9 +876,10 @@ function loadDrawing() {
     var raw = localStorage.getItem('dwo_drawing_v1');
     if (!raw) return;
     var data = JSON.parse(raw);
-    if (!data.strokes) return;
-    drawStrokes = data.strokes;
+    if (data.strokes) drawStrokes = data.strokes;
+    if (data.memoStrokes) memoStrokes = data.memoStrokes;
     renderDrawing();
+    renderMemoDrawing();
   } catch(e) {}
 }
 
@@ -892,19 +905,33 @@ function renderDrawing() {
 }
 
 function undoDrawing() {
-  if (drawHistory.length === 0) return;
-  drawRedoStack.push(JSON.parse(JSON.stringify(drawStrokes)));
-  drawStrokes = drawHistory.pop();
-  renderDrawing();
+  if (lastActiveZone === 'memo') {
+    if (memoHistory.length === 0) return;
+    memoRedoStack.push(JSON.parse(JSON.stringify(memoStrokes)));
+    memoStrokes = memoHistory.pop();
+    renderMemoDrawing();
+  } else {
+    if (drawHistory.length === 0) return;
+    drawRedoStack.push(JSON.parse(JSON.stringify(drawStrokes)));
+    drawStrokes = drawHistory.pop();
+    renderDrawing();
+  }
   saveDrawing();
   updateUndoRedoBtns();
 }
 
 function redoDrawing() {
-  if (drawRedoStack.length === 0) return;
-  drawHistory.push(JSON.parse(JSON.stringify(drawStrokes)));
-  drawStrokes = drawRedoStack.pop();
-  renderDrawing();
+  if (lastActiveZone === 'memo') {
+    if (memoRedoStack.length === 0) return;
+    memoHistory.push(JSON.parse(JSON.stringify(memoStrokes)));
+    memoStrokes = memoRedoStack.pop();
+    renderMemoDrawing();
+  } else {
+    if (drawRedoStack.length === 0) return;
+    drawHistory.push(JSON.parse(JSON.stringify(drawStrokes)));
+    drawStrokes = drawRedoStack.pop();
+    renderDrawing();
+  }
   saveDrawing();
   updateUndoRedoBtns();
 }
@@ -912,8 +939,10 @@ function redoDrawing() {
 function updateUndoRedoBtns() {
   var undoBtn = document.getElementById('undoBtn');
   var redoBtn = document.getElementById('redoBtn');
-  if (undoBtn) undoBtn.disabled = drawHistory.length === 0;
-  if (redoBtn) redoBtn.disabled = drawRedoStack.length === 0;
+  var hasUndo = lastActiveZone === 'memo' ? memoHistory.length > 0 : drawHistory.length > 0;
+  var hasRedo = lastActiveZone === 'memo' ? memoRedoStack.length > 0 : drawRedoStack.length > 0;
+  if (undoBtn) undoBtn.disabled = !hasUndo;
+  if (redoBtn) redoBtn.disabled = !hasRedo;
 }
 
 function clearDrawing() {
@@ -933,6 +962,8 @@ function toggleDrawMode() {
   var toothLayer = document.getElementById('toothLayer');
   var claspLayer = document.getElementById('claspLayer');
   var outlineLayer = document.getElementById('outlineLayer');
+  var memoSvgEl = document.getElementById('memoSvg');
+  var memoHitArea = document.getElementById('memoHitArea');
   if (drawMode) {
     btn.textContent = '✏️ 手書き ON';
     btn.classList.add('draw-mode-on');
@@ -945,6 +976,9 @@ function toggleDrawMode() {
     if (toothLayer) toothLayer.style.pointerEvents = 'none';
     if (claspLayer) claspLayer.style.pointerEvents = 'none';
     if (outlineLayer) outlineLayer.style.pointerEvents = 'none';
+    // メモSVGも描画モードに
+    if (memoSvgEl) { memoSvgEl.style.cursor = 'crosshair'; memoSvgEl.style.touchAction = 'none'; }
+    if (memoHitArea) memoHitArea.style.pointerEvents = 'all';
     updateUndoRedoBtns();
   } else {
     btn.textContent = '✏️ 手書き OFF';
@@ -958,11 +992,15 @@ function toggleDrawMode() {
     if (toothLayer) toothLayer.style.pointerEvents = '';
     if (claspLayer) claspLayer.style.pointerEvents = '';
     if (outlineLayer) outlineLayer.style.pointerEvents = '';
+    // メモSVGも戻す
+    if (memoSvgEl) { memoSvgEl.style.cursor = ''; memoSvgEl.style.touchAction = ''; }
+    if (memoHitArea) memoHitArea.style.pointerEvents = 'none';
     // 消しゴムモードもリセット
     eraserMode = false;
     var eraserBtn = document.getElementById('eraserBtn');
     if (eraserBtn) eraserBtn.classList.remove('active');
     if (eraserCursorEl) eraserCursorEl.style.display = 'none';
+    if (memoEraserCursorEl) memoEraserCursorEl.style.display = 'none';
     var sizeGroup = document.getElementById('eraserSizeGroup');
     if (sizeGroup) sizeGroup.style.display = 'none';
   }
@@ -973,21 +1011,29 @@ function toggleEraserMode() {
   var eraserBtn = document.getElementById('eraserBtn');
   var hitArea = document.getElementById('drawHitArea');
   var svgEl = document.getElementById('toothSvg');
+  var memoSvgEl2 = document.getElementById('memoSvg');
   if (eraserMode) {
     if (eraserBtn) eraserBtn.classList.add('active');
     svgEl.style.cursor = 'none';
+    if (memoSvgEl2) memoSvgEl2.style.cursor = 'none';
     if (hitArea) hitArea.style.pointerEvents = 'all';
     if (eraserCursorEl) {
       eraserCursorEl.setAttribute('r', String(eraserRadius));
       eraserCursorEl.style.display = '';
+    }
+    if (memoEraserCursorEl) {
+      memoEraserCursorEl.setAttribute('r', String(eraserRadius));
+      memoEraserCursorEl.style.display = '';
     }
     var sizeGroup = document.getElementById('eraserSizeGroup');
     if (sizeGroup) sizeGroup.style.display = 'flex';
   } else {
     if (eraserBtn) eraserBtn.classList.remove('active');
     svgEl.style.cursor = 'crosshair';
+    if (memoSvgEl2) memoSvgEl2.style.cursor = 'crosshair';
     if (hitArea) hitArea.style.pointerEvents = 'all';
     if (eraserCursorEl) eraserCursorEl.style.display = 'none';
+    if (memoEraserCursorEl) memoEraserCursorEl.style.display = 'none';
     var sizeGroup = document.getElementById('eraserSizeGroup');
     if (sizeGroup) sizeGroup.style.display = 'none';
   }
@@ -996,6 +1042,7 @@ function toggleEraserMode() {
 function setEraserRadius(r, btn) {
   eraserRadius = r;
   if (eraserCursorEl) eraserCursorEl.setAttribute('r', String(eraserRadius));
+  if (memoEraserCursorEl) memoEraserCursorEl.setAttribute('r', String(eraserRadius));
   document.querySelectorAll('.eraser-size-btn').forEach(function(b) { b.classList.remove('active'); });
   if (btn) btn.classList.add('active');
 }
@@ -1010,6 +1057,181 @@ function setDrawWidth(btn) {
   drawCurrentWidth = parseInt(btn.getAttribute('data-width'), 10);
   document.querySelectorAll('.draw-width-btn').forEach(function(b) { b.classList.remove('active'); });
   btn.classList.add('active');
+}
+
+// ===== 手書きメモ欄 描画関数 =====
+function renderMemoDrawing() {
+  if (!memoStrokes) memoStrokes = [];
+  var layer = document.getElementById('memoFreeLineLayer');
+  if (!layer) return;
+  Array.from(layer.querySelectorAll('.draw-path')).forEach(function(el) { layer.removeChild(el); });
+  memoStrokes.forEach(function(s, i) {
+    var p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('class', 'draw-path');
+    p.setAttribute('data-draw-index', String(i));
+    p.setAttribute('fill', 'none');
+    p.setAttribute('stroke', s.color);
+    p.setAttribute('stroke-width', String(s.width));
+    p.setAttribute('stroke-linecap', 'round');
+    p.setAttribute('stroke-linejoin', 'round');
+    p.style.pointerEvents = 'stroke';
+    p.setAttribute('d', s.d);
+    layer.appendChild(p);
+  });
+}
+
+function eraseAtPointMemo(pt) {
+  var layer = document.getElementById('memoFreeLineLayer');
+  if (!layer) return;
+  var paths = Array.from(layer.querySelectorAll('.draw-path[data-draw-index]'));
+  for (var i = paths.length - 1; i >= 0; i--) {
+    try {
+      var p = paths[i];
+      var idx = parseInt(p.getAttribute('data-draw-index'), 10);
+      if (isNaN(idx) || idx < 0 || idx >= memoStrokes.length) continue;
+      var strokeWidth = parseFloat(memoStrokes[idx].width) || 6;
+      var threshold = eraserRadius + strokeWidth / 2;
+      var total = p.getTotalLength();
+      if (total === 0) continue;
+      var hit = false;
+      for (var len = 0; len <= total + 5; len += 5) {
+        var svgPt = p.getPointAtLength(Math.min(len, total));
+        var dx = svgPt.x - pt.x; var dy = svgPt.y - pt.y;
+        if (dx * dx + dy * dy <= threshold * threshold) { hit = true; break; }
+      }
+      if (hit) { memoStrokes.splice(idx, 1); renderMemoDrawing(); saveDrawing(); return; }
+    } catch(err) {}
+  }
+}
+
+function clearMemoDrawing() {
+  if (!confirm('手書きメモをすべて消去しますか？')) return;
+  memoStrokes = [];
+  renderMemoDrawing();
+  saveDrawing();
+}
+
+function initMemoDrawing() {
+  var svgEl = document.getElementById('memoSvg');
+  if (!svgEl) return;
+
+  // レイヤー構造
+  var freeLineLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  freeLineLayer.id = 'memoFreeLineLayer';
+  svgEl.appendChild(freeLineLayer);
+
+  // ヒットエリア（手書きOFF時はpointer-events:none）
+  var hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  hitArea.id = 'memoHitArea';
+  hitArea.setAttribute('x', '0'); hitArea.setAttribute('y', '0');
+  hitArea.setAttribute('width', '400'); hitArea.setAttribute('height', '500');
+  hitArea.setAttribute('fill', 'transparent');
+  hitArea.style.pointerEvents = 'none';
+  freeLineLayer.appendChild(hitArea);
+
+  // 消しゴムカーソル
+  var eraserLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  eraserLayer.id = 'memoEraserLayer';
+  eraserLayer.style.pointerEvents = 'none';
+  svgEl.appendChild(eraserLayer);
+  memoEraserCursorEl = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  memoEraserCursorEl.setAttribute('class', 'eraser-cursor');
+  memoEraserCursorEl.setAttribute('r', '20');
+  memoEraserCursorEl.setAttribute('fill', 'none');
+  memoEraserCursorEl.setAttribute('stroke', '#888');
+  memoEraserCursorEl.setAttribute('stroke-width', '2');
+  memoEraserCursorEl.setAttribute('stroke-dasharray', '4 3');
+  memoEraserCursorEl.style.pointerEvents = 'none';
+  memoEraserCursorEl.style.display = 'none';
+  eraserLayer.appendChild(memoEraserCursorEl);
+
+  svgEl.addEventListener('pointerdown', function(e) {
+    if (!drawMode) return;
+    e.preventDefault();
+    e.stopPropagation();
+    lastActiveZone = 'memo';
+    if (eraserMode) {
+      eraseAtPointMemo(getSVGCoord(e, svgEl));
+      memoDrawActive = true;
+      return;
+    }
+    memoSnapshot = JSON.parse(JSON.stringify(memoStrokes));
+    memoDrawActive = true;
+    memoDrawPts = [getSVGCoord(e, svgEl)];
+    memoDrawPathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    memoDrawPathEl.setAttribute('class', 'draw-path');
+    memoDrawPathEl.setAttribute('fill', 'none');
+    memoDrawPathEl.setAttribute('stroke', drawCurrentColor);
+    memoDrawPathEl.setAttribute('stroke-width', String(drawCurrentWidth));
+    memoDrawPathEl.setAttribute('stroke-linecap', 'round');
+    memoDrawPathEl.setAttribute('stroke-linejoin', 'round');
+    memoDrawPathEl.setAttribute('d', 'M ' + memoDrawPts[0].x.toFixed(1) + ' ' + memoDrawPts[0].y.toFixed(1));
+    freeLineLayer.appendChild(memoDrawPathEl);
+    try { svgEl.setPointerCapture(e.pointerId); } catch(err) {}
+  });
+
+  svgEl.addEventListener('pointermove', function(e) {
+    if (drawMode && eraserMode && memoEraserCursorEl) {
+      var pt = getSVGCoord(e, svgEl);
+      memoEraserCursorEl.setAttribute('cx', pt.x.toFixed(1));
+      memoEraserCursorEl.setAttribute('cy', pt.y.toFixed(1));
+    }
+    if (!drawMode || !memoDrawActive) return;
+    e.preventDefault();
+    if (eraserMode) { eraseAtPointMemo(getSVGCoord(e, svgEl)); return; }
+    if (!memoDrawPathEl) return;
+    var pt = getSVGCoord(e, svgEl);
+    var last = memoDrawPts[memoDrawPts.length - 1];
+    var dx = pt.x - last.x, dy = pt.y - last.y;
+    if (dx * dx + dy * dy < 9) return;
+    memoDrawPts.push(pt);
+    memoDrawPathEl.setAttribute('d', buildPathD(memoDrawPts));
+  });
+
+  svgEl.addEventListener('pointermove', function(e) {
+    if (drawMode) e.preventDefault();
+  }, {passive: false});
+
+  function endMemoDraw() {
+    if (!memoDrawActive) return;
+    memoDrawActive = false;
+    if (memoDrawPts.length > 1 && memoDrawPathEl) {
+      var chunkSize = 25;
+      for (var start = 0; start < memoDrawPts.length; start += chunkSize) {
+        var end = Math.min(start + chunkSize, memoDrawPts.length);
+        var chunk = memoDrawPts.slice(start, end);
+        if (start > 0) chunk.unshift(memoDrawPts[start - 1]);
+        if (chunk.length < 2) continue;
+        memoStrokes.push({ color: drawCurrentColor, width: String(drawCurrentWidth), d: buildPathD(chunk) });
+      }
+      if (memoSnapshot !== null) {
+        memoHistory.push(memoSnapshot);
+        memoRedoStack = [];
+        memoSnapshot = null;
+        updateUndoRedoBtns();
+      }
+      try { freeLineLayer.removeChild(memoDrawPathEl); } catch(err) {}
+      renderMemoDrawing();
+      saveDrawing();
+    } else if (memoDrawPathEl) {
+      try { freeLineLayer.removeChild(memoDrawPathEl); } catch(err) {}
+    }
+    memoDrawPathEl = null;
+    memoDrawPts = [];
+  }
+
+  svgEl.addEventListener('pointerup', endMemoDraw);
+  svgEl.addEventListener('pointercancel', function() {
+    if (memoDrawActive && memoDrawPts.length > 1 && memoDrawPathEl) {
+      endMemoDraw();
+    } else {
+      memoDrawActive = false;
+      if (memoDrawPathEl) { try { freeLineLayer.removeChild(memoDrawPathEl); } catch(err) {} }
+      memoDrawPathEl = null; memoDrawPts = [];
+    }
+  });
+
+  renderMemoDrawing();
 }
 
 function selectUpperDenture() {

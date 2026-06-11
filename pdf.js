@@ -12,7 +12,9 @@ function exportPDF(id, id2) {
 
   var chartWrap = document.querySelector('.chart-wrap');
   var chartHtml = chartWrap ? chartWrap.outerHTML : '';
-  var html = _buildPrintHTML(order1, chartHtml, order2);
+  var memoSvgEl = document.getElementById('memoSvg');
+  var memoHtml = (memoSvgEl && memoSvgEl.querySelectorAll('.draw-path').length > 0) ? memoSvgEl.outerHTML : '';
+  var html = _buildPrintHTML(order1, chartHtml, order2, memoHtml);
 
   var iframe = document.createElement('iframe');
   iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:0;height:0;border:0;';
@@ -35,7 +37,7 @@ function exportPDF(id, id2) {
   showToast('印刷ダイアログを開きます');
 }
 
-function _buildPrintHTML(order1, chartHtml, order2) {
+function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;')
@@ -187,7 +189,7 @@ function _buildPrintHTML(order1, chartHtml, order2) {
     return '<div class="slip-header"><h1>歯科技工指示書</h1>' +
       '<div class="issue-date">発行日：' + esc(order.issueDate ? formatJapaneseEraDate(order.issueDate) : '') + '</div></div>' +
       '<div class="print-body">' +
-      (chartHtml ? '<div class="chart-col">' + chartHtml + '</div>' : '') +
+      (chartHtml ? '<div class="chart-col">' + chartHtml + (memoHtml ? '<div class="memo-col">' + memoHtml + '</div>' : '') + '</div>' : '') +
       '<div class="info-wrap">' +
       keyBar +
       '<div class="info-2col">' +
@@ -282,7 +284,18 @@ function _buildPrintHTML(order1, chartHtml, order2) {
     .slip-empty { flex: 1; }
     .studio-sig { text-align: right; font-size: 14pt; font-weight: bold; color: #555; padding-top: 1mm; line-height: 1.5; flex-shrink: 0; }
     .print-body { display: flex; gap: 4mm; align-items: flex-start; flex: 1; overflow: hidden; }
-    .chart-col { flex: 0 0 68mm; align-self: center; }
+    .chart-col { flex: 0 0 68mm; align-self: flex-start; }
+    .memo-col { margin-top: 1.5mm; width: 68mm; }
+    .memo-col svg, .memo-col .memo-svg {
+      display: block !important;
+      width: 68mm !important;
+      height: 22mm !important;
+      border: 0.3mm solid #ccc !important;
+      border-radius: 0 !important;
+      background: #fff !important;
+    }
+    .memo-col .eraser-cursor, .memo-col #memoEraserLayer { display: none !important; }
+    .memo-col #memoHitArea { display: none !important; }
     .info-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
     .info-2col { display: flex; gap: 2mm; flex: 1; overflow: hidden; }
     .info-left { flex: 1; min-width: 0; overflow: hidden; }
