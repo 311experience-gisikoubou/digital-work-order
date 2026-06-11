@@ -715,7 +715,6 @@ function eraseAtPoint(pt) {
         drawStrokes.splice(idx, 1);
         renderDrawing();
         saveDrawing();
-        dbg("ERASE radius=" + eraserRadius + " before=" + beforeCount + " after=" + drawStrokes.length + " removed=" + (beforeCount - drawStrokes.length));
         return;
       }
     } catch(err) {}
@@ -732,17 +731,16 @@ function initDrawing() {
   svgEl.appendChild(eraserLayer);
   eraserCursorEl = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
   eraserCursorEl.setAttribute('class', 'eraser-cursor');
-  eraserCursorEl.setAttribute('r', '40');
+  eraserCursorEl.setAttribute('r', '20');
   eraserCursorEl.setAttribute('fill', 'none');
-  eraserCursorEl.setAttribute('stroke', 'red');
-  eraserCursorEl.setAttribute('stroke-width', '4');
+  eraserCursorEl.setAttribute('stroke', '#888');
+  eraserCursorEl.setAttribute('stroke-width', '2');
   eraserCursorEl.setAttribute('stroke-dasharray', '4 3');
   eraserCursorEl.style.pointerEvents = 'none';
   eraserCursorEl.style.display = 'none';
   eraserLayer.appendChild(eraserCursorEl);
 
   svgEl.addEventListener('pointerdown', function(e) {
-    dbg("② pointerdown drawMode=" + drawMode + " eraserMode=" + eraserMode);
     if (!drawMode) return;
     e.preventDefault();
     e.stopPropagation();
@@ -758,7 +756,6 @@ function initDrawing() {
     drawSnapshot = JSON.parse(JSON.stringify(drawStrokes));
     drawActive = true;
     drawPts = [getSVGCoord(e, svgEl)];
-    dbg("DOWN pts=" + drawPts.length + " strokes=" + drawStrokes.length);
     drawPathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     drawPathEl.setAttribute('class', 'draw-path');
     drawPathEl.setAttribute('fill', 'none');
@@ -833,20 +830,10 @@ function initDrawing() {
   svgEl.addEventListener('pointermove', function(e) {
     if (!drawMode || !eraserMode) return;
     var pt = getSVGCoord(e, svgEl);
-    dbg("SVG POINT x=" + pt.x.toFixed(1) + " y=" + pt.y.toFixed(1));
-    if (!svgEl._vbLogged) {
-      dbg("SVG viewBox=" + svgEl.getAttribute('viewBox'));
-      var rect = svgEl.getBoundingClientRect();
-      dbg("SVG rect w=" + rect.width.toFixed(0) + " h=" + rect.height.toFixed(0) + " top=" + rect.top.toFixed(0));
-      svgEl._vbLogged = true;
-    }
     if (eraserCursorEl) {
       eraserCursorEl.setAttribute('cx', pt.x.toFixed(1));
       eraserCursorEl.setAttribute('cy', pt.y.toFixed(1));
-      dbg("CURSOR cx=" + eraserCursorEl.getAttribute('cx') + " cy=" + eraserCursorEl.getAttribute('cy'));
     }
-    dbg("clientXY=" + e.clientX.toFixed(0) + "," + e.clientY.toFixed(0));
-    dbg("ERASER MOVE target=" + (e.target.getAttribute ? (e.target.getAttribute('class') || e.target.tagName) : e.target.tagName));
   });
 
   svgEl.addEventListener('pointerup', endDraw);
@@ -902,7 +889,6 @@ function renderDrawing() {
     p.setAttribute('d', s.d);
     layer.appendChild(p);
   });
-  dbg("RENDER drawStrokes=" + drawStrokes.length + " DOMpaths=" + layer.querySelectorAll('.draw-path[data-draw-index]').length);
 }
 
 function undoDrawing() {
@@ -984,7 +970,6 @@ function toggleDrawMode() {
 
 function toggleEraserMode() {
   eraserMode = !eraserMode;
-  dbg("① eraser clicked drawMode=" + drawMode + " eraserMode=" + eraserMode);
   var eraserBtn = document.getElementById('eraserBtn');
   var hitArea = document.getElementById('drawHitArea');
   var svgEl = document.getElementById('toothSvg');
