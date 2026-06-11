@@ -1145,11 +1145,13 @@ function initMemoDrawing() {
   memoEraserCursorEl.style.display = 'none';
   eraserLayer.appendChild(memoEraserCursorEl);
 
+  // pointerdown: 常時 passive:false で preventDefault を確実に呼ぶ
   svgEl.addEventListener('pointerdown', function(e) {
-    if (!drawMode) return;
     e.preventDefault();
     e.stopPropagation();
+    if (!drawMode) return;
     lastActiveZone = 'memo';
+    try { svgEl.setPointerCapture(e.pointerId); } catch(err) {}
     if (eraserMode) {
       eraseAtPointMemo(getSVGCoord(e, svgEl));
       memoDrawActive = true;
@@ -1167,17 +1169,17 @@ function initMemoDrawing() {
     memoDrawPathEl.setAttribute('stroke-linejoin', 'round');
     memoDrawPathEl.setAttribute('d', 'M ' + memoDrawPts[0].x.toFixed(1) + ' ' + memoDrawPts[0].y.toFixed(1));
     freeLineLayer.appendChild(memoDrawPathEl);
-    try { svgEl.setPointerCapture(e.pointerId); } catch(err) {}
-  });
+  }, {passive: false});
 
+  // pointermove: 常時 passive:false・常時 preventDefault（スクロール・選択を確実に抑制）
   svgEl.addEventListener('pointermove', function(e) {
+    e.preventDefault();
     if (drawMode && eraserMode && memoEraserCursorEl) {
       var pt = getSVGCoord(e, svgEl);
       memoEraserCursorEl.setAttribute('cx', pt.x.toFixed(1));
       memoEraserCursorEl.setAttribute('cy', pt.y.toFixed(1));
     }
     if (!drawMode || !memoDrawActive) return;
-    e.preventDefault();
     if (eraserMode) { eraseAtPointMemo(getSVGCoord(e, svgEl)); return; }
     if (!memoDrawPathEl) return;
     var pt = getSVGCoord(e, svgEl);
@@ -1186,13 +1188,13 @@ function initMemoDrawing() {
     if (dx * dx + dy * dy < 9) return;
     memoDrawPts.push(pt);
     memoDrawPathEl.setAttribute('d', buildPathD(memoDrawPts));
-  });
-
-  svgEl.addEventListener('pointermove', function(e) {
-    if (drawMode) e.preventDefault();
   }, {passive: false});
 
-  function endMemoDraw() {
+  function endMemoDraw(e) {
+    if (e) {
+      e.preventDefault();
+      try { if (svgEl.hasPointerCapture(e.pointerId)) svgEl.releasePointerCapture(e.pointerId); } catch(err) {}
+    }
     if (!memoDrawActive) return;
     memoDrawActive = false;
     if (memoDrawPts.length > 1 && memoDrawPathEl) {
@@ -1220,8 +1222,12 @@ function initMemoDrawing() {
     memoDrawPts = [];
   }
 
-  svgEl.addEventListener('pointerup', endMemoDraw);
-  svgEl.addEventListener('pointercancel', function() {
+  svgEl.addEventListener('pointerup', endMemoDraw, {passive: false});
+  svgEl.addEventListener('pointercancel', function(e) {
+    if (e) {
+      e.preventDefault();
+      try { if (svgEl.hasPointerCapture(e.pointerId)) svgEl.releasePointerCapture(e.pointerId); } catch(err) {}
+    }
     if (memoDrawActive && memoDrawPts.length > 1 && memoDrawPathEl) {
       endMemoDraw();
     } else {
@@ -1229,7 +1235,11 @@ function initMemoDrawing() {
       if (memoDrawPathEl) { try { freeLineLayer.removeChild(memoDrawPathEl); } catch(err) {} }
       memoDrawPathEl = null; memoDrawPts = [];
     }
-  });
+  }, {passive: false});
+
+  // iPad Safari: コピー/選択メニュー・長押しメニューを抑制
+  svgEl.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+  svgEl.addEventListener('selectstart', function(e) { e.preventDefault(); });
 
   renderMemoDrawing();
 }
