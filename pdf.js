@@ -13,7 +13,11 @@ function exportPDF(id, id2) {
   var chartWrap = document.querySelector('.chart-wrap');
   var chartHtml = chartWrap ? chartWrap.outerHTML : '';
   var memoSvgEl = document.getElementById('memoSvg');
-  var memoHtml = (memoSvgEl && memoSvgEl.querySelectorAll('.draw-path').length > 0) ? memoSvgEl.outerHTML : '';
+  var memoHtml = '';
+  if (memoSvgEl && memoSvgEl.querySelectorAll('.draw-path').length > 0) {
+    // preserveAspectRatio を none にして 68mm 全幅に引き伸ばす（切れ防止）
+    memoHtml = memoSvgEl.outerHTML.replace(/preserveAspectRatio="[^"]*"/, 'preserveAspectRatio="none"');
+  }
   var html = _buildPrintHTML(order1, chartHtml, order2, memoHtml);
 
   var iframe = document.createElement('iframe');
@@ -285,14 +289,15 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
     .studio-sig { text-align: right; font-size: 14pt; font-weight: bold; color: #555; padding-top: 1mm; line-height: 1.5; flex-shrink: 0; }
     .print-body { display: flex; gap: 4mm; align-items: flex-start; flex: 1; overflow: hidden; }
     .chart-col { flex: 0 0 68mm; align-self: flex-start; }
-    .memo-col { margin-top: 1.5mm; width: 68mm; }
+    .memo-col { margin-top: 1.5mm; width: 68mm; overflow: hidden; }
     .memo-col svg, .memo-col .memo-svg {
       display: block !important;
       width: 68mm !important;
-      height: 22mm !important;
+      height: 12mm !important;
       border: 0.3mm solid #ccc !important;
       border-radius: 0 !important;
       background: #fff !important;
+      overflow: hidden !important;
     }
     .memo-col .eraser-cursor, .memo-col #memoEraserLayer { display: none !important; }
     .memo-col #memoHitArea { display: none !important; }
