@@ -287,13 +287,14 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
     .remarks { padding: 1mm 2mm; line-height: 2.0; min-height: 16mm; border-top: 0.3mm solid #ccc; overflow: hidden; }
     .slip-empty { flex: 1; }
     .studio-sig { text-align: right; font-size: 14pt; font-weight: bold; color: #555; padding-top: 1mm; line-height: 1.5; flex-shrink: 0; }
-    .print-body { display: flex; gap: 4mm; align-items: flex-start; flex: 1; overflow: hidden; }
-    .chart-col { flex: 0 0 68mm; align-self: flex-start; }
-    .memo-col { margin-top: 1.5mm; width: 68mm; overflow: hidden; }
+    .print-body { display: flex; gap: 4mm; align-items: stretch; flex: 1; overflow: hidden; }
+    .chart-col { flex: 0 0 68mm; display: flex; flex-direction: column; }
+    .memo-col { flex: 1; min-height: 0; margin-top: 1.5mm; overflow: hidden; }
     .memo-col svg, .memo-col .memo-svg {
       display: block !important;
       width: 68mm !important;
-      height: 12mm !important;
+      height: 100% !important;
+      min-height: 0 !important;
       border: 0.3mm solid #ccc !important;
       border-radius: 0 !important;
       background: #fff !important;
