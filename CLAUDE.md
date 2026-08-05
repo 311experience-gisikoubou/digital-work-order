@@ -4,11 +4,19 @@
 単一HTMLだった歯科技工作業指示書を、安全にモジュール分離しながら保守可能にする。
 
 ## 現在構成
-- ccbdbadb-shijishov5.3.html
+- index.html
 - style.css
 - app.js
+- toast.js
+- date-utils.js
+- tooth-chart.js
+- validate.js
+- orders.js
+- modal.js
 - calendar.js
 - pdf.js
+
+現状把握は `docs/skills/SKILL_shiji-sho-map.md` も参照する。
 
 ## 絶対禁止
 - 関数名変更
@@ -51,7 +59,7 @@
 ## 現在の安定状態
 
 ### 採用コミット
-- **安定版**: `31bd951`（ブランチ: `claude/fix-browser-cache-PAZUe`）
+- **安定版**: `31bd951`
 - **fallback**: `41501f4`（ブランチ: `claude/create-claude-md-kZVaJ`）
 
 `41501f4` には手を加えない。問題発生時の戻し先として保持する。
@@ -93,7 +101,7 @@
 
 ---
 
-## script 読み込み順（ccbdbadb-shijishov5.3.html）
+## script 読み込み順（index.html）
 
 ```
 toast.js
@@ -125,6 +133,6 @@ calendar.js
 ## 今後触らない方がいいもの
 
 - `collectFormData()`（DOM 依存強すぎ）
-- `ccbdbadb-shijishov5.3.html` の script タグ順序
+- `index.html` の script タグ順序
 - `41501f4` のファイル群（fallback として保持）
 - `state` の構造（全ファイルが依存）

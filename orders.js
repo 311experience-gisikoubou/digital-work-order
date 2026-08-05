@@ -36,6 +36,7 @@ function renderOrders() {
     updateSummary([]);
     return;
   }
+  container.textContent = '';
 
   // 納品日ごとにグループ化
   const groups = {};
@@ -49,59 +50,103 @@ function renderOrders() {
   const sortedDates = Object.keys(groups).sort();
 
   // B5印刷ツールバー
-  const btnLabel = printSelection.length > 0
+  const toolbar = document.createElement('div');
+  toolbar.style.cssText = 'padding:8px 0 12px;text-align:right;';
+  const printBtn = document.createElement('button');
+  printBtn.id = 'btn-print-selected';
+  printBtn.disabled = printSelection.length === 0;
+  printBtn.style.cssText = 'padding:6px 14px;font-size:13px;cursor:pointer;';
+  printBtn.textContent = printSelection.length > 0
     ? '選択分をB5印刷 (' + printSelection.length + '件)'
     : '選択分をB5印刷';
-  let html = '<div style="padding:8px 0 12px;text-align:right;">' +
-    '<button id="btn-print-selected" onclick="printSelected()"' +
-    (printSelection.length === 0 ? ' disabled' : '') +
-    ' style="padding:6px 14px;font-size:13px;cursor:pointer;">' +
-    btnLabel + '</button></div>';
+  printBtn.addEventListener('click', printSelected);
+  toolbar.appendChild(printBtn);
+  container.appendChild(toolbar);
 
   sortedDates.forEach(date => {
     const label = formatDateLabel(date);
-    html += `<div class="order-group"><div class="order-group-date">📅 ${label}</div>`;
+    const groupEl = document.createElement('div');
+    groupEl.className = 'order-group';
+    const dateEl = document.createElement('div');
+    dateEl.className = 'order-group-date';
+    dateEl.textContent = '📅 ' + label;
+    groupEl.appendChild(dateEl);
     groups[date].forEach(order => {
       const cls = order.insuranceType === 'insurance' ? 'insurance' : 'jishi';
-      const badge = order.insuranceType === 'insurance'
-        ? '<span class="order-badge insurance">保険</span>'
-        : '<span class="order-badge jishi">自費</span>';
-      const statusChk = order.status === 'accepted'
-        ? '<button class="act-btn check" onclick="cancelOrder(\'' + order.id + '\')" style="opacity:0.65" title="クリックで受付取り消し">✅ 受付済み</button>'
-        : '<button class="act-btn check" onclick="acceptOrder(\'' + order.id + '\')" >受付</button>';
-
       const isChecked = printSelection.indexOf(order.id) >= 0;
       const isDisabled = printSelection.length >= 2 && !isChecked;
-      const chk = '<input type="checkbox" class="print-chk"' +
-        ' data-id="' + order.id + '"' +
-        (isChecked ? ' checked' : '') +
-        (isDisabled ? ' disabled' : '') +
-        ' onchange="togglePrintSelect(\'' + order.id + '\')"' +
-        ' style="width:16px;height:16px;cursor:pointer;flex-shrink:0;align-self:center;">';
+      const item = document.createElement('div');
+      item.className = 'order-item ' + cls;
+      item.id = 'order-' + order.id;
 
-      html += `
-        <div class="order-item ${cls}" id="order-${order.id}">
-          ${chk}
-          <div style="font-size:20px">👤</div>
-          <div class="order-info">
-            <div class="order-patient">${order.patientName || '患者名未設定'} ${badge}</div>
-            <div class="order-meta">
-              ${order.clinicName || ''} ／ ${order.deliveryDate || ''} ${order.ampm || ''}
-              ${order.priority === 'urgent' ? '🚨急ぎ' : ''}
-              ${order.bedType ? '｜' + order.bedType : ''}
-            </div>
-          </div>
-          <div class="order-actions">
-            ${statusChk}
-            <button class="act-btn detail" onclick="showDetail('${order.id}')">詳細</button>
-            <button class="act-btn pdf" onclick="exportPDF('${order.id}')">PDF</button>
-          </div>
-        </div>`;
+      const chk = document.createElement('input');
+      chk.type = 'checkbox';
+      chk.className = 'print-chk';
+      chk.dataset.id = order.id;
+      chk.checked = isChecked;
+      chk.disabled = isDisabled;
+      chk.style.cssText = 'width:16px;height:16px;cursor:pointer;flex-shrink:0;align-self:center;';
+      chk.addEventListener('change', function() { togglePrintSelect(order.id); });
+      item.appendChild(chk);
+
+      const icon = document.createElement('div');
+      icon.style.fontSize = '20px';
+      icon.textContent = '👤';
+      item.appendChild(icon);
+
+      const info = document.createElement('div');
+      info.className = 'order-info';
+      const patient = document.createElement('div');
+      patient.className = 'order-patient';
+      patient.appendChild(document.createTextNode(order.patientName || '患者名未設定'));
+      patient.appendChild(document.createTextNode(' '));
+      const badge = document.createElement('span');
+      badge.className = 'order-badge ' + cls;
+      badge.textContent = order.insuranceType === 'insurance' ? '保険' : '自費';
+      patient.appendChild(badge);
+      info.appendChild(patient);
+
+      const meta = document.createElement('div');
+      meta.className = 'order-meta';
+      meta.textContent =
+        (order.clinicName || '') + ' ／ ' + (order.deliveryDate || '') + ' ' + (order.ampm || '') +
+        (order.priority === 'urgent' ? ' 🚨急ぎ' : '') +
+        (order.bedType ? '｜' + order.bedType : '');
+      info.appendChild(meta);
+      item.appendChild(info);
+
+      const actions = document.createElement('div');
+      actions.className = 'order-actions';
+      const statusBtn = document.createElement('button');
+      statusBtn.className = 'act-btn check';
+      if (order.status === 'accepted') {
+        statusBtn.style.opacity = '0.65';
+        statusBtn.title = 'クリックで受付取り消し';
+        statusBtn.textContent = '✅ 受付済み';
+        statusBtn.addEventListener('click', function() { cancelOrder(order.id); });
+      } else {
+        statusBtn.textContent = '受付';
+        statusBtn.addEventListener('click', function() { acceptOrder(order.id); });
+      }
+      actions.appendChild(statusBtn);
+
+      const detailBtn = document.createElement('button');
+      detailBtn.className = 'act-btn detail';
+      detailBtn.textContent = '詳細';
+      detailBtn.addEventListener('click', function() { showDetail(order.id); });
+      actions.appendChild(detailBtn);
+
+      const pdfBtn = document.createElement('button');
+      pdfBtn.className = 'act-btn pdf';
+      pdfBtn.textContent = 'PDF';
+      pdfBtn.addEventListener('click', function() { exportPDF(order.id); });
+      actions.appendChild(pdfBtn);
+      item.appendChild(actions);
+
+      groupEl.appendChild(item);
     });
-    html += '</div>';
+    container.appendChild(groupEl);
   });
-
-  container.innerHTML = html;
   updateSummary(state.orders);
 }
 

@@ -1,16 +1,16 @@
 # SKILL_shiji-sho-map — 歯科技工指示書アプリ 現状マップ
 
-> **用途**：新チャット開始時または Claude Code 引き継ぎ時にこのファイルを読み込んで現状を把握するためのリファレンス。  
-> **最終照合日**：2026-06-15  
+> **用途**：新チャット開始時または Claude Code 引き継ぎ時にこのファイルを読み込んで現状を把握するためのリファレンス。
+> **最終照合日**：2026-06-15
 > **対象ブランチ**：`claude/redesign-dental-form-qG3Ue`
 
 ---
 
 ## 1. プロジェクト概要
 
-歯科技工所向けのデジタル作業指示書 Web アプリ。  
-iPad Safari + Apple Pencil での現場利用を主目的とし、PDF 出力・受注管理・歯式図手書きを備える。  
-データ保存は現在 localStorage（Firebase 連携は未着手）。  
+歯科技工所向けのデジタル作業指示書 Web アプリ。
+iPad Safari + Apple Pencil での現場利用を主目的とし、PDF 出力・受注管理・歯式図手書きを備える。
+データ保存は現在 localStorage（Firebase 連携は未着手）。
 ホスティングは Cloudflare Pages 導入予定。
 
 ---
@@ -27,7 +27,7 @@ shiji-sho-v5 (1) (2).html
 shiji-sho-v5.3 (1).html
 ```
 
-**現在の実働入口は `index.html`。**  
+**現在の実働入口は `index.html`。**
 アプリのコードはすべて分割構成（後述）に移行済み。
 
 ---
@@ -81,7 +81,7 @@ const state = {
 
 ### 二重状態管理（最大危険箇所）
 
-`state.selectedTeeth`（歯チャート側）と `toothState`（歯式図 SVG 側、tooth-chart.js 内）が並存している。  
+`state.selectedTeeth`（歯チャート側）と `toothState`（歯式図 SVG 側、tooth-chart.js 内）が並存している。
 どちらかを変更するときは両方の同期が必要。むやみに触らない。
 
 ---

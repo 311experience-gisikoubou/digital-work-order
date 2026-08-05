@@ -343,11 +343,25 @@ function updateClaspList(){
       var label=(CLASP_NAMES[c.type]||c.type);
       if(c.twinWith) label+="("+t.num+"↔"+c.twinWith+")";
       else label+="("+t.num+")";
-      items.push('<span class="clasp-tag" style="background:'+color+'">'+label+'</span>');
+      items.push({ color: color, label: label });
     });
   });
   var el=document.getElementById("claspList");
-  el.innerHTML=items.length?items.join(""): "<span class=\"clasp-list-empty\">—</span>";
+  el.textContent = "";
+  if (!items.length) {
+    var empty = document.createElement("span");
+    empty.className = "clasp-list-empty";
+    empty.textContent = "—";
+    el.appendChild(empty);
+    return;
+  }
+  items.forEach(function(item) {
+    var tag = document.createElement("span");
+    tag.className = "clasp-tag";
+    tag.style.background = item.color;
+    tag.textContent = item.label;
+    el.appendChild(tag);
+  });
 }
 
 function resetClasp(){
@@ -424,7 +438,7 @@ function buildSVG(){
     g.appendChild(enEl);
     toothLayer.appendChild(g);
   });
-  
+
   var svgEl=document.getElementById("toothSvg");
   svgEl.addEventListener("mousemove",onMM);
   svgEl.addEventListener("mouseup",onMU);
@@ -488,7 +502,7 @@ function clickTooth(num){
     applyClaspToTooth(num);
     return;
   }
-  
+
   if(activeClaspUid) {
     activeClaspUid = null;
     renderAllClasps();
