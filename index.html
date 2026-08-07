@@ -682,8 +682,13 @@
 
   <!-- 手書きツールバー -->
   <div class="draw-toolbar">
-    <button class="draw-toggle-btn" id="drawToggleBtn" onclick="toggleDrawMode()">✏️ 手書き OFF</button>
+    <button class="draw-toggle-btn" id="drawToggleBtn" onclick="toggleDrawMode()">✏️ 手書きモード OFF</button>
     <div class="draw-options" id="drawOptions" style="display:none;">
+      <div class="draw-input-group" id="drawInputGroup">
+        <button type="button" class="draw-input-btn active" data-input="pen" onclick="setDrawInputMode('pen', this)">ペンのみ</button>
+        <button type="button" class="draw-input-btn" data-input="finger" onclick="setDrawInputMode('finger', this)">指でも書く</button>
+      </div>
+      <div class="draw-input-hint" id="drawInputHint">Apple Pencil：描画　2本指：移動・拡大</div>
       <div class="draw-option-group">
         <button class="draw-color-btn active" data-color="#cc2222" onclick="setDrawColor(this)" title="赤"></button>
         <button class="draw-color-btn" data-color="#2563a8" onclick="setDrawColor(this)" title="青"></button>

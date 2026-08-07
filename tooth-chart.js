@@ -665,6 +665,7 @@ buildSVG();
 initClasp();
 initDrawing();
 initMemoDrawing();
+initTouchPointerTracking();
 
 // ===== 手書き機能 =====
 var drawMode = false;
@@ -681,6 +682,9 @@ var drawHistory = [];
 var drawRedoStack = [];
 var drawSnapshot = null;
 var drawPointerId = null;
+var drawPointerType = null;
+var drawInputMode = 'pen';
+var activeTouchPointers = {};
 
 // ===== 手書きメモ欄（右側）変数 =====
 var memoStrokes = [];
@@ -692,10 +696,105 @@ var memoHistory = [];
 var memoRedoStack = [];
 var memoSnapshot = null;
 var memoDrawPointerId = null;
+var memoDrawPointerType = null;
 var lastActiveZone = 'chart';
 
 function isPenPointer(e) {
   return e && e.pointerType === 'pen';
+}
+
+function isTouchPointer(e) {
+  return e && e.pointerType === 'touch';
+}
+
+function trackTouchPointerDown(e) {
+  if (isTouchPointer(e)) activeTouchPointers[e.pointerId] = true;
+}
+
+function trackTouchPointerEnd(e) {
+  if (isTouchPointer(e)) delete activeTouchPointers[e.pointerId];
+}
+
+function getActiveTouchPointerCount() {
+  return Object.keys(activeTouchPointers).length;
+}
+
+function hasActiveDrawingPointer() {
+  return drawActive || memoDrawActive;
+}
+
+function canStartDrawingPointer(e) {
+  if (hasActiveDrawingPointer()) return false;
+  if (isPenPointer(e)) return true;
+  return drawInputMode === 'finger' && isTouchPointer(e) && getActiveTouchPointerCount() === 1;
+}
+
+function cancelChartActiveDrawing() {
+  var svgEl = document.getElementById('toothSvg');
+  if (svgEl && drawPointerId !== null) {
+    try { if (svgEl.hasPointerCapture(drawPointerId)) svgEl.releasePointerCapture(drawPointerId); } catch(err) {}
+  }
+  drawActive = false;
+  if (drawPathEl) {
+    try { document.getElementById('freeLineLayer').removeChild(drawPathEl); } catch(err) {}
+  }
+  drawPathEl = null;
+  drawPts = [];
+  drawSnapshot = null;
+  drawPointerId = null;
+  drawPointerType = null;
+}
+
+function cancelMemoActiveDrawing() {
+  memoDrawActive = false;
+  var svgEl = document.getElementById('memoSvg');
+  if (svgEl && memoDrawPointerId !== null) {
+    try { if (svgEl.hasPointerCapture(memoDrawPointerId)) svgEl.releasePointerCapture(memoDrawPointerId); } catch(err) {}
+  }
+  var layer = document.getElementById('memoFreeLineLayer');
+  if (memoDrawPathEl && layer) {
+    try { layer.removeChild(memoDrawPathEl); } catch(err) {}
+  }
+  memoDrawPathEl = null;
+  memoDrawPts = [];
+  memoSnapshot = null;
+  memoDrawPointerId = null;
+  memoDrawPointerType = null;
+}
+
+function cancelActiveTouchDrawing() {
+  if (drawPointerType === 'touch') cancelChartActiveDrawing();
+  if (memoDrawPointerType === 'touch') cancelMemoActiveDrawing();
+}
+
+function initTouchPointerTracking() {
+  document.addEventListener('pointerdown', function(e) {
+    trackTouchPointerDown(e);
+    if (getActiveTouchPointerCount() > 1) cancelActiveTouchDrawing();
+  }, true);
+  document.addEventListener('pointerup', trackTouchPointerEnd, true);
+  document.addEventListener('pointercancel', trackTouchPointerEnd, true);
+}
+
+function updateDrawInputUI() {
+  document.querySelectorAll('.draw-input-btn').forEach(function(btn) {
+    btn.classList.toggle('active', btn.getAttribute('data-input') === drawInputMode);
+  });
+  var hint = document.getElementById('drawInputHint');
+  if (hint) {
+    hint.textContent = drawInputMode === 'finger'
+      ? '1本指：描画　2本指：移動・拡大'
+      : 'Apple Pencil：描画　2本指：移動・拡大';
+  }
+}
+
+function setDrawInputMode(mode, btn) {
+  drawInputMode = mode === 'finger' ? 'finger' : 'pen';
+  if (drawInputMode === 'pen') {
+    cancelActiveTouchDrawing();
+    activeTouchPointers = {};
+  }
+  updateDrawInputUI();
 }
 
 function getSVGCoord(e, svgEl) {
@@ -774,10 +873,12 @@ function initDrawing() {
 
   svgEl.addEventListener('pointerdown', function(e) {
     if (!drawMode) return;
-    if (!isPenPointer(e)) return;
+    if (drawActive) return;
+    if (!canStartDrawingPointer(e)) return;
     e.preventDefault();
     e.stopPropagation();
     drawPointerId = e.pointerId;
+    drawPointerType = e.pointerType;
     try { svgEl.setPointerCapture(e.pointerId); } catch(err) {}
 
     // 消しゴムモード：タップしたストロークを削除
@@ -804,7 +905,7 @@ function initDrawing() {
 
   svgEl.addEventListener('pointermove', function(e) {
     if (!drawMode || !drawActive) return;
-    if (e.pointerId !== drawPointerId || !isPenPointer(e)) return;
+    if (e.pointerId !== drawPointerId || e.pointerType !== drawPointerType) return;
     e.preventDefault();
     if (eraserMode) {
       var pt = getSVGCoord(e, svgEl);
@@ -860,16 +961,18 @@ function initDrawing() {
     drawPathEl = null;
     drawPts = [];
     drawPointerId = null;
+    drawPointerType = null;
   }
 
   // passive:false を明示してスクロール抑制を確実に行う
   svgEl.addEventListener('pointermove', function(e) {
-    if (drawMode && drawActive && e.pointerId === drawPointerId && isPenPointer(e)) e.preventDefault();
+    if (drawMode && drawActive && e.pointerId === drawPointerId && e.pointerType === drawPointerType) e.preventDefault();
   }, {passive: false});
 
   // 消しゴムカーソル追従：drawActive不要、SVG内の全pointermoveで更新
   svgEl.addEventListener('pointermove', function(e) {
-    if (!drawMode || !eraserMode || !isPenPointer(e)) return;
+    if (!drawMode || !eraserMode) return;
+    if (e.pointerId !== drawPointerId || e.pointerType !== drawPointerType) return;
     var pt = getSVGCoord(e, svgEl);
     if (eraserCursorEl) {
       eraserCursorEl.setAttribute('cx', pt.x.toFixed(1));
@@ -880,6 +983,10 @@ function initDrawing() {
   svgEl.addEventListener('pointerup', endDraw);
   svgEl.addEventListener('pointercancel', function(e) {
     if (drawPointerId !== null && e && e.pointerId !== drawPointerId) return;
+    if (drawPointerType === 'touch') {
+      cancelChartActiveDrawing();
+      return;
+    }
     if (drawActive && drawPts.length > 1 && drawPathEl) {
       endDraw(e);
     } else {
@@ -890,6 +997,7 @@ function initDrawing() {
       drawPathEl = null;
       drawPts = [];
       drawPointerId = null;
+      drawPointerType = null;
     }
   });
 
@@ -996,9 +1104,10 @@ function toggleDrawMode() {
   var memoSvgEl = document.getElementById('memoSvg');
   var memoHitArea = document.getElementById('memoHitArea');
   if (drawMode) {
-    btn.textContent = '✏️ 手書き ON';
+    btn.textContent = '✏️ 手書きモード中';
     btn.classList.add('draw-mode-on');
     if (opts) opts.style.display = 'flex';
+    updateDrawInputUI();
     svgEl.style.cursor = 'crosshair';
     svgEl.style.touchAction = 'pinch-zoom';
     if (chartWrap) chartWrap.style.touchAction = 'pinch-zoom';
@@ -1014,9 +1123,12 @@ function toggleDrawMode() {
     if (memoHitArea) memoHitArea.style.pointerEvents = 'all';
     updateUndoRedoBtns();
   } else {
-    btn.textContent = '✏️ 手書き OFF';
+    btn.textContent = '✏️ 手書きモード OFF';
     btn.classList.remove('draw-mode-on');
     if (opts) opts.style.display = 'none';
+    cancelChartActiveDrawing();
+    cancelMemoActiveDrawing();
+    activeTouchPointers = {};
     svgEl.style.cursor = '';
     svgEl.style.touchAction = '';
     if (chartWrap) chartWrap.style.touchAction = '';
@@ -1192,14 +1304,16 @@ function initMemoDrawing() {
   memoEraserCursorEl.style.display = 'none';
   eraserLayer.appendChild(memoEraserCursorEl);
 
-  // Capture only active Apple Pencil drawing pointers.
+  // Capture only active drawing pointers.
   svgEl.addEventListener('pointerdown', function(e) {
     if (!drawMode) return;
-    if (!isPenPointer(e)) return;
+    if (memoDrawActive) return;
+    if (!canStartDrawingPointer(e)) return;
     e.preventDefault();
     e.stopPropagation();
     // Capture only after drawMode and pen checks.
     memoDrawPointerId = e.pointerId;
+    memoDrawPointerType = e.pointerType;
     try { svgEl.setPointerCapture(e.pointerId); } catch(err) {}
     lastActiveZone = 'memo';
     if (eraserMode) {
@@ -1221,17 +1335,17 @@ function initMemoDrawing() {
     freeLineLayer.appendChild(memoDrawPathEl);
   }, {passive: false});
 
-  // Prevent default only while handling the active Apple Pencil pointer.
+  // Prevent default only while handling the active drawing pointer.
   svgEl.addEventListener('pointermove', function(e) {
-    if (!drawMode || !isPenPointer(e)) return;
+    if (!drawMode || !memoDrawActive) return;
     if (memoDrawPointerId !== null && e.pointerId !== memoDrawPointerId) return;
+    if (memoDrawPointerType !== null && e.pointerType !== memoDrawPointerType) return;
     e.preventDefault();
     if (drawMode && eraserMode && memoEraserCursorEl) {
       var pt = getSVGCoord(e, svgEl);
       memoEraserCursorEl.setAttribute('cx', pt.x.toFixed(1));
       memoEraserCursorEl.setAttribute('cy', pt.y.toFixed(1));
     }
-    if (!drawMode || !memoDrawActive) return;
     if (eraserMode) { eraseAtPointMemo(getSVGCoord(e, svgEl)); return; }
     if (!memoDrawPathEl) return;
     var pt = getSVGCoord(e, svgEl);
@@ -1274,11 +1388,16 @@ function initMemoDrawing() {
     memoDrawPathEl = null;
     memoDrawPts = [];
     memoDrawPointerId = null;
+    memoDrawPointerType = null;
   }
 
   svgEl.addEventListener('pointerup', endMemoDraw, {passive: false});
   svgEl.addEventListener('pointercancel', function(e) {
     if (e && e.pointerId !== memoDrawPointerId) return;
+    if (memoDrawPointerType === 'touch') {
+      cancelMemoActiveDrawing();
+      return;
+    }
     if (e) {
       e.preventDefault();
       try { if (svgEl.hasPointerCapture(e.pointerId)) svgEl.releasePointerCapture(e.pointerId); } catch(err) {}
@@ -1290,6 +1409,7 @@ function initMemoDrawing() {
       if (memoDrawPathEl) { try { freeLineLayer.removeChild(memoDrawPathEl); } catch(err) {} }
       memoDrawPathEl = null; memoDrawPts = [];
       memoDrawPointerId = null;
+      memoDrawPointerType = null;
     }
   }, {passive: false});
 
