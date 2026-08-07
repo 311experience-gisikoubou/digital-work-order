@@ -64,8 +64,7 @@ function formatDateJP(dateStr) {
 }
 
 function getStdDays() {
-  var insBtn = document.getElementById('btn-insurance');
-  return (!insBtn || insBtn.classList.contains('active')) ? 11 : 14;
+  return (typeof state !== 'undefined' && state.insuranceType === 'jishi') ? 14 : 11;
 }
 
 async function onNextApChange() {
@@ -248,11 +247,4 @@ function vcalNext() {
 document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('submit-btn').disabled = true;
   fetchHolidays();
-  setTimeout(function() {
-    document.querySelectorAll('.ins-btn').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        setTimeout(onShippingDateChange, 50);
-      });
-    });
-  }, 500);
 });

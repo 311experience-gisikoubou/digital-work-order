@@ -27,13 +27,32 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 document.getElementById('btn-insurance').addEventListener('click', () => setInsurance('insurance'));
 document.getElementById('btn-jishi').addEventListener('click', () => setInsurance('jishi'));
 
-function setInsurance(type) {
-  state.insuranceType = type;
-  document.getElementById('btn-insurance').classList.toggle('active', type === 'insurance');
-  document.getElementById('btn-jishi').classList.toggle('active', type === 'jishi');
-  document.getElementById('prosthetics-insurance').style.display = type === 'insurance' ? '' : 'none';
-  document.getElementById('prosthetics-jishi').style.display = type === 'jishi' ? '' : 'none';
+function setInsurance(type, options) {
+  const nextType = type === 'jishi' ? 'jishi' : 'insurance';
+  const shouldRecalculate = !options || options.recalculate !== false;
+
+  state.insuranceType = nextType;
+  syncInsuranceUI();
+
+  if (shouldRecalculate && typeof onShippingDateChange === 'function') {
+    onShippingDateChange();
+  }
 }
+
+function syncInsuranceUI() {
+  const isInsurance = state.insuranceType === 'insurance';
+  document.getElementById('btn-insurance').classList.toggle('active', isInsurance);
+  document.getElementById('btn-jishi').classList.toggle('active', !isInsurance);
+  document.getElementById('prosthetics-insurance').style.display = isInsurance ? '' : 'none';
+  document.getElementById('prosthetics-jishi').style.display = isInsurance ? 'none' : '';
+
+  const insuranceLabel = document.getElementById('ds-insurance-label');
+  const jishiLabel = document.getElementById('ds-jishi-label');
+  if (insuranceLabel) insuranceLabel.style.display = isInsurance ? '' : 'none';
+  if (jishiLabel) jishiLabel.style.display = isInsurance ? 'none' : '';
+}
+
+syncInsuranceUI();
 
 // ============================================================
 //  トグルボタン（single / multi 両対応）
