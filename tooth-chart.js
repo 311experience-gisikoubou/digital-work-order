@@ -680,6 +680,7 @@ var eraserCursorEl = null;
 var drawHistory = [];
 var drawRedoStack = [];
 var drawSnapshot = null;
+var drawPointerId = null;
 
 // ===== 手書きメモ欄（右側）変数 =====
 var memoStrokes = [];
@@ -690,7 +691,12 @@ var memoEraserCursorEl = null;
 var memoHistory = [];
 var memoRedoStack = [];
 var memoSnapshot = null;
+var memoDrawPointerId = null;
 var lastActiveZone = 'chart';
+
+function isPenPointer(e) {
+  return e && e.pointerType === 'pen';
+}
 
 function getSVGCoord(e, svgEl) {
   var pt = svgEl.createSVGPoint();
@@ -768,8 +774,11 @@ function initDrawing() {
 
   svgEl.addEventListener('pointerdown', function(e) {
     if (!drawMode) return;
+    if (!isPenPointer(e)) return;
     e.preventDefault();
     e.stopPropagation();
+    drawPointerId = e.pointerId;
+    try { svgEl.setPointerCapture(e.pointerId); } catch(err) {}
 
     // 消しゴムモード：タップしたストロークを削除
     if (eraserMode) {
@@ -791,11 +800,11 @@ function initDrawing() {
     drawPathEl.setAttribute('stroke-linejoin', 'round');
     drawPathEl.setAttribute('d', 'M ' + drawPts[0].x.toFixed(1) + ' ' + drawPts[0].y.toFixed(1));
     document.getElementById('freeLineLayer').appendChild(drawPathEl);
-    try { svgEl.setPointerCapture(e.pointerId); } catch(err) {}
   });
 
   svgEl.addEventListener('pointermove', function(e) {
     if (!drawMode || !drawActive) return;
+    if (e.pointerId !== drawPointerId || !isPenPointer(e)) return;
     e.preventDefault();
     if (eraserMode) {
       var pt = getSVGCoord(e, svgEl);
@@ -811,8 +820,13 @@ function initDrawing() {
     drawPathEl.setAttribute('d', buildPathD(drawPts));
   });
 
-  function endDraw() {
+  function endDraw(e) {
     if (!drawActive) return;
+    if (e && e.pointerId !== drawPointerId) return;
+    if (e) {
+      e.preventDefault();
+      try { if (svgEl.hasPointerCapture(e.pointerId)) svgEl.releasePointerCapture(e.pointerId); } catch(err) {}
+    }
     drawActive = false;
     if (drawPts.length > 1 && drawPathEl) {
       // drawPtsを25点単位に分割してdrawStrokesへ push
@@ -845,16 +859,17 @@ function initDrawing() {
     }
     drawPathEl = null;
     drawPts = [];
+    drawPointerId = null;
   }
 
   // passive:false を明示してスクロール抑制を確実に行う
   svgEl.addEventListener('pointermove', function(e) {
-    if (drawMode) e.preventDefault();
+    if (drawMode && drawActive && e.pointerId === drawPointerId && isPenPointer(e)) e.preventDefault();
   }, {passive: false});
 
   // 消しゴムカーソル追従：drawActive不要、SVG内の全pointermoveで更新
   svgEl.addEventListener('pointermove', function(e) {
-    if (!drawMode || !eraserMode) return;
+    if (!drawMode || !eraserMode || !isPenPointer(e)) return;
     var pt = getSVGCoord(e, svgEl);
     if (eraserCursorEl) {
       eraserCursorEl.setAttribute('cx', pt.x.toFixed(1));
@@ -863,9 +878,10 @@ function initDrawing() {
   });
 
   svgEl.addEventListener('pointerup', endDraw);
-  svgEl.addEventListener('pointercancel', function() {
+  svgEl.addEventListener('pointercancel', function(e) {
+    if (drawPointerId !== null && e && e.pointerId !== drawPointerId) return;
     if (drawActive && drawPts.length > 1 && drawPathEl) {
-      endDraw();
+      endDraw(e);
     } else {
       drawActive = false;
       if (drawPathEl) {
@@ -873,6 +889,7 @@ function initDrawing() {
       }
       drawPathEl = null;
       drawPts = [];
+      drawPointerId = null;
     }
   });
 
@@ -983,15 +1000,17 @@ function toggleDrawMode() {
     btn.classList.add('draw-mode-on');
     if (opts) opts.style.display = 'flex';
     svgEl.style.cursor = 'crosshair';
-    svgEl.style.touchAction = 'none';
-    if (chartWrap) chartWrap.style.touchAction = 'none';
+    svgEl.style.touchAction = 'pinch-zoom';
+    if (chartWrap) chartWrap.style.touchAction = 'pinch-zoom';
     if (hitArea) hitArea.style.pointerEvents = 'all';
     // 手書き中は歯・クラスプレイヤーのイベントを抑制してpointermoveを確実に取得
     if (toothLayer) toothLayer.style.pointerEvents = 'none';
     if (claspLayer) claspLayer.style.pointerEvents = 'none';
     if (outlineLayer) outlineLayer.style.pointerEvents = 'none';
     // メモSVGも描画モードに
-    if (memoSvgEl) { memoSvgEl.style.cursor = 'crosshair'; memoSvgEl.style.touchAction = 'none'; }
+    if (memoSvgEl) { memoSvgEl.style.cursor = 'crosshair'; memoSvgEl.style.touchAction = 'pinch-zoom'; }
+    var memoWrap = memoSvgEl ? memoSvgEl.parentElement : null;
+    if (memoWrap) memoWrap.style.touchAction = 'pinch-zoom';
     if (memoHitArea) memoHitArea.style.pointerEvents = 'all';
     updateUndoRedoBtns();
   } else {
@@ -1008,6 +1027,8 @@ function toggleDrawMode() {
     if (outlineLayer) outlineLayer.style.pointerEvents = '';
     // メモSVGも戻す
     if (memoSvgEl) { memoSvgEl.style.cursor = ''; memoSvgEl.style.touchAction = ''; }
+    var memoWrapOff = memoSvgEl ? memoSvgEl.parentElement : null;
+    if (memoWrapOff) memoWrapOff.style.touchAction = '';
     if (memoHitArea) memoHitArea.style.pointerEvents = 'none';
     // 消しゴムモードもリセット
     eraserMode = false;
@@ -1129,15 +1150,13 @@ function initMemoDrawing() {
   var svgEl = document.getElementById('memoSvg');
   if (!svgEl) return;
 
-  // Safari向けCSS: スタイルシートだけでは効かない場合があるためインライン直接設定
-  svgEl.style.touchAction = 'none';
+  // Keep selection/callout disabled without blocking Safari touch gestures by default.
   svgEl.style.userSelect = 'none';
   svgEl.style.webkitUserSelect = 'none';
   svgEl.style.webkitTouchCallout = 'none';
   svgEl.style.webkitTapHighlightColor = 'transparent';
   var memoWrap = svgEl.parentElement;
   if (memoWrap) {
-    memoWrap.style.touchAction = 'none';
     memoWrap.style.userSelect = 'none';
     memoWrap.style.webkitUserSelect = 'none';
     memoWrap.style.webkitTouchCallout = 'none';
@@ -1173,18 +1192,15 @@ function initMemoDrawing() {
   memoEraserCursorEl.style.display = 'none';
   eraserLayer.appendChild(memoEraserCursorEl);
 
-  // Safari: TouchEvent も直接抑制（PointerEventと並走してコンテキストメニューを起動させない）
-  svgEl.addEventListener('touchstart', function(e) { e.preventDefault(); }, {passive: false});
-  svgEl.addEventListener('touchmove',  function(e) { e.preventDefault(); }, {passive: false});
-  svgEl.addEventListener('touchend',   function(e) { e.preventDefault(); }, {passive: false});
-
-  // pointerdown: setPointerCapture を drawMode チェックより先に実行（ブラウザに奪わせない）
+  // Capture only active Apple Pencil drawing pointers.
   svgEl.addEventListener('pointerdown', function(e) {
+    if (!drawMode) return;
+    if (!isPenPointer(e)) return;
     e.preventDefault();
     e.stopPropagation();
-    // drawMode に関わらず即キャプチャ
+    // Capture only after drawMode and pen checks.
+    memoDrawPointerId = e.pointerId;
     try { svgEl.setPointerCapture(e.pointerId); } catch(err) {}
-    if (!drawMode) return;
     lastActiveZone = 'memo';
     if (eraserMode) {
       eraseAtPointMemo(getSVGCoord(e, svgEl));
@@ -1205,8 +1221,10 @@ function initMemoDrawing() {
     freeLineLayer.appendChild(memoDrawPathEl);
   }, {passive: false});
 
-  // pointermove: 常時 passive:false・常時 preventDefault（スクロール・選択を確実に抑制）
+  // Prevent default only while handling the active Apple Pencil pointer.
   svgEl.addEventListener('pointermove', function(e) {
+    if (!drawMode || !isPenPointer(e)) return;
+    if (memoDrawPointerId !== null && e.pointerId !== memoDrawPointerId) return;
     e.preventDefault();
     if (drawMode && eraserMode && memoEraserCursorEl) {
       var pt = getSVGCoord(e, svgEl);
@@ -1225,6 +1243,7 @@ function initMemoDrawing() {
   }, {passive: false});
 
   function endMemoDraw(e) {
+    if (e && e.pointerId !== memoDrawPointerId) return;
     if (e) {
       e.preventDefault();
       try { if (svgEl.hasPointerCapture(e.pointerId)) svgEl.releasePointerCapture(e.pointerId); } catch(err) {}
@@ -1254,20 +1273,23 @@ function initMemoDrawing() {
     }
     memoDrawPathEl = null;
     memoDrawPts = [];
+    memoDrawPointerId = null;
   }
 
   svgEl.addEventListener('pointerup', endMemoDraw, {passive: false});
   svgEl.addEventListener('pointercancel', function(e) {
+    if (e && e.pointerId !== memoDrawPointerId) return;
     if (e) {
       e.preventDefault();
       try { if (svgEl.hasPointerCapture(e.pointerId)) svgEl.releasePointerCapture(e.pointerId); } catch(err) {}
     }
     if (memoDrawActive && memoDrawPts.length > 1 && memoDrawPathEl) {
-      endMemoDraw();
+      endMemoDraw(e);
     } else {
       memoDrawActive = false;
       if (memoDrawPathEl) { try { freeLineLayer.removeChild(memoDrawPathEl); } catch(err) {} }
       memoDrawPathEl = null; memoDrawPts = [];
+      memoDrawPointerId = null;
     }
   }, {passive: false});
 
