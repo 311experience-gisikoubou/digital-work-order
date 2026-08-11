@@ -133,6 +133,79 @@ document.querySelectorAll('.priority-btn').forEach(btn => {
 });
 
 // ============================================================
+//  次回予約日時（15分刻み）
+// ============================================================
+function buildNextAppointmentTimeOptions(selectedTime) {
+  const timeEl = document.getElementById('next-appointment-time');
+  if (!timeEl) return;
+
+  const keepTime = selectedTime && !/^(?:[01]\d|2[0-3]):(?:00|15|30|45)$/.test(selectedTime)
+    ? selectedTime
+    : '';
+  timeEl.textContent = '';
+
+  const empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = '時刻を選択';
+  timeEl.appendChild(empty);
+
+  for (let h = 0; h < 24; h += 1) {
+    ['00', '15', '30', '45'].forEach(min => {
+      const value = String(h).padStart(2, '0') + ':' + min;
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = value;
+      timeEl.appendChild(opt);
+    });
+  }
+
+  if (keepTime) {
+    const opt = document.createElement('option');
+    opt.value = keepTime;
+    opt.textContent = keepTime + '（既存値）';
+    timeEl.appendChild(opt);
+  }
+
+  if (selectedTime) timeEl.value = selectedTime;
+}
+
+function syncNextAppointmentFromValue() {
+  const hidden = document.getElementById('next-appointment');
+  const dateEl = document.getElementById('next-appointment-date');
+  if (!hidden || !dateEl) return;
+  const parts = hidden.value ? hidden.value.split('T') : [];
+  const dateValue = parts[0] || '';
+  const timeValue = parts[1] ? parts[1].slice(0, 5) : '';
+  dateEl.value = dateValue;
+  buildNextAppointmentTimeOptions(timeValue);
+}
+
+function updateNextAppointmentValue() {
+  const hidden = document.getElementById('next-appointment');
+  const dateEl = document.getElementById('next-appointment-date');
+  const timeEl = document.getElementById('next-appointment-time');
+  if (!hidden || !dateEl || !timeEl) return;
+  hidden.value = dateEl.value && timeEl.value ? dateEl.value + 'T' + timeEl.value : '';
+}
+
+async function syncNextAppointmentParts() {
+  updateNextAppointmentValue();
+  const dateEl = document.getElementById('next-appointment-date');
+  if (typeof nextApDateGlobal !== 'undefined') {
+    nextApDateGlobal = dateEl && dateEl.value ? dateEl.value : null;
+  }
+  if (typeof shippingDateGlobal !== 'undefined' && shippingDateGlobal && typeof renderVcal === 'function') {
+    await renderVcal();
+    if (typeof selectedDeliveryDate !== 'undefined' && selectedDeliveryDate && typeof fetchHolidays === 'function' && typeof applyDelivery === 'function') {
+      const hols = await fetchHolidays();
+      await applyDelivery(selectedDeliveryDate, hols);
+    }
+  } else if (typeof onNextApChange === 'function') {
+    await onNextApChange();
+  }
+}
+
+// ============================================================
 //  フォームデータ収集
 // ============================================================
 function collectFormData() {
@@ -226,7 +299,7 @@ function collectFormData() {
 
     // 納期
     deliveryDate:    document.getElementById('delivery-date').value,
-    nextAppointment: document.getElementById('next-appointment').value,
+    nextAppointment: (updateNextAppointmentValue(), document.getElementById('next-appointment').value),
     priority:        state.priority,
     remarks:      document.getElementById('remarks').value,
 
@@ -268,7 +341,7 @@ document.getElementById('submit-btn').addEventListener('click', async () => {
 function resetForm() {
   // テキスト入力リセット
   ['clinic-name','doctor-name','patient-name','patient-age','patient-gender',
-   'shade-guide','shade-number','delivery-date','next-appointment','remarks',
+   'shade-guide','shade-number','delivery-date','next-appointment','next-appointment-date','next-appointment-time','remarks',
    'repair-detail','metalup-ins-detail','kyoko-ins-detail',
    'metalup-jishi-detail','kyoko-jishi-detail',
    'articulator-type','articulator-detail'
@@ -290,6 +363,7 @@ function resetForm() {
 
   // トグル・ボタンリセット
   document.querySelectorAll('.toggle-btn.active').forEach(b => b.classList.remove('active'));
+  buildNextAppointmentTimeOptions('');
 }
 
 // ============================================================
@@ -307,6 +381,7 @@ function initDates() {
 //  初期化
 // ============================================================
 initDates();
+syncNextAppointmentFromValue();
 
 // ============================================================
 //  Firebase（本番接続 — 設定後アンコメント）

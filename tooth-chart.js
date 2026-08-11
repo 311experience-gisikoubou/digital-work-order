@@ -115,13 +115,13 @@ var lowerTeeth = [
 
 var toothBB={11:{cx:263,cy:74,x1:239,x2:287,y1:50,y2:98},12:{cx:211,cy:99,x1:187,x2:235,y1:75,y2:123},13:{cx:166,cy:140,x1:139,x2:193,y1:113,y2:167},14:{cx:144,cy:201,x1:114,x2:174,y1:171,y2:231},15:{cx:126,cy:255,x1:94,x2:158,y1:223,y2:287},16:{cx:111,cy:321,x1:75,x2:147,y1:285,y2:357},17:{cx:97,cy:396,x1:61,x2:133,y1:360,y2:432},18:{cx:95,cy:462,x1:57,x2:133,y1:424,y2:500},21:{cx:320,cy:74,x1:296,x2:344,y1:50,y2:98},22:{cx:372,cy:91,x1:348,x2:396,y1:67,y2:115},23:{cx:420,cy:128,x1:393,x2:447,y1:101,y2:155},24:{cx:444,cy:189,x1:414,x2:474,y1:159,y2:219},25:{cx:470,cy:244,x1:438,x2:502,y1:212,y2:276},26:{cx:485,cy:309,x1:449,x2:521,y1:273,y2:345},27:{cx:502,cy:379,x1:466,x2:538,y1:343,y2:415},28:{cx:514,cy:447,x1:476,x2:552,y1:409,y2:485},31:{cx:346,cy:1007,x1:326,x2:366,y1:987,y2:1027},32:{cx:386,cy:994,x1:364,x2:408,y1:972,y2:1016},33:{cx:420,cy:960,x1:394,x2:446,y1:934,y2:986},34:{cx:448,cy:913,x1:420,x2:476,y1:885,y2:941},35:{cx:463,cy:851,x1:431,x2:495,y1:819,y2:883},36:{cx:483,cy:776,x1:447,x2:519,y1:740,y2:812},37:{cx:497,cy:690,x1:461,x2:533,y1:654,y2:726},38:{cx:507,cy:612,x1:469,x2:545,y1:574,y2:650},41:{cx:306,cy:1008,x1:286,x2:326,y1:988,y2:1028},42:{cx:264,cy:996,x1:242,x2:286,y1:974,y2:1018},43:{cx:228,cy:965,x1:202,x2:254,y1:939,y2:991},44:{cx:192,cy:917,x1:164,x2:220,y1:889,y2:945},45:{cx:174,cy:859,x1:142,x2:206,y1:827,y2:891},46:{cx:149,cy:787,x1:113,x2:185,y1:751,y2:823},47:{cx:126,cy:701,x1:90,x2:162,y1:665,y2:737},48:{cx:107,cy:628,x1:69,x2:145,y1:590,y2:666}};
 // 内部キー → 歯式図上表示文字
-var CLASP_LABELS={"W":"WC","E":"CC","T":"双子","C":"コンビ","H":"フック","R":"レスト","I":"Ⅰバー","WI":"WCⅠバー"};
+var CLASP_LABELS={"W":"WC","E":"CC","T":"双子","C":"コンビ","H":"フック","R":"レスト","CR":"CR","I":"Ⅰバー","WI":"WCⅠバー"};
 var STAMPS={missing:"✕",caution:"!"};
 var toothState={},coords={},currentMode="missing";
 var drag={active:false,moved:false,num:null,startX:0,startY:0,origCx:0,origCy:0};
 
 // ===== クラスプ管理 =====
-var CLASP_COLORS={"W":"#2563a8","E":"#22aa66","T":"#8844cc","C":"#8B4513","H":"#cc2222","R":"#dd7700","I":"#0088aa","WI":"#0088aa"};
+var CLASP_COLORS={"W":"#2563a8","E":"#22aa66","T":"#8844cc","C":"#8B4513","H":"#cc2222","R":"#dd7700","CR":"#b45309","I":"#0088aa","WI":"#0088aa"};
 var claspState={};  // {歯番号: [{uid, type, dir, isTwin1, twinWith, cx, cy, sx, sy, angle}]}
 var claspMode=null; // {type, dir}
 var twinFirst=null; // 双子鉤の1本目
@@ -222,8 +222,8 @@ function getClaspLabelOffset(tooth) {
 }
 
 function getClaspLabelBox(label, offset) {
-  var width = Math.max(36, label.length * 15 + 10);
-  var height = 24;
+  var width = Math.max(40, label.length * 18 + 12);
+  var height = 28;
   return {
     x: offset.x - width / 2,
     y: offset.y - height / 2,
@@ -347,7 +347,8 @@ function renderAllClasps(){
       txt.setAttribute("y", labelOffset.y);
       txt.setAttribute("class", "clasp-label");
       txt.setAttribute("fill", color);
-      txt.style.fontSize = label.length >= 4 ? "16px" : "18px";
+      txt.style.fontSize = label.length >= 4 ? "20px" : "22px";
+      txt.style.fontWeight = "800";
       txt.textContent = label;
       g.appendChild(txt);
 
@@ -362,7 +363,7 @@ function updateClaspList(){
     claspState[t.num].forEach(function(c){
       if(c.isTwin1) return;
       var color=CLASP_COLORS[c.type]||"#555";
-      var CLASP_NAMES={"W":"W ワイヤークラスプ","E":"C キャスト鉤","T":"T 双子鉤","R":"R レスト","H":"H フック","C":"CM コンビ鉤","I":"I Iバー","WI":"WI ワイヤーIバー"};
+      var CLASP_NAMES={"W":"W ワイヤークラスプ","E":"C キャスト鉤","T":"T 双子鉤","R":"R レスト","CR":"CR キャストレスト","H":"H フック","C":"CM コンビ鉤","I":"I Iバー","WI":"WI ワイヤーIバー"};
       var label=(CLASP_NAMES[c.type]||c.type);
       if(c.twinWith) label+="("+t.num+"↔"+c.twinWith+")";
       else label+="("+t.num+")";
@@ -730,6 +731,10 @@ function isTouchPointer(e) {
   return e && e.pointerType === 'touch';
 }
 
+function isMousePointer(e) {
+  return e && e.pointerType === 'mouse';
+}
+
 function trackTouchPointerDown(e) {
   if (isTouchPointer(e)) activeTouchPointers[e.pointerId] = true;
 }
@@ -749,6 +754,7 @@ function hasActiveDrawingPointer() {
 function canStartDrawingPointer(e) {
   if (hasActiveDrawingPointer()) return false;
   if (isPenPointer(e)) return true;
+  if (isMousePointer(e)) return e.button === 0;
   return drawInputMode === 'finger' && isTouchPointer(e) && getActiveTouchPointerCount() === 1;
 }
 

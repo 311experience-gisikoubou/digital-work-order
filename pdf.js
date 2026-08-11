@@ -61,6 +61,11 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
       '</div>'
     );
   }
+  function displayGender(value) {
+    if (value === 'male') return '男性';
+    if (value === 'female') return '女性';
+    return value || '';
+  }
 
   // 月日曜日のみの日付フォーマット（PDF内の納品日・次回Ap用）
   function formatMonthDay(dateStr) {
@@ -101,7 +106,7 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
 
     // ── 左列：補足情報 ─────────────────────────────
     if (order.doctorName) row(L, '担当医', order.doctorName);
-    var ag = [order.patientAge ? order.patientAge + '歳' : '', order.patientGender].filter(Boolean).join('　');
+    var ag = [order.patientAge ? order.patientAge + '歳' : '', displayGender(order.patientGender)].filter(Boolean).join('　');
     if (ag) row(L, '年齢・性別', ag);
     if (keyOrderType) row(L, '発注形態', keyOrderType);
     row(L, '区分', order.insuranceType === 'insurance' ? '保険' : '自費');
@@ -136,7 +141,7 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
     if (order.barType) row(R, 'バー', order.barType + 'バー');
 
     if (typeof claspState !== 'undefined') {
-      var CN = { W:'W ワイヤークラスプ', E:'C キャスト鉤', T:'T 双子鉤', R:'R レスト', H:'H フック', C:'CM コンビ鉤', I:'I Iバー', WI:'WI ワイヤーIバー' };
+      var CN = { W:'W ワイヤークラスプ', E:'C キャスト鉤', T:'T 双子鉤', R:'R レスト', CR:'CR キャストレスト', H:'H フック', C:'CM コンビ鉤', I:'I Iバー', WI:'WI ワイヤーIバー' };
       var counts = {};
       Object.keys(claspState).forEach(function(num) {
         (claspState[num] || []).forEach(function(c) {
@@ -171,9 +176,13 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
       }
     }
 
-    // ── 右列：備考（常時）──────────────────────────
-    sect(R, '備考');
-    R.push('<div class="remarks">' + (order.remarks ? esc(order.remarks).replace(/\n/g, '<br>') : '') + '</div>');
+    var notesHtml =
+      '<div class="notes-area">' +
+      '<div class="notes-title">備考・手書きメモ</div>' +
+      '<div class="notes-body">' +
+      '<div class="remarks">' + (order.remarks ? esc(order.remarks).replace(/\n/g, '<br>') : '') + '</div>' +
+      (memoHtml ? '<div class="memo-col">' + memoHtml + '</div>' : '') +
+      '</div></div>';
 
     var keyBar =
       '<div class="key-bar">' +
@@ -193,13 +202,14 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
     return '<div class="slip-header"><h1>歯科技工指示書</h1>' +
       '<div class="issue-date">発行日：' + esc(order.issueDate ? formatJapaneseEraDate(order.issueDate) : '') + '</div></div>' +
       '<div class="print-body">' +
-      (chartHtml ? '<div class="chart-col">' + chartHtml + (memoHtml ? '<div class="memo-col">' + memoHtml + '</div>' : '') + '</div>' : '') +
+      (chartHtml ? '<div class="chart-col">' + chartHtml + '</div>' : '') +
       '<div class="info-wrap">' +
       keyBar +
       '<div class="info-2col">' +
       '<div class="info-left">' + L.join('\n') + '</div>' +
       '<div class="info-right">' + R.join('\n') + '</div>' +
       '</div>' +
+      notesHtml +
       '</div>' +
       '</div>' +
       '<div class="studio-sig">咬み合わせ医療会　こよし技工房</div>';
@@ -284,15 +294,18 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
     .tn-num.tn-missing { color: #000; }
     .tn-mid { flex: 0 0 auto; padding: 0 0.5mm; color: #333; font-weight: bold; }
     .tn-sep { border-top: 0.3mm solid #ccc; margin: 0.5mm 0; }
-    .remarks { padding: 1mm 2mm; line-height: 2.0; min-height: 16mm; border-top: 0.3mm solid #ccc; overflow: hidden; }
+    .remarks { flex: 1; min-width: 0; padding: 1mm 2mm; line-height: 2.0; overflow: hidden; }
     .slip-empty { flex: 1; }
     .studio-sig { text-align: right; font-size: 14pt; font-weight: bold; color: #555; padding-top: 1mm; line-height: 1.5; flex-shrink: 0; }
     .print-body { display: flex; gap: 4mm; align-items: stretch; flex: 1; overflow: hidden; }
     .chart-col { flex: 0 0 68mm; display: flex; flex-direction: column; }
-    .memo-col { flex: 1; min-height: 0; margin-top: 1.5mm; overflow: hidden; }
+    .notes-area { flex: 0 0 34mm; display: flex; flex-direction: column; margin-top: 1.5mm; border: 0.3mm solid #ccc; overflow: hidden; }
+    .notes-title { background: #bbb; padding: 0.3mm 1.5mm; font-size: 6.5pt; font-weight: bold; flex-shrink: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .notes-body { display: flex; gap: 2mm; flex: 1; min-height: 0; overflow: hidden; }
+    .memo-col { flex: 1; min-width: 0; min-height: 0; overflow: hidden; border-left: 0.3mm solid #ccc; }
     .memo-col svg, .memo-col .memo-svg {
       display: block !important;
-      width: 68mm !important;
+      width: 100% !important;
       height: 100% !important;
       min-height: 0 !important;
       border: 0.3mm solid #ccc !important;
