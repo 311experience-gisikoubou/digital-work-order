@@ -127,7 +127,7 @@ var claspMode=null; // {type, dir}
 var twinFirst=null; // 双子鉤の1本目
 
 var activeClaspUid = null;
-var claspDrag = { active: false, mode: null, uid: null, num: null, startX: 0, startY: 0, initT: null };
+var claspDrag = { active: false, mode: null, uid: null, num: null, startX: 0, startY: 0, moved: false, initT: null };
 
 function genUid(){ return Date.now().toString(36)+Math.random().toString(36).substring(2,6); }
 
@@ -214,21 +214,36 @@ function getInitialTransform(num) {
   return { cx: c.cx, cy: c.cy };
 }
 
-function getClaspLabelOffset(tooth) {
+function getClaspLabelFontSize(label) {
+  return String(label || '').length >= 4 ? 36 : 44;
+}
+
+function getClaspLabelSize(label) {
+  var fontSize = getClaspLabelFontSize(label);
+  return {
+    fontSize: fontSize,
+    width: Math.max(58, String(label || '').length * fontSize * 0.72 + 16),
+    height: fontSize + 12
+  };
+}
+
+function getClaspLabelOffset(tooth, label) {
+  var size = getClaspLabelSize(label);
   var isUpper = tooth.num < 30;
-  var x = tooth.cx < 300 ? -12 : 12;
-  var y = isUpper ? -(tooth.ry + 24) : (tooth.ry + 24);
-  return { x: x, y: y };
+  var centerX = tooth.cx + (tooth.cx < 300 ? -16 : 16);
+  var centerY = tooth.cy + (isUpper ? -(tooth.ry + 30) : (tooth.ry + 30));
+  centerX = Math.max(size.width / 2 + 4, Math.min(600 - size.width / 2 - 4, centerX));
+  centerY = Math.max(size.height / 2 + 4, Math.min(1070 - size.height / 2 - 4, centerY));
+  return { x: centerX - tooth.cx, y: centerY - tooth.cy };
 }
 
 function getClaspLabelBox(label, offset) {
-  var width = Math.max(40, label.length * 18 + 12);
-  var height = 28;
+  var size = getClaspLabelSize(label);
   return {
-    x: offset.x - width / 2,
-    y: offset.y - height / 2,
-    width: width,
-    height: height
+    x: offset.x - size.width / 2,
+    y: offset.y - size.height / 2,
+    width: size.width,
+    height: size.height
   };
 }
 
@@ -276,7 +291,7 @@ function applyClaspToTooth(num){
 
   var existing=claspState[num].findIndex(function(c){return c.type===type;});
   if(existing>=0){
-    claspState[num].splice(existing,1);
+    removeClaspAt(num, existing);
   } else {
     var t0 = getSavedTransform(num, type) || getInitialTransform(num);
     var newUid = genUid();
@@ -285,6 +300,34 @@ function applyClaspToTooth(num){
   }
   updateClaspList();
   renderAllClasps();
+}
+
+function removeClaspAt(num, index) {
+  if (!claspState[num] || index < 0 || index >= claspState[num].length) return null;
+  var removed = claspState[num].splice(index, 1)[0];
+  if (removed && removed.uid === activeClaspUid) activeClaspUid = null;
+
+  if (removed && removed.type === 'T' && removed.twinWith != null && claspState[removed.twinWith]) {
+    var pair = claspState[removed.twinWith].find(function(c) {
+      return c.type === 'T' && c.twinWith === num;
+    });
+    if (pair) {
+      pair.isTwin1 = true;
+      pair.twinWith = null;
+    }
+  }
+  return removed;
+}
+
+function removeClaspByUid(num, uid) {
+  if (!claspState[num]) return false;
+  var index = claspState[num].findIndex(function(c) { return c.uid === uid; });
+  if (index < 0) return false;
+  removeClaspAt(num, index);
+  twinFirst = null;
+  updateClaspList();
+  renderAllClasps();
+  return true;
 }
 
 function renderAllClasps(){
@@ -298,7 +341,7 @@ function renderAllClasps(){
       var color = CLASP_COLORS[c.type] || "#555";
       var tx = (c.cx !== undefined) ? c.cx : t.cx;
       var ty = (c.cy !== undefined) ? c.cy : t.cy;
-      var labelOffset = getClaspLabelOffset(t);
+      var labelOffset = getClaspLabelOffset(t, label);
 
       var g = document.createElementNS("http://www.w3.org/2000/svg","g");
       g.setAttribute("class", "clasp-group" + (activeClaspUid===c.uid ? " clasp-selected" : ""));
@@ -314,6 +357,7 @@ function renderAllClasps(){
         claspDrag.num = t.num;
         claspDrag.startX = e.clientX;
         claspDrag.startY = e.clientY;
+        claspDrag.moved = false;
         claspDrag.initT = {cx: tx, cy: ty};
         renderAllClasps();
       });
@@ -326,6 +370,7 @@ function renderAllClasps(){
         claspDrag.num = t.num;
         claspDrag.startX = e.touches[0].clientX;
         claspDrag.startY = e.touches[0].clientY;
+        claspDrag.moved = false;
         claspDrag.initT = {cx: tx, cy: ty};
         renderAllClasps();
       }, {passive:true});
@@ -347,8 +392,8 @@ function renderAllClasps(){
       txt.setAttribute("y", labelOffset.y);
       txt.setAttribute("class", "clasp-label");
       txt.setAttribute("fill", color);
-      txt.style.fontSize = label.length >= 4 ? "20px" : "22px";
-      txt.style.fontWeight = "800";
+      txt.style.fontSize = getClaspLabelFontSize(label) + "px";
+      txt.style.fontWeight = "900";
       txt.textContent = label;
       g.appendChild(txt);
 
@@ -477,6 +522,7 @@ function buildSVG(){
     var cy = e.clientY || (e.touches && e.touches[0].clientY);
     var dx = cx - claspDrag.startX;
     var dy = cy - claspDrag.startY;
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) claspDrag.moved = true;
 
     var rect = svgEl.getBoundingClientRect();
     dx *= 600 / rect.width;
@@ -496,6 +542,17 @@ function buildSVG(){
 
   function onClaspDragEnd(e){
     if(claspDrag.active){
+      if(!claspDrag.moved && claspMode) {
+        var list = claspState[claspDrag.num] || [];
+        var current = list.find(function(item){return item.uid === claspDrag.uid;});
+        if(current && current.type === claspMode.type) {
+          removeClaspByUid(claspDrag.num, claspDrag.uid);
+          claspDrag.active = false;
+          claspDrag.uid = null;
+          claspDrag.num = null;
+          return;
+        }
+      }
       claspDrag.active = false;
       renderAllClasps();
     }
@@ -684,13 +741,6 @@ function resetAll(){
   }
   updateResults();
 }
-buildToothChart();
-buildSVG();
-initClasp();
-initDrawing();
-initMemoDrawing();
-initTouchPointerTracking();
-
 // ===== 手書き機能 =====
 var drawMode = false;
 var drawCurrentColor = '#cc2222';
@@ -723,6 +773,14 @@ var memoDrawPointerId = null;
 var memoDrawPointerType = null;
 var lastActiveZone = 'chart';
 
+// Initialize after drawing state is assigned so loaded strokes and SVG references persist.
+buildToothChart();
+buildSVG();
+initClasp();
+initDrawing();
+initMemoDrawing();
+initTouchPointerTracking();
+
 function isPenPointer(e) {
   return e && e.pointerType === 'pen';
 }
@@ -754,7 +812,7 @@ function hasActiveDrawingPointer() {
 function canStartDrawingPointer(e) {
   if (hasActiveDrawingPointer()) return false;
   if (isPenPointer(e)) return true;
-  if (isMousePointer(e)) return e.button === 0;
+  if (isMousePointer(e)) return e.button === 0 && (typeof e.buttons !== 'number' || (e.buttons & 1) === 1);
   return drawInputMode === 'finger' && isTouchPointer(e) && getActiveTouchPointerCount() === 1;
 }
 
@@ -849,6 +907,62 @@ function buildPathD(pts) {
   return d;
 }
 
+function getMemoStrokeBounds(strokes, padding, maxScale) {
+  if (!Array.isArray(strokes) || strokes.length === 0) return null;
+  var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  var hasPoint = false;
+  var pad = Number(padding);
+  if (!isFinite(pad)) pad = 12;
+
+  strokes.forEach(function(stroke) {
+    if (!stroke || !stroke.d) return;
+    var nums = String(stroke.d).match(/-?\d+(?:\.\d+)?/g);
+    if (!nums || nums.length < 2) return;
+    var strokePad = (parseFloat(stroke.width) || 0) / 2;
+    for (var i = 0; i + 1 < nums.length; i += 2) {
+      var x = parseFloat(nums[i]);
+      var y = parseFloat(nums[i + 1]);
+      if (!isFinite(x) || !isFinite(y)) continue;
+      minX = Math.min(minX, x - strokePad);
+      minY = Math.min(minY, y - strokePad);
+      maxX = Math.max(maxX, x + strokePad);
+      maxY = Math.max(maxY, y + strokePad);
+      hasPoint = true;
+    }
+  });
+
+  if (!hasPoint) return null;
+
+  var rawMinX = minX, rawMinY = minY, rawMaxX = maxX, rawMaxY = maxY;
+  minX = Math.max(0, rawMinX - pad);
+  minY = Math.max(0, rawMinY - pad);
+  maxX = Math.min(400, rawMaxX + pad);
+  maxY = Math.min(500, rawMaxY + pad);
+
+  var scale = Number(maxScale);
+  if (isFinite(scale) && scale > 1) {
+    scale = Math.min(scale, 1.2);
+    var cx = (rawMinX + rawMaxX) / 2;
+    var cy = (rawMinY + rawMaxY) / 2;
+    var targetW = Math.max(rawMaxX - rawMinX, (maxX - minX) / scale);
+    var targetH = Math.max(rawMaxY - rawMinY, (maxY - minY) / scale);
+    minX = Math.min(rawMinX, cx - targetW / 2);
+    maxX = Math.max(rawMaxX, cx + targetW / 2);
+    minY = Math.min(rawMinY, cy - targetH / 2);
+    maxY = Math.max(rawMaxY, cy + targetH / 2);
+    minX = Math.max(0, minX);
+    minY = Math.max(0, minY);
+    maxX = Math.min(400, maxX);
+    maxY = Math.min(500, maxY);
+  }
+  return {
+    x: minX,
+    y: minY,
+    width: Math.max(1, maxX - minX),
+    height: Math.max(1, maxY - minY)
+  };
+}
+
 function eraseAtPoint(pt) {
   var layer = document.getElementById('freeLineLayer');
   if (!layer) return;
@@ -902,6 +1016,7 @@ function initDrawing() {
 
   svgEl.addEventListener('pointerdown', function(e) {
     if (!drawMode) return;
+    if (drawActive && eraserMode && isMousePointer(e)) cancelChartActiveDrawing();
     if (drawActive) return;
     if (!canStartDrawingPointer(e)) return;
     e.preventDefault();
@@ -912,8 +1027,8 @@ function initDrawing() {
 
     // 消しゴムモード：タップしたストロークを削除
     if (eraserMode) {
-      eraseAtPoint(getSVGCoord(e, svgEl));
       drawActive = true;
+      eraseAtPoint(getSVGCoord(e, svgEl));
       return;
     }
 
@@ -1001,7 +1116,7 @@ function initDrawing() {
   // 消しゴムカーソル追従：drawActive不要、SVG内の全pointermoveで更新
   svgEl.addEventListener('pointermove', function(e) {
     if (!drawMode || !eraserMode) return;
-    if (e.pointerId !== drawPointerId || e.pointerType !== drawPointerType) return;
+    if (!isMousePointer(e) && (e.pointerId !== drawPointerId || e.pointerType !== drawPointerType)) return;
     var pt = getSVGCoord(e, svgEl);
     if (eraserCursorEl) {
       eraserCursorEl.setAttribute('cx', pt.x.toFixed(1));
@@ -1010,6 +1125,7 @@ function initDrawing() {
   });
 
   svgEl.addEventListener('pointerup', endDraw);
+  document.addEventListener('pointerup', endDraw, true);
   svgEl.addEventListener('pointercancel', function(e) {
     if (drawPointerId !== null && e && e.pointerId !== drawPointerId) return;
     if (drawPointerType === 'touch') {
@@ -1190,8 +1306,8 @@ function toggleEraserMode() {
   var memoSvgEl2 = document.getElementById('memoSvg');
   if (eraserMode) {
     if (eraserBtn) eraserBtn.classList.add('active');
-    svgEl.style.cursor = 'none';
-    if (memoSvgEl2) memoSvgEl2.style.cursor = 'none';
+    svgEl.style.cursor = 'crosshair';
+    if (memoSvgEl2) memoSvgEl2.style.cursor = 'crosshair';
     if (hitArea) hitArea.style.pointerEvents = 'all';
     if (eraserCursorEl) {
       eraserCursorEl.setAttribute('r', String(eraserRadius));
@@ -1336,6 +1452,7 @@ function initMemoDrawing() {
   // Capture only active drawing pointers.
   svgEl.addEventListener('pointerdown', function(e) {
     if (!drawMode) return;
+    if (memoDrawActive && eraserMode && isMousePointer(e)) cancelMemoActiveDrawing();
     if (memoDrawActive) return;
     if (!canStartDrawingPointer(e)) return;
     e.preventDefault();
@@ -1346,8 +1463,8 @@ function initMemoDrawing() {
     try { svgEl.setPointerCapture(e.pointerId); } catch(err) {}
     lastActiveZone = 'memo';
     if (eraserMode) {
-      eraseAtPointMemo(getSVGCoord(e, svgEl));
       memoDrawActive = true;
+      eraseAtPointMemo(getSVGCoord(e, svgEl));
       return;
     }
     memoSnapshot = JSON.parse(JSON.stringify(memoStrokes));
@@ -1366,6 +1483,11 @@ function initMemoDrawing() {
 
   // Prevent default only while handling the active drawing pointer.
   svgEl.addEventListener('pointermove', function(e) {
+    if (drawMode && eraserMode && isMousePointer(e) && memoEraserCursorEl) {
+      var hoverPt = getSVGCoord(e, svgEl);
+      memoEraserCursorEl.setAttribute('cx', hoverPt.x.toFixed(1));
+      memoEraserCursorEl.setAttribute('cy', hoverPt.y.toFixed(1));
+    }
     if (!drawMode || !memoDrawActive) return;
     if (memoDrawPointerId !== null && e.pointerId !== memoDrawPointerId) return;
     if (memoDrawPointerType !== null && e.pointerType !== memoDrawPointerType) return;
@@ -1421,6 +1543,7 @@ function initMemoDrawing() {
   }
 
   svgEl.addEventListener('pointerup', endMemoDraw, {passive: false});
+  document.addEventListener('pointerup', endMemoDraw, true);
   svgEl.addEventListener('pointercancel', function(e) {
     if (e && e.pointerId !== memoDrawPointerId) return;
     if (memoDrawPointerType === 'touch') {

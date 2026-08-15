@@ -244,6 +244,10 @@ function collectFormData() {
   // 色調（トグルボタン選択値を優先、「その他」または未選択時はテキスト入力を使用）
   const shadeSel = ins === 'insurance' ? getToggleVal('shade') : getToggleVal('shade-jishi');
 
+  const memoSnapshot = (typeof memoStrokes !== 'undefined' && Array.isArray(memoStrokes))
+    ? JSON.parse(JSON.stringify(memoStrokes))
+    : [];
+
   return {
     // 患者・医院情報
     clinicName:   document.getElementById('clinic-name').value.trim(),
@@ -302,6 +306,7 @@ function collectFormData() {
     nextAppointment: (updateNextAppointmentValue(), document.getElementById('next-appointment').value),
     priority:        state.priority,
     remarks:      document.getElementById('remarks').value,
+    memoStrokes:  memoSnapshot,
 
     // メタデータ
     status:       'pending',   // 未受付
