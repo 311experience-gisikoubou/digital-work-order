@@ -392,6 +392,26 @@ textarea { resize: vertical; min-height: 80px; }
 .modal-actions {
   display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end;
 }
+.detail-memo-preview {
+  margin-top: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  overflow: hidden;
+}
+.detail-memo-title {
+  padding: 8px 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  border-bottom: 1px solid var(--border-color);
+}
+.detail-memo-svg {
+  display: block;
+  width: 100%;
+  height: min(42vh, 360px);
+  background: #fff;
+}
 .btn-secondary {
   padding: 10px 20px; border: 1px solid var(--border-color);
   background: transparent; color: var(--text-secondary); border-radius: var(--radius-sm);
@@ -577,7 +597,7 @@ body.edit-active .tooth-num { display:none; }
 .dir-item { padding:10px 16px; font-size:12px; font-weight:700; cursor:pointer; color:#1a2a3a; display:flex; align-items:center; gap:8px; transition:background 0.1s; }
 .dir-item:hover { background:#f0f4f8; }
 .dir-dot { width:8px; height:8px; border-radius:50%; }
-.clasp-label { font-size:22px; text-anchor:middle; dominant-baseline:middle; font-weight:800; cursor:move; }
+.clasp-label { font-size:44px; text-anchor:middle; dominant-baseline:middle; font-weight:900; cursor:move; }
 .clasp-sel-rect { fill:rgba(37,99,168,0.12); stroke:#2563a8; stroke-width:1.5; stroke-dasharray:4 3; pointer-events:none; }
 .clasp-dir-label { font-size:7px; text-anchor:middle; dominant-baseline:middle; pointer-events:none; font-weight:700; }
 .clasp-result { background:#fff; border:1px solid var(--border-color); border-radius:10px; padding:12px 14px; }
