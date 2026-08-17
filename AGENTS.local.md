@@ -94,3 +94,10 @@ The following skills are expected to be useful after they are introduced into `.
 Until those skills exist in this repository or are available in the current environment, treat them as planned workflow names, not installed tools.
 
 `migration-safety` is not part of the normal workflow for this repository. Reconsider it only if DB, schema migration, or migration-equivalent behavior is introduced.
+
+## Local AI Handoff
+
+- `.ai-handoff/` implements the `local-ai-handoff` skill from `ai-dev-foundation`. V1 scope is Claude Code ↔ Codex CLI only; the browser-based GPT continues to use the existing GitHub `[AI_HANDOFF]` PR-comment channel, and Gemini/Antigravity is an extension point only, not wired in.
+- `.ai-handoff/runtime/` is **not git-tracked** in this repository. It is excluded via `.gitignore` (`.ai-handoff/runtime/`). Only `.ai-handoff/README.md` is tracked.
+- Handoff messages must not contain secrets, tokens, personal information, or production data, and must not be used to route around this repository's existing human-confirmation requirements (real-device UI checks, high-risk operations, `AGENTS.md`'s Git safety rules).
+- Actually invoking Codex CLI (via `detect-codex.ps1` and `codex exec`) is a repository operation like any other; it is not run unattended without the operator's awareness.

@@ -1,0 +1,2 @@
+# Local AI Handoff runtime (ephemeral working state, not permanent history)
+.ai-handoff/runtime/
