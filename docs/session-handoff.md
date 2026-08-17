@@ -53,11 +53,11 @@
 
 ## 実行担当
 
+- 役割分担の基本方針は `AGENTS.local.md` の「Roles And Default Flow」節を参照する。作業開始時に必ず確認すること。
 - 本セッション: Claude（ローカル実装・ローカルGit操作）。
-- PR監査・merge管理: GPT（GitHub上）。
-- merge可否判断・承認（高リスク）: 人間。
-- 承認後のGitHub上のSquash and merge実行: GPT。
-- post-merge-verification: GPT。
+- 本リポジトリのmerge実行に関する補足（`AGENTS.local.md`にはまだ記載がない詳細）:
+  - 承認後のGitHub上のSquash and merge実行: GPT。
+  - post-merge-verification: GPT。
 
 ## 人間確認が必要な項目
 

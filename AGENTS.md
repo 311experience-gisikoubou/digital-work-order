@@ -1,66 +1,64 @@
-# Agent Operating Rules
+# AGENTS.md
 
-This file is the common entry point for AI agents working in this repository.
+## 役割
 
-## Required Reading
+このrepositoryは、複数のAIツールと複数のアプリケーションrepositoryで共通利用する開発基盤の正本です。特定のAIツール・特定のプログラミング言語・特定のアプリケーションに依存しない内容だけを扱います。
 
-- Read this file first.
-- Read `AGENTS.local.md` for digital-work-order specific rules.
-- Read `docs/learnings.md` and `docs/session-handoff.md` at the start of work, when they exist.
-- Treat `docs/design.md` as the source of truth for business and screen behavior.
-- Common skills may be used after `.agents/skills/` is introduced.
-- Do not assume a skill exists unless it has actually been installed in this repository or is available in the current environment.
-- Do not change already-established automated flows, AI role assignments, or human-confirmation scope based on in-conversation guesses.
+各アプリケーションrepository側には、この内容をversion付きの同期コピーとして取り込んで利用します。
 
-## Git And Work Rules
+## 読む順番
 
-- Do not commit directly to `main`.
-- Do not force push.
-- Use one branch for one purpose.
-- Use one PR for one purpose.
-- If the user asks for audit, investigation, or read-only work only, do not change files.
-- Do not silently fix, delete, or revert unexpected changes.
-- Do not implement behavior from guesswork. Confirm requirements or report uncertainty.
-- Check the impact area before making changes.
-- Prefer one change followed by one appropriate verification.
-- After implementation, run static checks or tests appropriate to the changed files.
-- Before PR work or final handoff, audit the diff and safety of the change.
-- For changes that affect visible behavior or device interaction, include human real-device UI verification when needed.
-- Do not cause additional paid service usage or install paid services without explicit approval.
-- Do not expose secrets, tokens, credentials, or personal information in output, commits, logs, or test artifacts.
+このrepositoryの内容を導入したアプリケーションrepositoryで作業するAIは、次の順番で確認してください。
 
-## Independent Third-Party Audit
+1. `AGENTS.md`（このファイル。共通ルール）
+2. `AGENTS.local.md`（そのアプリケーションrepository固有のルール）
+3. そのアプリケーションrepositoryの業務仕様の正本
+4. 該当する共通スキル
+5. repository内の実装・テスト・設定
 
-Antigravity CLI / Gemini may be used as an independent third-party reviewer when the cost of overlooking an error is high. It is not required for every change.
+この順番は、特定のAIツールが持つ機能（import構文など）に依存せず、どのAIが読んでも同じ手順で進められるようにするためのものです。
 
-Typical use cases include important design changes, broad-impact changes, security-sensitive changes, complex state or data consistency, database / transaction / migration related work if introduced in the future, and final independent review before a high-risk PR.
+## Git安全原則
 
-The primary implementation agent remains responsible for its own audit and tests. A third-party review does not replace `test-gate`, `final-pr-audit`, or human device verification.
+- `main`へ直接commitしない。
+- 作業前に、local/originの状態、現在のHEAD、working treeの状態、stashの有無を確認する。
+- 1つのPull Requestは1つの目的にとどめる。
+- 想定外の差分がある場合は、その時点で作業を止めて報告する。
+- amend、force push、強制的なbranch削除・データ削除は、明示的な許可がない限り行わない。
+- Squash and mergeの後は、マージ結果の検証を行う。
+- 読み取り専用の監査では、ファイルを変更しない。
 
-Do not expose secrets, tokens, personal information, or production data to an external review process. Use only currently available tooling that does not create additional cost.
+## 実装原則
 
-## Roles And Default Flow
+- 実装・修正・リファクタリングの前に、現状把握のための監査を行う。
+- 仕様とコードが矛盾する場合、推測で実装を進めない。その時点で止めて報告する。
+- 変更は最小限にとどめ、段階的に確認しながら進める。
+- 既存の挙動を無断で変更しない。
+- 必要なテストと監査を省略しない。
+- 具体的な技術コマンド（ビルド・lint・テスト等）は、各アプリケーションrepository側の`AGENTS.local.md`を参照する。
+- 共通基盤側には、技術スタック固有のコマンドを追加しない。
 
-- Default roles for this repository:
-  - Local implementation and local Git operations: Codex
-  - GitHub PR audit and merge management: GPT
-  - Real-device UI/PDF verification and high-risk operation judgment: Human
-- Default flow: preflight → implementation → test-gate → commit/push/PR → final-pr-audit.
-- High-risk operations (merge, deletion, direct changes to `main`, force push, etc.) follow the human-confirmation rules under "Git And Work Rules" above.
-- If a decision is NG, UNKNOWN, or not determinable, do not proceed on a guess. Stop and report.
-- AI agents do not auto-update `AGENTS.md`, `AGENTS.local.md`, or `docs/learnings.md`. An AI may propose improvements; changes are applied only after human approval.
+## セキュリティ
 
-## Future Skills
+- secrets、token、個人情報、実データを表示・commitしない。
+- 実データが入っている環境を直接変更しない。
+- 検証環境と実データ環境を分離する。
+- 必要最小限の権限で作業する。
+- 有料サービスや自動課金につながる仕組みを無断で導入しない。
 
-The following skills are expected to be useful after they are introduced into `.agents/skills/`:
+## スキル運用
 
-- `preflight-audit`
-- `test-gate`
-- `final-pr-audit`
-- `post-merge-verification`
-- `handoff`
-- `manual-ui-smoke-test`
+- 通常の自然言語による依頼から、必要なスキルを自動的に選択する。
+- ユーザーへ、不要なスキル名の選択を求めない。
+- 複数のスキルが必要な場合は、組み合わせて使用する。
+- 新しいスキルを追加する場合は、既存スキルとの重複・必要性・優先度を確認してから提案する。
+- 共通スキルは、特定の言語、特定のpackage manager、特定のframework、特定のrepository名、特定の絶対パスを名指ししない。
+- 技術スタック固有の手順は、共通スキルではなく各アプリケーションrepository側の`AGENTS.local.md`に置く。
 
-Until those skills exist in this repository or are available in the current environment, treat them as planned workflow names, not installed tools.
+## 同期コピーの扱い
 
-`migration-safety` is not part of the normal workflow for this repository. Reconsider it only if DB, schema migration, or migration-equivalent behavior is introduced.
+- 各アプリケーションrepository側にある`AGENTS.md`と`.agents/skills/`以下は、この共通repositoryからの同期コピーである。
+- 同期コピーは、アプリケーションrepository側で直接編集しない。
+- アプリケーション固有のルールは、`AGENTS.local.md`にのみ記載する。
+- 共通ルールを変更する場合は、まずこの共通repository側へ変更を反映し、`VERSION`を更新してから、各アプリケーションへ同期する。
+- 同期の際は、同期元のversionとcommit SHAを記録する。
