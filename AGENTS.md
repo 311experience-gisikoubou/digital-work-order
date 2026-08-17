@@ -6,9 +6,11 @@ This file is the common entry point for AI agents working in this repository.
 
 - Read this file first.
 - Read `AGENTS.local.md` for digital-work-order specific rules.
+- Read `docs/learnings.md` and `docs/session-handoff.md` at the start of work, when they exist.
 - Treat `docs/design.md` as the source of truth for business and screen behavior.
 - Common skills may be used after `.agents/skills/` is introduced.
 - Do not assume a skill exists unless it has actually been installed in this repository or is available in the current environment.
+- Do not change already-established automated flows, AI role assignments, or human-confirmation scope based on in-conversation guesses.
 
 ## Git And Work Rules
 
@@ -36,6 +38,17 @@ Typical use cases include important design changes, broad-impact changes, securi
 The primary implementation agent remains responsible for its own audit and tests. A third-party review does not replace `test-gate`, `final-pr-audit`, or human device verification.
 
 Do not expose secrets, tokens, personal information, or production data to an external review process. Use only currently available tooling that does not create additional cost.
+
+## Roles And Default Flow
+
+- Default roles for this repository:
+  - Local implementation and local Git operations: Codex
+  - GitHub PR audit and merge management: GPT
+  - Real-device UI/PDF verification and high-risk operation judgment: Human
+- Default flow: preflight → implementation → test-gate → commit/push/PR → final-pr-audit.
+- High-risk operations (merge, deletion, direct changes to `main`, force push, etc.) follow the human-confirmation rules under "Git And Work Rules" above.
+- If a decision is NG, UNKNOWN, or not determinable, do not proceed on a guess. Stop and report.
+- AI agents do not auto-update `AGENTS.md`, `AGENTS.local.md`, or `docs/learnings.md`. An AI may propose improvements; changes are applied only after human approval.
 
 ## Future Skills
 
