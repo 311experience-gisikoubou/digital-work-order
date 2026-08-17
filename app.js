@@ -69,7 +69,19 @@ document.addEventListener('click', e => {
     document.querySelectorAll(`.toggle-btn[data-group="${group}"]`).forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
   }
+
+  if (btn.dataset.group === 'bar-ins' || btn.dataset.group === 'bar-jishi') {
+    syncCastBarQuantity(btn.dataset.group === 'bar-ins' ? 'ins' : 'jishi');
+  }
 });
+
+function syncCastBarQuantity(insKey) {
+  const group = insKey === 'ins' ? 'bar-ins' : 'bar-jishi';
+  const castBarButton = [...document.querySelectorAll(`.toggle-btn[data-group="${group}"]`)]
+    .find(btn => btn.textContent.trim() === '鋳造バー');
+  const area = document.getElementById(`cast-bar-${insKey === 'ins' ? 'insurance' : 'jishi'}-area`);
+  if (area) area.hidden = !(castBarButton && castBarButton.classList.contains('active'));
+}
 
 // ============================================================
 //  展開エリア制御（汎用）
@@ -224,6 +236,11 @@ function collectFormData() {
     return el ? (el.dataset.val || el.textContent.trim()) : null;
   }
 
+  function getToggleVals(group) {
+    return [...document.querySelectorAll(`.toggle-btn[data-group="${group}"].active`)]
+      .map(el => el.dataset.val || el.textContent.trim());
+  }
+
   // 発注形態
   const orderTypes = [...document.querySelectorAll('#order-type-group input:checked')].map(c => c.value);
 
@@ -235,7 +252,19 @@ function collectFormData() {
   const claspType = ins === 'insurance' ? getToggleVal('clasp-ins') : getToggleVal('clasp-jishi');
 
   // バー
-  const barType = ins === 'insurance' ? getToggleVal('bar-ins') : getToggleVal('bar-jishi');
+  const barGroup = ins === 'insurance' ? 'bar-ins' : 'bar-jishi';
+  const barTypes = getToggleVals(barGroup);
+  const barType = barTypes[0] || null;
+  function castBarCount(jaw) {
+    const checkbox = document.getElementById(`chk-cast-bar-${jaw}-${insKey}`);
+    const input = document.getElementById(`cast-bar-${jaw}-count-${insKey}`);
+    const count = Math.max(0, Math.floor(Number(input?.value || 0)));
+    return checkbox?.checked && Number.isFinite(count) ? count : 0;
+  }
+  const castBars = {
+    upper: castBarCount('upper'),
+    lower: castBarCount('lower')
+  };
 
   // 人工歯
   const toothAnt  = ins === 'insurance' ? getToggleVal('tooth-ant-ins')  : getToggleVal('tooth-ant-jishi');
@@ -266,12 +295,15 @@ function collectFormData() {
     // 発注形態
     orderTypes,
     repairDetail: document.getElementById('repair-detail').value,
+    hasRimount: document.getElementById(`chk-rimount-${insKey}`).checked,
 
     // 補綴物
     bedType:      getToggleVal(ins === 'insurance' ? 'bed-insurance' : 'bed-jishi'),
     devices,
     claspType,
     barType,
+    barTypes,
+    castBars,
 
     // メタルアップ
     hasMetalup:   document.getElementById(`chk-metalup-${insKey}`).checked,
@@ -349,10 +381,12 @@ function resetForm() {
    'shade-guide','shade-number','delivery-date','next-appointment','next-appointment-date','next-appointment-time','remarks',
    'repair-detail','metalup-ins-detail','kyoko-ins-detail',
    'metalup-jishi-detail','kyoko-jishi-detail',
-   'articulator-type','articulator-detail'
+   'articulator-type','articulator-detail',
+   'cast-bar-upper-count-ins','cast-bar-lower-count-ins',
+   'cast-bar-upper-count-jishi','cast-bar-lower-count-jishi'
   ].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.value = '';
+    if (el) el.value = el.type === 'number' ? '1' : '';
   });
 
   // 歯式リセット
@@ -368,6 +402,8 @@ function resetForm() {
 
   // トグル・ボタンリセット
   document.querySelectorAll('.toggle-btn.active').forEach(b => b.classList.remove('active'));
+  syncCastBarQuantity('ins');
+  syncCastBarQuantity('jishi');
   buildNextAppointmentTimeOptions('');
 }
 
