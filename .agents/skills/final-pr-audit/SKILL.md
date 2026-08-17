@@ -1,82 +1,66 @@
 ---
 name: final-pr-audit
-description: Use after implementation and before PR creation, push approval, final completion reports, or when the user asks for final review, PR audit, merge readiness, or whether it is safe to proceed in digital-work-order. Verify branch, upstream, HEAD, base branch, origin/main diff, commit count, working tree, changed files, scope, docs/design.md consistency, AGENTS.md and AGENTS.local.md compliance, test-gate results, unrun checks, secrets risk, dangerous operations, added-cost risk, high-risk app areas, manual device confirmation need/result, and blockers. Treat Antigravity CLI / Gemini only as an optional independent third-party review for high-risk work, not as a replacement for primary audit, tests, or human device checks.
+description: Use after implementation and before PR creation, merge, or final completion reports, or when the user asks for a final review, PR audit, merge readiness check, or whether it is safe to proceed. Verify base/head branch and SHA, commit count, changed files, diff scope, migration and dependency-manifest diffs, design consistency, report consistency, the repository's format/lint/type-check/build/selftest verification, generated tracked diffs, real-device status, GitHub information limits, and blockers, and separate audit approval from merge execution.
 ---
 
 # Final PR Audit
 
-Use when work is complete, before PR creation, before approving push, or when the user asks for final confirmation.
+Use when work is complete or the user asks for final confirmation.
 
 ## Required Checks
 
-- Confirm current branch, upstream, and HEAD.
-- Confirm base branch.
-- Compare the work against `origin/main` when relevant.
-- Confirm commit count.
-- Confirm working tree status.
-- Confirm changed files.
-- Confirm all changes are within the requested scope.
-- Confirm there are no violations of `AGENTS.md` or `AGENTS.local.md`.
-- Confirm consistency with `docs/design.md` when behavior or screen specifications are affected.
-- Confirm the implementation report matches the actual diff.
-- Confirm `test-gate` results for this change, when available.
-- Confirm unrun or unavailable checks are clearly reported.
-- Run or verify `git diff --check` unless already reported for the same final state.
-- Confirm no force push, destructive operation, or unsafe Git operation is being requested.
-- Confirm added-cost risk.
-- Confirm secrets, tokens, credentials, personal information, and production data are not introduced.
-- Confirm whether manual device confirmation is required and whether it has been completed.
-- Identify blockers.
+- Base and head branch
+- Base and head SHA
+- Commit count
+- Changed files
+- Scope-outside changes — anything changed outside what the task called for, and anything inside the repository's forbidden scope (see `AGENTS.local.md`)
+- Migration diffs, if any (see `migration-safety`)
+- Dependency-manifest and lockfile diffs, if the repository has any (the specific file names are repository-specific — see `AGENTS.local.md`)
+- Consistency with the repository's design documentation (its "Source of Truth")
+- Consistency with the implementation report already given to the user
+- `git diff --check`
+- The repository's format, lint, type-check, build, and selftest verification, as defined in `AGENTS.local.md`
+- The results already recorded by `test-gate` for this change
+- Security-relevant changes (see "Security Review" below)
+- Consistency between the PR description and the actual change (see "PR Description Audit" below)
+- Real-device or manual confirmation status
+- Blockers
 
-## High-Risk Impact Areas
+## Security Review
 
-When relevant, check `docs/design.md` and the diff for effects on:
+Confirm, independently of the other checks:
 
-- `localStorage` persistence behavior
-- PDF and print behavior
-- Touch and pointer handling
-- Apple Pencil behavior
-- Calendar behavior
-- Insurance / self-pay switching
-- Clasp behavior
-- Tooth number behavior
-- Holiday judgment
-- Surcharge judgment
+- No secrets, credentials, tokens, personal information, or real data are introduced into tracked files or the PR description.
+- Whether the change affects authentication, authorization, or permission handling, and whether that effect was intended.
+- Whether the change adds a new external call, external service, or external dependency.
+- Whether input handling, output handling, or logging introduced or changed by this change could leak sensitive information or accept unsafe input.
+- Whether the change could cause data destruction, information disclosure, or an unintended increase in privilege.
+- Consistency with the repository's `AGENTS.local.md` "Data and Security" section.
+- Any security-relevant point that could not be verified — state it explicitly rather than assuming it is safe.
 
-## Independent Third-Party Audit
-
-Antigravity CLI / Gemini may be considered for high-risk independent review.
-
-- It is not required for every change.
-- It does not replace the primary implementation agent's audit or tests.
-- It does not replace human device confirmation.
-- Do not expose secrets, tokens, credentials, personal information, or production data.
-- Use only tooling that is currently available and does not create additional cost.
+A material, unresolved security risk, or a security question that cannot be verified, is a Blocker. This review names no specific framework, vulnerability scanner, or command; use whatever the repository's `AGENTS.local.md` designates, if any.
 
 ## PR Description Audit
 
-When PR title and body are available, confirm:
+When the PR title and body are available, confirm:
 
-- The title and body describe the actual diff.
-- Summary, included, not-included, and verification sections match implementation fact.
-- No unimplemented feature is described as complete.
-- No unrun test is described as passing.
-- Branches, SHAs, commit counts, and changed files match the audited state.
-- Known issues, unverified items, and blockers are not omitted.
+- The title and body describe what the diff actually contains, not what was originally planned.
+- Sections such as Summary, Included, Not included, and Verification match implementation fact.
+- No unimplemented feature is described as complete, and no test that was not run is described as passing.
+- Stated changed-file counts, commit counts, version, branch, and SHAs match what was independently verified in this audit.
+- No known issue, unverified item, or Blocker is omitted from the description.
+- If the PR description cannot be obtained, state that limitation explicitly, and separate what was confirmed from local Git state from what could not be checked.
 
-If PR information is unavailable locally, state that limitation instead of guessing.
+A material mismatch between the PR description and the actual diff is a Blocker. This audit does not modify the PR description; it only reports mismatches.
 
-## Stop Conditions
+## Command Notes
 
-- Current branch or base branch is unclear.
-- Changed files exceed the requested scope.
-- The diff conflicts with `docs/design.md`.
-- `AGENTS.md` or `AGENTS.local.md` is violated.
-- Required verification failed or was not run.
-- A material security or privacy risk is unresolved.
-- Added-cost risk is unresolved.
-- Required manual device confirmation is missing.
-- PR description materially misstates the diff.
+- Build output directories may be updated by a build command; verify tracked files remain unchanged afterward.
+- For a migration checksum failure, first check for raw-byte or line-ending differences before treating it as a logic failure.
+- If GitHub PR data is unavailable locally, list browser-confirmation items instead of guessing.
+- Audit approval is not merge execution.
+- For post-implementation verification execution and result tracking, use `test-gate`; final PR audit checks the `test-gate` results rather than re-running everything from scratch.
+- For actual post-merge verification and local `main` synchronization, use `post-merge-verification`.
 
 ## Output
 
@@ -87,10 +71,13 @@ Report:
 - Diff scope
 - Specification fit
 - Verification results
-- Security and privacy review result
-- Added-cost review result
-- PR description consistency result, if applicable
-- Manual device confirmation status
+- Security review result
+- PR description consistency result
+- Real-device confirmation
 - Blockers
-- Readiness to proceed
+- Merge readiness
 - Operations not performed
+
+## Application-Specific Configuration
+
+The exact build/test/lint/type-check commands, dependency-manifest file names, migration conventions, and forbidden scope come from that repository's `AGENTS.local.md` — specifically its "Repository Commands", "Forbidden Scope", and "Migration Rules" sections. This skill names no specific language, package manager, or framework.

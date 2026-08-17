@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: Use when moving digital-work-order work to a new chat, Claude Code, Codex, another AI, or another session, or when the user asks for handoff, 引き継ぎ, session transfer, continuation notes, or a context summary. Produce paste-ready Markdown with repository, local path, branch, upstream, HEAD, working tree, unpushed commits, completed work and commit SHAs, current phase, docs/design.md source of truth, available AI entrypoints and skills, real-device results, unchecked items, protected areas, next steps, blockers, and known harmless warnings. Keep facts, assumptions, and unknowns separate.
+description: Use when moving work to a new chat, Claude Code, Codex, another AI, or another session, or when the user asks for handoff,引き継ぎ, session transfer, context summary, or continuation notes. Produce paste-ready Markdown with repository, path, branch, HEAD, main SHA, upstream, working tree, completed work, recent PR, confirmed specs, unfinished items, real-device results, next steps, forbidden areas, Git rules, AI/user roles, zero-cost condition, and mark unknown conversation-only facts as 要補足.
 ---
 
 # Handoff
@@ -13,47 +13,33 @@ Write paste-ready Markdown.
 
 ## Include
 
+- Project overview
 - Repository
 - Local path
 - Current branch
-- Upstream
 - HEAD
-- Working tree status
-- Unpushed commits
+- Main SHA
+- Upstream
+- Working tree
 - Completed work
-- Completed commit SHAs
-- Current work phase
-- Source of truth: `docs/design.md`
-- Current AI entrypoints and available skills
+- Recent PR
+- Confirmed specifications
+- Unfinished items
 - Real-device confirmation results
-- Unchecked or unknown items
-- Protected or high-care areas from `AGENTS.local.md` and `docs/design.md`
-- Next steps
-- Blockers
-- Known harmless warnings
-- Git workflow constraints
+- Next work
+- Forbidden areas
+- Git workflow
 - AI and user role split
 - Additional-cost-zero condition
+- What the next AI should check first
 
 ## Rules
 
 - Do not guess conversation-only details.
 - Mark unknown or unavailable information as `要補足`.
 - Separate facts from recommendations.
-- Do not include old branch names, old SHAs, or old fallback points as fixed template content.
-- Include operations not performed.
-- Include blockers plainly.
-- Include relevant repository-specific rules in the handoff text itself instead of assuming the next agent will read every file first.
+- Include blockers and operations not performed.
 
-## Output Sections
+## Application-Specific Configuration
 
-Use concise sections:
-
-- Current State
-- Completed Work
-- Confirmed Specifications
-- Verification And Device Checks
-- Constraints
-- Next Steps
-- Blockers
-- Unknowns / 要補足
+Repository-specific detail — forbidden areas, the additional-cost-zero condition's specifics, and any other repository rule — is recorded in that repository's `AGENTS.local.md`. Include the relevant facts from it in the handoff document itself rather than assuming the next AI or session will read `AGENTS.local.md` unprompted.
