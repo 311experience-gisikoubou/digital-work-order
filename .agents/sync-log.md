@@ -31,7 +31,31 @@
   - `.claude/skills/manual-ui-smoke-test/SKILL.md`（repo固有wrapper。foundation側に対応するtemplateは存在しない。今回新設）
 - Local deviations found before synchronization: 同期前の`AGENTS.md`は、foundationとは独立に手書きされた英語版であり、foundation正本とは構成・内容が全く異なっていた（一致行数0）。repository固有情報（役割分担・force push無条件禁止・独立第三者監査方針・学習文書の読了指示など）は、本同期に先立ち`AGENTS.local.md`側へ退避済み（Step 2・Step 4A-準備・A修正）。`.agents/skills/`配下の`preflight-audit`・`test-gate`・`final-pr-audit`・`handoff`の4件も、foundation非導入以前にdigital-work-order名指しで手書きされた独自版であり、同期元と内容が異なっていた（commit `cabdf25`で導入、Claude Codeの`.claude/skills/`からは一度も自動選択されていないことを事前調査済み）。`migration-safety`・`post-merge-verification`・`.agents/skills/README.md`は本repositoryに未導入だった（新規追加）。`.claude/skills/`はディレクトリ自体が存在しなかった（新規作成）。
 - Verification performed: `git diff --check`（対象6ファイル、warning無し）。foundation正本6スキル本体との内容一致確認（`diff`、差分なし）。`.agents/skills/README.md`の内容一致確認（`diff`、差分なし）。`.claude/skills/`6件の参照path（`../../../.agents/skills/<name>/SKILL.md`）確認。`manual-ui-smoke-test`本体の同期前後SHA256一致確認（`dcd5db61...`で一致、変更なし）。secrets/token/個人情報キーワード検索（該当なし）。`docs/design.md`・application code（`app.js`等）の未変更確認。
+- Resulting commit SHA: `cb6e4ab4969c5bc25f18a69695fda34b20999f68`
+- PR number: `#6`
+- Rollback commit or rollback method: 本同期は独立した1commitとして作成する予定のため、問題が判明した場合は当該commitを`git revert`で取り消す。
+- Notes: `.claude/skills/manual-ui-smoke-test/SKILL.md`はfoundation同期対象ではないrepository固有wrapperであり、将来のfoundation同期で上書き・削除してはならない（dentalの`merge-gate`と同種の扱い）。次回foundation側に新しい共通skillが追加された場合は、本ファイルへ新しいエントリを追記すること（既存エントリの書き換えはしない）。（2026-08-18追記：上記2項目は当時未確定のまま放置されていたため、git historyから確認し確定値へ補完した。）
+
+## Entry: Local AI Handoff adoption (local-ai-handoff skill + .ai-handoff/)
+
+- Target repository: `digital-work-order`
+- Target branch: `feature/local-ai-handoff-adoption`
+- Foundation version: `1.0.0-dev.5`
+- Source repository: `ai-dev-foundation`
+- Source commit SHA: `2a2b7fb1c708356252abfa8a59772cb00dc0e097`（`main`、Local AI Handoff Foundation Support merge commit）
+- Synced date: `2026-08-18`
+- Synced by: `Claude Code（Local AI Handoff実証作業の一環としての手動同期）`
+- Synchronized files:
+  - `.agents/skills/local-ai-handoff/SKILL.md`
+  - `.agents/skills/local-ai-handoff/detect-codex.ps1`
+  - `.claude/skills/local-ai-handoff/SKILL.md`
+- New repository-local files (from foundation template, not the skill canon itself):
+  - `.ai-handoff/README.md`（`templates/.ai-handoff/README.md.template`から作成。digital-work-order固有の保護対象への言及を追記）
+  - `.gitignore`（新設。`.ai-handoff/runtime/`を除外）
+  - `.ai-handoff/runtime/{inbox,outbox,processed}/`（ローカルのみに作成。`.gitignore`により追跡対象外。このsync-logにも実データは記載しない）
+- Local deviations found before synchronization: `local-ai-handoff`はdigital-work-order側に未導入だった（新規追加）。`.gitignore`自体がrepository全体で存在しなかった（新設）。
+- Verification performed: foundation正本（`.agents/skills/local-ai-handoff/SKILL.md`・`detect-codex.ps1`）およびwrapper（`templates/.claude/skills/local-ai-handoff/SKILL.md.template`）との`diff`による内容完全一致確認。`git status`により`.ai-handoff/runtime/`が追跡対象外であることを確認。secrets/token/個人情報キーワード検索（該当なし）。アプリケーションコード・`docs/design.md`・localStorage・PDF・clasp・歯式・memoStrokes関連ファイルの未変更確認。
 - Resulting commit SHA: `not yet created`
 - PR number: `not yet created`
 - Rollback commit or rollback method: 本同期は独立した1commitとして作成する予定のため、問題が判明した場合は当該commitを`git revert`で取り消す。
-- Notes: `.claude/skills/manual-ui-smoke-test/SKILL.md`はfoundation同期対象ではないrepository固有wrapperであり、将来のfoundation同期で上書き・削除してはならない（dentalの`merge-gate`と同種の扱い）。次回foundation側に新しい共通skillが追加された場合は、本ファイルへ新しいエントリを追記すること（既存エントリの書き換えはしない）。
+- Notes: 実際のClaude→Codex→Claudeのdry-run実証（Codex CLIの実起動を含む）は、本sync（ファイル導入のみ）とは別に、明示確認のうえで実施する。
