@@ -25,10 +25,13 @@
 - `AGENTS.md` に最小追記（役割分担・既定フロー・NG/UNKNOWN時の停止・自動更新禁止の原則）。
 - `docs/learnings.md` を新設し、今回の再発防止事項を記録。
 - `docs/session-handoff.md`（本ファイル）を新設。
+- commit: 完了。
+- push: 完了。
+- PR #4 作成: 完了。
 
 ## 未完了
 
-- commit / push / PR作成 / final-pr-audit。
+- final-pr-audit: GPT実施中。
 
 ## 確認済み
 
@@ -42,9 +45,7 @@
 
 ## 次の最小作業
 
-- 変更差分の最終確認（`git diff --check` 等）。
-- commit → push → PR作成。
-- PR作成後、final-pr-audit相当の確認（現時点ではスキル未導入のため手動確認）。
+- 指摘修正 → GPT再監査 → 人間がmerge可否判断。
 
 ## blocker
 
@@ -54,7 +55,9 @@
 
 - 本セッション: Claude（ローカル実装・ローカルGit操作）。
 - PR監査・merge管理: GPT（GitHub上）。
-- merge実行・高リスク判断: 人間。
+- merge可否判断・承認（高リスク）: 人間。
+- 承認後のGitHub上のSquash and merge実行: GPT。
+- post-merge-verification: GPT。
 
 ## 人間確認が必要な項目
 
