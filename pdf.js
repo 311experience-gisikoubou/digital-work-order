@@ -337,7 +337,14 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
 
     var deviceCountItems = [];
     if (items && items.length) deviceCountItems = deviceCountItems.concat(items);
-    if (order.barType) deviceCountItems.push(order.barType + 'バー ×1');
+    var hasCastBarJaws = order.castBarJaws && typeof order.castBarJaws === 'object';
+    if (hasCastBarJaws) {
+      if (order.castBarJaws.upper) deviceCountItems.push('鋳造バー（上顎）×1');
+      if (order.castBarJaws.lower) deviceCountItems.push('鋳造バー（下顎）×1');
+    }
+    if (order.barType && !(hasCastBarJaws && order.barType === '鋳造バー')) {
+      deviceCountItems.push(order.barType + (order.barType.indexOf('バー') === -1 ? 'バー' : '') + ' ×1');
+    }
     if (deviceCountItems.length) {
       pushHtmlRow(
         '装置',
@@ -372,7 +379,12 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
     pushHtmlRow('オプション', optionInfoHtml ? '<span class="inline-info">' + optionInfoHtml + '</span>' : '', 'inline-row option-row');
     R = compactR;
 
-    var remarksText = String(order.remarks || '');
+    var repairDetail = String(order.repairDetail || '').trim();
+    var isRepairOrder = Array.isArray(order.orderTypes) && order.orderTypes.indexOf('修理') !== -1;
+    var remarksText = [
+      isRepairOrder && repairDetail ? '修理詳細：' + repairDetail : '',
+      String(order.remarks || '')
+    ].filter(Boolean).join('\n');
     var remarksLineCount = remarksText ? remarksText.split(/\r\n|\r|\n/).length : 0;
     var remarksScore = remarksText.replace(/\s/g, '').length + Math.max(0, remarksLineCount - 1) * 18;
     var notesLevel = remarksScore > 620 ? ' notes-ultra' : (remarksScore > 420 ? ' notes-dense' : (remarksScore > 240 ? ' notes-long' : (remarksScore > 120 ? ' notes-medium' : '')));
@@ -397,7 +409,9 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
         return '<span class="pdf-badge ' + badgeClass(v, 'order') + '">' + esc(v) + '</span>';
       }).join('')
       : '<span class="meta-empty">-</span>';
-    var metaInsuranceText = order.insuranceType === 'insurance' ? '保険' : '自費';
+    var metaInsuranceText = order.hasRimount
+      ? 'リマウント咬合調整'
+      : (order.insuranceType === 'insurance' ? '保険' : '自費');
     var metaBar =
       '<div class="meta-bar">' +
       '<div class="meta-item"><span class="meta-lbl">発注形態</span><span class="meta-val badge-list">' + metaOrderBadges + '</span></div>' +

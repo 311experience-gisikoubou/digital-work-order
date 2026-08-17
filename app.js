@@ -236,6 +236,12 @@ function collectFormData() {
 
   // バー
   const barType = ins === 'insurance' ? getToggleVal('bar-ins') : getToggleVal('bar-jishi');
+  const castBarSelected = [...document.querySelectorAll(`.toggle-btn[data-group="bar-${insKey}"].active`)]
+    .some(el => (el.dataset.val || el.textContent.trim()) === '鋳造バー');
+  const castBarJaws = {
+    upper: castBarSelected && document.getElementById(`chk-cast-bar-upper-${insKey}`).checked,
+    lower: castBarSelected && document.getElementById(`chk-cast-bar-lower-${insKey}`).checked
+  };
 
   // 人工歯
   const toothAnt  = ins === 'insurance' ? getToggleVal('tooth-ant-ins')  : getToggleVal('tooth-ant-jishi');
@@ -272,6 +278,8 @@ function collectFormData() {
     devices,
     claspType,
     barType,
+    castBarJaws,
+    hasRimount: document.getElementById(`chk-rimount-${insKey}`).checked,
 
     // メタルアップ
     hasMetalup:   document.getElementById(`chk-metalup-${insKey}`).checked,
