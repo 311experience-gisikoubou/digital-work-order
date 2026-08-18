@@ -55,7 +55,26 @@
   - `.ai-handoff/runtime/{inbox,outbox,processed}/`（ローカルのみに作成。`.gitignore`により追跡対象外。このsync-logにも実データは記載しない）
 - Local deviations found before synchronization: `local-ai-handoff`はdigital-work-order側に未導入だった（新規追加）。`.gitignore`自体がrepository全体で存在しなかった（新設）。
 - Verification performed: foundation正本（`.agents/skills/local-ai-handoff/SKILL.md`・`detect-codex.ps1`）およびwrapper（`templates/.claude/skills/local-ai-handoff/SKILL.md.template`）との`diff`による内容完全一致確認。`git status`により`.ai-handoff/runtime/`が追跡対象外であることを確認。secrets/token/個人情報キーワード検索（該当なし）。アプリケーションコード・`docs/design.md`・localStorage・PDF・clasp・歯式・memoStrokes関連ファイルの未変更確認。
+- Resulting commit SHA: `eef83750cad278280641b8dafb9060f1f856a05d`
+- PR number: `#7`
+- Rollback commit or rollback method: 本同期は独立した1commitとして作成する予定のため、問題が判明した場合は当該commitを`git revert`で取り消す。
+- Notes: 実際のClaude→Codex→Claudeのdry-run実証（Codex CLIの実起動を含む）は、本sync（ファイル導入のみ）とは別に、明示確認のうえで実施した。dry-run結果はPR #7のConversationへ`[AI_HANDOFF]`として投稿済み（PASS）。
+
+## Entry: Local AI Handoff V2 sync (automated duplicate/drift guards)
+
+- Target repository: `digital-work-order`
+- Target branch: `feature/local-ai-handoff-v2-guards`
+- Foundation version: `1.0.0-dev.6`
+- Source repository: `ai-dev-foundation`
+- Source commit SHA: `200cbd780b9563a22715df0b15df17ff8563154c`（`main`、local-ai-handoff V2 merge commit）
+- Synced date: `2026-08-18`
+- Synced by: `Claude Code（Local AI Handoff V2作業の一環としての手動同期）`
+- Synchronized files:
+  - `.agents/skills/local-ai-handoff/SKILL.md`（更新：message_id／head_sha必須化、Automated Guards節追加）
+  - `.agents/skills/local-ai-handoff/validate-handoff-message.ps1`（新規）
+- Local deviations found before synchronization: なし（V1導入時と同じ経路での追加更新）。
+- Verification performed: foundation正本（`SKILL.md`・`validate-handoff-message.ps1`）との`diff`による内容完全一致確認。secrets/token/個人情報キーワード検索（該当なし）。アプリケーションコード・`docs/design.md`の未変更確認。
 - Resulting commit SHA: `not yet created`
 - PR number: `not yet created`
 - Rollback commit or rollback method: 本同期は独立した1commitとして作成する予定のため、問題が判明した場合は当該commitを`git revert`で取り消す。
-- Notes: 実際のClaude→Codex→Claudeのdry-run実証（Codex CLIの実起動を含む）は、本sync（ファイル導入のみ）とは別に、明示確認のうえで実施する。
+- Notes: `.claude/skills/local-ai-handoff/SKILL.md`（wrapper）は今回変更なし（frontmatter・参照先とも既存のまま有効）。

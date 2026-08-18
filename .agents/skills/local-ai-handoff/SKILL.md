@@ -32,12 +32,38 @@ The live runtime lives in the application repository being worked on, never in `
 
 1. The sending AI writes a message to `runtime/outbox/<ISO8601-UTC>-<from>-to-<to>.md` (for example, `20260817T235900Z-claude-to-codex.md`). The filename's `<from>-to-<to>` makes the direction explicit regardless of which folder the file is later found in.
 2. Before the addressed AI is invoked, the file is moved from `outbox/` to `inbox/`. This is a deliberate, visible step (not automatic), so there is always a clear record of what has been handed off versus what is still pending.
-3. The addressed AI reads from `inbox/`, acts on it, and — when it produces a result the other side needs — writes its own message to `outbox/` (for the return trip) using the same naming convention.
-4. Once a message has been read and acted upon, it is moved from `inbox/` to `processed/`. Do not delete processed messages; they are the audit trail for what was handed off and when.
+3. **Immediately before the addressed AI is invoked**, run `validate-handoff-message.ps1` against the `inbox/` file (see "Automated Guards" below). If it does not exit 0, stop — do not invoke the addressed AI, and report the failure reason to the human.
+4. The addressed AI reads from `inbox/`, acts on it, and — when it produces a result the other side needs — writes its own message to `outbox/` (for the return trip) using the same naming convention, including fresh `message_id` and `head_sha` values.
+5. Once a message has been read and acted upon, it is moved from `inbox/` to `processed/`. Do not delete processed messages; they are the audit trail for what was handed off and when.
 
 ## Message Content
 
 Reuse the `handoff` skill's format and required sections (repository, path, branch, HEAD, upstream, working tree, completed work, recent PR, confirmed specs, unfinished items, next steps, blockers, `要補足` for unknowns) rather than inventing a second content schema. A local-ai-handoff message *is* a `handoff` skill output, written to a file in `runtime/outbox/` instead of pasted into a chat.
+
+Every message additionally requires two fields, each on its own bullet line so `validate-handoff-message.ps1` can parse them:
+
+```
+- message_id: `<unique identifier for this message>`
+- head_sha: `<repository HEAD SHA at the moment this message was written>`
+```
+
+These two fields are local to this file-based protocol; they are unrelated to (and do not need to match the field names of) the `[AI_HANDOFF]` GitHub PR-comment convention, which is a separate channel for GPT. `message_id` only needs to be unique within this repository's `.ai-handoff/runtime/` tree. `head_sha` is what "Automated Guards" below compares against the repository's actual HEAD at validation time.
+
+## Automated Guards (V2)
+
+V1 only checked duplicate `message_id` and HEAD SHA drift by hand. `validate-handoff-message.ps1`, bundled in this skill's directory alongside `detect-codex.ps1`, enforces both mechanically:
+
+```powershell
+& "<this skill's directory>\validate-handoff-message.ps1" -MessagePath "<inbox message path>" -RepoRoot "<repository root>"
+if ($LASTEXITCODE -ne 0) {
+    # Stop. Do not invoke Codex. Report the failure reason (printed on stderr) to the human.
+}
+```
+
+- **Duplicate `message_id`**: scans every other file under `runtime/inbox/`, `runtime/outbox/`, and `runtime/processed/` for the same `message_id`. No separate log file to keep in sync — the runtime tree itself is the source of truth. Exit code 4 on a match.
+- **HEAD SHA drift**: compares the message's `head_sha` against the repository's current `git rev-parse HEAD`. If the target/content/risk this message was approved against may no longer hold, this fails closed rather than proceeding. Exit code 5 on a mismatch.
+- A missing `message_id` or `head_sha` field is itself a validation failure (exit code 3) — it does not fall back to skipping the check.
+- This script only validates; it never invokes Codex, moves files, or decides what to do next. That decision belongs to the orchestrating AI and, per `OPERATIONS.md`'s Human Confirmation Points, to the human when the failure reason itself constitutes one of those points (for example, SHA drift is a change in approved scope).
 
 ## Codex Detection (no hardcoded paths, no PATH changes)
 
