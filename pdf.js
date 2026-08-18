@@ -244,15 +244,24 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
       nextApTime = naParts[1] ? naParts[1].slice(0, 5) : '';
     }
     var hasNextAp = nextApDate || nextApTime;
-    var keyOrderType = order.orderTypes && order.orderTypes.length
-      ? order.orderTypes.join(' / ') : '';
+    var rimountCount = Number.parseInt(order.rimountCount, 10);
+    if (!Number.isFinite(rimountCount)) {
+      var legacyRimountDevices = Array.isArray(order.devices) ? order.devices : [];
+      rimountCount = legacyRimountDevices.filter(function(device) {
+        return device === 'リマウント上' || device === 'リマウント下';
+      }).length;
+    }
+    var rimountOrderText = 'リマウント咬合調整 ×' + rimountCount;
+    var keyOrderType = order.hasRimount
+      ? rimountOrderText
+      : (order.orderTypes && order.orderTypes.length ? order.orderTypes.join(' / ') : '');
 
     // ── 左列：補足情報 ─────────────────────────────
     if (order.doctorName) row(L, '担当医', order.doctorName);
     var ag = [order.patientAge ? order.patientAge + '歳' : '', displayGender(order.patientGender)].filter(Boolean).join('　');
     if (ag) row(L, '年齢・性別', ag);
     if (keyOrderType) row(L, '発注形態', keyOrderType);
-    row(L, '区分', order.insuranceType === 'insurance' ? '保険' : '自費');
+    if (!order.hasRimount) row(L, '区分', order.insuranceType === 'insurance' ? '保険' : '自費');
     if (order.priority && order.priority !== 'normal') row(L, '優先度', order.priority);
     if (order.repairDetail) row(L, '修理詳細', order.repairDetail);
 
@@ -337,14 +346,23 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
 
     var deviceCountItems = [];
     if (items && items.length) deviceCountItems = deviceCountItems.concat(items);
-    var hasCastBarJaws = order.castBarJaws && typeof order.castBarJaws === 'object';
-    if (hasCastBarJaws) {
-      if (order.castBarJaws.upper) deviceCountItems.push('鋳造バー（上顎）×1');
-      if (order.castBarJaws.lower) deviceCountItems.push('鋳造バー（下顎）×1');
+    var castBarCount = 0;
+    if (order.castBarCounts && typeof order.castBarCounts === 'object') {
+      ['upper', 'lower'].forEach(function(jaw) {
+        var count = Number.parseInt(order.castBarCounts[jaw], 10) || 0;
+        castBarCount += Math.min(3, Math.max(0, count));
+      });
+    } else if (order.castBarJaws && typeof order.castBarJaws === 'object') {
+      // PR #11より前のデータは、顎ごとの選択を各1本として扱う。
+      castBarCount = (order.castBarJaws.upper ? 1 : 0) + (order.castBarJaws.lower ? 1 : 0);
     }
-    if (order.barType && !(hasCastBarJaws && order.barType === '鋳造バー')) {
+    if (castBarCount > 0) deviceCountItems.push('キャストバー ×' + castBarCount);
+    var isCastBarType = order.barType === '鋳造バー' || order.barType === 'キャストバー';
+    if (order.barType && !(castBarCount > 0 && isCastBarType)) {
       deviceCountItems.push(order.barType + (order.barType.indexOf('バー') === -1 ? 'バー' : '') + ' ×1');
     }
+    var reinforcementWireCount = Number.parseInt(order.reinforcementWireCount, 10) || 0;
+    if (reinforcementWireCount > 0) deviceCountItems.push('補強線 ×' + reinforcementWireCount);
     if (deviceCountItems.length) {
       pushHtmlRow(
         '装置',
@@ -404,19 +422,20 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
       '<div class="contact-phone">電話</div>' +
       '<div class="contact-line">LINE相談 <span class="qr-placeholder">QR</span></div>' +
       '</div>';
-    var metaOrderBadges = (order.orderTypes && order.orderTypes.length)
-      ? order.orderTypes.map(function(v) {
-        return '<span class="pdf-badge ' + badgeClass(v, 'order') + '">' + esc(v) + '</span>';
-      }).join('')
-      : '<span class="meta-empty">-</span>';
-    var metaInsuranceText = order.hasRimount
-      ? 'リマウント咬合調整'
-      : (order.insuranceType === 'insurance' ? '保険' : '自費');
+    var metaOrderBadges = order.hasRimount
+      ? '<span class="pdf-badge ' + badgeClass('リマウント咬合調整', 'order') + '">' + esc(rimountOrderText) + '</span>'
+      : ((order.orderTypes && order.orderTypes.length)
+        ? order.orderTypes.map(function(v) {
+          return '<span class="pdf-badge ' + badgeClass(v, 'order') + '">' + esc(v) + '</span>';
+        }).join('')
+        : '<span class="meta-empty">-</span>');
     var metaBar =
       '<div class="meta-bar">' +
       '<div class="meta-item"><span class="meta-lbl">発注形態</span><span class="meta-val badge-list">' + metaOrderBadges + '</span></div>' +
-      '<div class="meta-sep"></div>' +
-      '<div class="meta-item"><span class="meta-lbl">区分</span><span class="meta-val badge-list"><span class="pdf-badge ' + badgeClass(metaInsuranceText, 'insurance') + '">' + esc(metaInsuranceText) + '</span></span></div>' +
+      (order.hasRimount
+        ? ''
+        : '<div class="meta-sep"></div>' +
+          '<div class="meta-item"><span class="meta-lbl">区分</span><span class="meta-val badge-list"><span class="pdf-badge ' + badgeClass(order.insuranceType === 'insurance' ? '保険' : '自費', 'insurance') + '">' + esc(order.insuranceType === 'insurance' ? '保険' : '自費') + '</span></span></div>') +
       '</div>';
 
     var keyBar =
