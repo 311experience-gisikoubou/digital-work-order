@@ -40,18 +40,20 @@ The live runtime lives in the application repository being worked on, never in `
 
 Reuse the `handoff` skill's format and required sections (repository, path, branch, HEAD, upstream, working tree, completed work, recent PR, confirmed specs, unfinished items, next steps, blockers, `要補足` for unknowns) rather than inventing a second content schema. A local-ai-handoff message *is* a `handoff` skill output, written to a file in `runtime/outbox/` instead of pasted into a chat.
 
-Every message additionally requires two fields, each on its own bullet line so `validate-handoff-message.ps1` can parse them:
+Every message additionally requires four fields, each on its own bullet line so `validate-handoff-message.ps1` can parse them:
 
 ```
 - message_id: `<unique identifier for this message>`
 - head_sha: `<repository HEAD SHA at the moment this message was written>`
+- repository: `<owner/repo, e.g. 311experience-gisikoubou/digital-work-order>`
+- branch: `<the branch checked out at the moment this message was written>`
 ```
 
-These two fields are local to this file-based protocol; they are unrelated to (and do not need to match the field names of) the `[AI_HANDOFF]` GitHub PR-comment convention, which is a separate channel for GPT. `message_id` only needs to be unique within this repository's `.ai-handoff/runtime/` tree. `head_sha` is what "Automated Guards" below compares against the repository's actual HEAD at validation time.
+These four fields are local to this file-based protocol; they are unrelated to (and do not need to match the field names of) the `[AI_HANDOFF]` GitHub PR-comment convention, which is a separate channel for GPT. `message_id` only needs to be unique within this repository's `.ai-handoff/runtime/` tree. `repository` must be the canonical `owner/repo` form, matched against the actual repository derived from `git remote get-url origin` (HTTPS or SSH, with or without a trailing `.git`) — not from a folder name, and not the bare repo name alone, since two different owners can have same-named repositories. `branch` and `head_sha` are what "Automated Guards" below compares against the repository's actual state at validation time.
 
-## Automated Guards (V2)
+## Automated Guards (V2 / V2.1)
 
-V1 only checked duplicate `message_id` and HEAD SHA drift by hand. `validate-handoff-message.ps1`, bundled in this skill's directory alongside `detect-codex.ps1`, enforces both mechanically:
+V1 only checked duplicate `message_id` and HEAD SHA drift by hand. `validate-handoff-message.ps1`, bundled in this skill's directory alongside `detect-codex.ps1`, enforces the following mechanically, in this order, stopping at the first failure:
 
 ```powershell
 & "<this skill's directory>\validate-handoff-message.ps1" -MessagePath "<inbox message path>" -RepoRoot "<repository root>"
@@ -60,10 +62,13 @@ if ($LASTEXITCODE -ne 0) {
 }
 ```
 
-- **Duplicate `message_id`**: scans every other file under `runtime/inbox/`, `runtime/outbox/`, and `runtime/processed/` for the same `message_id`. No separate log file to keep in sync — the runtime tree itself is the source of truth. Exit code 4 on a match.
-- **HEAD SHA drift**: compares the message's `head_sha` against the repository's current `git rev-parse HEAD`. If the target/content/risk this message was approved against may no longer hold, this fails closed rather than proceeding. Exit code 5 on a mismatch.
-- A missing `message_id` or `head_sha` field is itself a validation failure (exit code 3) — it does not fall back to skipping the check.
-- This script only validates; it never invokes Codex, moves files, or decides what to do next. That decision belongs to the orchestrating AI and, per `OPERATIONS.md`'s Human Confirmation Points, to the human when the failure reason itself constitutes one of those points (for example, SHA drift is a change in approved scope).
+1. **Required fields present** (`message_id`, `head_sha`, `repository`, `branch`). Missing any one is itself a validation failure (exit code 3) — it does not fall back to skipping the check.
+2. **Repository drift (V2.1)**: the message's `repository` must match the actual repository name at `RepoRoot`, resolved from `git remote get-url origin` (HTTPS or SSH form). A message written for one repository must never be acted on inside a different one — for example, if the same message file were copied or the wrong `-RepoRoot` were passed. Exit code 6 on a mismatch, or if the repository name cannot be determined at all (no `origin` remote, or an unparseable URL).
+3. **Branch drift (V2.1)**: the message's `branch` must match the branch currently checked out at `RepoRoot` (`git branch --show-current`). Also fails if `RepoRoot` is in a detached-HEAD state. Exit code 7 on a mismatch.
+4. **Duplicate `message_id`**: scans every other file under `runtime/inbox/`, `runtime/outbox/`, and `runtime/processed/` for the same `message_id`. No separate log file to keep in sync — the runtime tree itself is the source of truth. Exit code 4 on a match.
+5. **HEAD SHA drift**: compares the message's `head_sha` against the repository's current `git rev-parse HEAD`. Exit code 5 on a mismatch.
+
+If the target/content/risk this message was approved against may no longer hold — a different repository, a different branch, a different commit — this fails closed rather than proceeding. This script only validates; it never invokes Codex, moves files, or decides what to do next. That decision belongs to the orchestrating AI and, per `OPERATIONS.md`'s Human Confirmation Points, to the human when the failure reason itself constitutes one of those points (for example, any of these four drift/duplicate conditions is a change in approved scope).
 
 ## Codex Detection (no hardcoded paths, no PATH changes)
 
