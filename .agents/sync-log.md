@@ -78,3 +78,23 @@
 - PR number: `not yet created`
 - Rollback commit or rollback method: 本同期は独立した1commitとして作成する予定のため、問題が判明した場合は当該commitを`git revert`で取り消す。
 - Notes: `.claude/skills/local-ai-handoff/SKILL.md`（wrapper）は今回変更なし（frontmatter・参照先とも既存のまま有効）。
+
+## Entry: Local AI Handoff V2.1 sync (repository/branch drift guards)
+
+- Target repository: `digital-work-order`
+- Target branch: `feature/local-ai-handoff-v2.1-sync`
+- Foundation version: `1.0.0-dev.7`
+- Source repository: `ai-dev-foundation`
+- Source commit SHA: `0ef76c0ae9e7960b54bc18e674f1025b722633c8`（`main`、local-ai-handoff V2.1 + [GPT_REVIEW]対応（owner/repo形式修正）merge commit）
+- Synced date: `2026-08-18`
+- Synced by: `Claude Code（Local AI Handoff V2.1横展開作業の一環としての手動同期）`
+- Synchronized files:
+  - `.agents/skills/local-ai-handoff/SKILL.md`（更新：repository drift・branch drift追加、必須フィールドにrepository・branch追加、repositoryはowner/repo形式）
+  - `.agents/skills/local-ai-handoff/validate-handoff-message.ps1`（更新：上記2ガードを追加実装。exit code 6=repository drift、7=branch drift）
+- Not changed: `.claude/skills/local-ai-handoff/SKILL.md`（wrapper）。frontmatter（name/description）はV2から変更なく、foundation側テンプレートと内容一致を確認済みのため今回は対象外。
+- Local deviations found before synchronization: なし（V1/V2導入時と同じ経路での追加更新）。
+- Verification performed: foundation正本（`SKILL.md`・`validate-handoff-message.ps1`）との`diff`による内容完全一致確認。wrapperがfoundationテンプレートと一致し変更不要であることを確認。secrets/token/個人情報キーワード検索（該当なし）。アプリケーションコード・`docs/design.md`の未変更確認。
+- Resulting commit SHA: `not yet created`
+- PR number: `not yet created`
+- Rollback commit or rollback method: 本同期は独立した1commitとして作成する予定のため、問題が判明した場合は当該commitを`git revert`で取り消す。
+- Notes: V2.1で追加された`repository`・`branch`必須フィールドにより、V2時点で作成済みの（もしあれば）未処理メッセージは新validatorで`exit 3`（フィールド欠落）になる。現時点で`.ai-handoff/runtime/inbox/`・`outbox/`に未処理メッセージが無いことを確認済み（`processed/`のみ、過去のdry-run記録）。
