@@ -337,14 +337,16 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
 
     var deviceCountItems = [];
     if (items && items.length) deviceCountItems = deviceCountItems.concat(items);
-    var hasCastBarJaws = order.castBarJaws && typeof order.castBarJaws === 'object';
-    if (hasCastBarJaws) {
-      if (order.castBarJaws.upper) deviceCountItems.push('鋳造バー（上顎）×1');
-      if (order.castBarJaws.lower) deviceCountItems.push('鋳造バー（下顎）×1');
-    }
-    if (order.barType && !(hasCastBarJaws && order.barType === '鋳造バー')) {
+    var castBarCount = order.castBarJaws && typeof order.castBarJaws === 'object'
+      ? (order.castBarJaws.upper ? 1 : 0) + (order.castBarJaws.lower ? 1 : 0)
+      : 0;
+    if (castBarCount > 0) deviceCountItems.push('キャストバー ×' + castBarCount);
+    var isCastBarType = order.barType === '鋳造バー' || order.barType === 'キャストバー';
+    if (order.barType && !(castBarCount > 0 && isCastBarType)) {
       deviceCountItems.push(order.barType + (order.barType.indexOf('バー') === -1 ? 'バー' : '') + ' ×1');
     }
+    var reinforcementWireCount = Number.parseInt(order.reinforcementWireCount, 10) || 0;
+    if (reinforcementWireCount > 0) deviceCountItems.push('補強線 ×' + reinforcementWireCount);
     if (deviceCountItems.length) {
       pushHtmlRow(
         '装置',
