@@ -254,6 +254,12 @@ function collectFormData() {
   const reinforcementWireCount = document.getElementById(`chk-kyokosen-${insKey}`).checked
     ? Number.parseInt(document.getElementById(`kyokosen-${insKey}`).value, 10) || 1
     : 0;
+  const rimountArea = document.getElementById(`rimount-${ins === 'insurance' ? 'insurance' : 'jishi'}-area`);
+  const rimountJaws = {
+    upper: rimountArea?.querySelector('input[value="リマウント上"]')?.checked ?? false,
+    lower: rimountArea?.querySelector('input[value="リマウント下"]')?.checked ?? false
+  };
+  const rimountCount = (rimountJaws.upper ? 1 : 0) + (rimountJaws.lower ? 1 : 0);
 
   // 人工歯
   const toothAnt  = ins === 'insurance' ? getToggleVal('tooth-ant-ins')  : getToggleVal('tooth-ant-jishi');
@@ -294,6 +300,8 @@ function collectFormData() {
     castBarCounts,
     reinforcementWireCount,
     hasRimount: document.getElementById(`chk-rimount-${insKey}`).checked,
+    rimountJaws,
+    rimountCount,
 
     // メタルアップ
     hasMetalup:   document.getElementById(`chk-metalup-${insKey}`).checked,
