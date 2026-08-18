@@ -97,6 +97,31 @@ Codex CLI supports non-interactive execution via `codex exec`, confirmed from `c
 
 Actually invoking Codex is a repository operation like any other and follows the same `OPERATIONS.md` Human Confirmation Points — this skill documents the command, it does not make invoking another agentic AI process an unattended default action.
 
+## Orchestration (V3)
+
+`run-codex-handoff.ps1`, bundled alongside `detect-codex.ps1` and `validate-handoff-message.ps1`, runs the mechanical middle of the flow above — validate, detect, invoke read-only, save output, check the result — in one command instead of four or five separate ones:
+
+```powershell
+& "<this skill's directory>\run-codex-handoff.ps1" -MessagePath "<inbox message path>" -RepoRoot "<repository root>"
+```
+
+This does not add any permission or automate any new decision. It automates steps that were already being performed by hand, one at a time:
+
+1. Confirm the message file exists.
+2. Run `validate-handoff-message.ps1`. If it does not exit 0, stop here — Codex is never invoked.
+3. Run `detect-codex.ps1`. If it does not exit 0, stop here.
+4. Invoke `codex exec -C <RepoRoot> -s read-only -o <output file>`, with a prompt that both points Codex at the message and restates the "do not edit / commit / push / PR / merge / branch / destructive operation" constraint every time.
+5. Confirm Codex exited 0 and its output file exists.
+6. Confirm the output file is non-empty.
+7. Report a structured PASS/FAIL result naming exactly which step succeeded or failed.
+
+Two things this script deliberately does **not** do, to keep the existing checkpoints intact:
+
+- It never moves a message between `outbox/`, `inbox/`, or `processed/`. Those transitions stay separate, deliberate, visible steps performed by the operator (see "Message Lifecycle"). It only acts on a message already sitting in `inbox/`.
+- It has no parameter to change the sandbox mode or bypass approvals. It always runs `-s read-only`; there is no way to pass `--dangerously-bypass-approvals-and-sandbox` or `--approve-for-me` through this script.
+
+Like `detect-codex.ps1` and `validate-handoff-message.ps1`, this script does not run itself — it is invoked explicitly, for a task the operator has already decided to hand to Codex.
+
 ## Safety Constraints
 
 - Do not write secrets, tokens, credentials, personal information, or real data into any `.ai-handoff/` file (`CORE.md`).

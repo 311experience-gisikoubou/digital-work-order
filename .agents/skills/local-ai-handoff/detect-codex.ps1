@@ -28,14 +28,20 @@ $ErrorActionPreference = 'Stop'
 $root = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin'
 
 if (-not (Test-Path $root)) {
-    Write-Error "Codex install root not found: $root (Codex CLI does not appear to be installed on this machine)"
+    # Plain stderr write, not Write-Error: combined with a caller that
+    # sets $ErrorActionPreference = 'Stop' (as run-codex-handoff.ps1
+    # does), Write-Error becomes a terminating exception that propagates
+    # out of this script entirely, bypassing its own `exit 1` and any
+    # caller-side $LASTEXITCODE check. This keeps the exit code the
+    # single source of truth regardless of the caller's error preference.
+    [Console]::Error.WriteLine("Codex install root not found: $root (Codex CLI does not appear to be installed on this machine)")
     exit 1
 }
 
 $candidates = Get-ChildItem -Path $root -Filter 'codex.exe' -Recurse -ErrorAction SilentlyContinue
 
 if (-not $candidates -or $candidates.Count -eq 0) {
-    Write-Error "codex.exe not found under $root"
+    [Console]::Error.WriteLine("codex.exe not found under $root")
     exit 1
 }
 
