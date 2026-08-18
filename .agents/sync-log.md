@@ -74,10 +74,10 @@
   - `.agents/skills/local-ai-handoff/validate-handoff-message.ps1`（新規）
 - Local deviations found before synchronization: なし（V1導入時と同じ経路での追加更新）。
 - Verification performed: foundation正本（`SKILL.md`・`validate-handoff-message.ps1`）との`diff`による内容完全一致確認。secrets/token/個人情報キーワード検索（該当なし）。アプリケーションコード・`docs/design.md`の未変更確認。
-- Resulting commit SHA: `not yet created`
-- PR number: `not yet created`
+- Resulting commit SHA: `fe91ef5`
+- PR number: `#8`
 - Rollback commit or rollback method: 本同期は独立した1commitとして作成する予定のため、問題が判明した場合は当該commitを`git revert`で取り消す。
-- Notes: `.claude/skills/local-ai-handoff/SKILL.md`（wrapper）は今回変更なし（frontmatter・参照先とも既存のまま有効）。
+- Notes: `.claude/skills/local-ai-handoff/SKILL.md`（wrapper）は今回変更なし（frontmatter・参照先とも既存のまま有効）。（2026-08-18追記：commit SHA・PR番号は当時未確定のまま放置されていたため、`git log`から確認し確定値へ補完した。）
 
 ## Entry: Local AI Handoff V2.1 sync (repository/branch drift guards)
 
@@ -94,7 +94,28 @@
 - Not changed: `.claude/skills/local-ai-handoff/SKILL.md`（wrapper）。frontmatter（name/description）はV2から変更なく、foundation側テンプレートと内容一致を確認済みのため今回は対象外。
 - Local deviations found before synchronization: なし（V1/V2導入時と同じ経路での追加更新）。
 - Verification performed: foundation正本（`SKILL.md`・`validate-handoff-message.ps1`）との`diff`による内容完全一致確認。wrapperがfoundationテンプレートと一致し変更不要であることを確認。secrets/token/個人情報キーワード検索（該当なし）。アプリケーションコード・`docs/design.md`の未変更確認。
+- Resulting commit SHA: `e5a674d`
+- PR number: `#9`
+- Rollback commit or rollback method: 本同期は独立した1commitとして作成する予定のため、問題が判明した場合は当該commitを`git revert`で取り消す。
+- Notes: V2.1で追加された`repository`・`branch`必須フィールドにより、V2時点で作成済みの（もしあれば）未処理メッセージは新validatorで`exit 3`（フィールド欠落）になる。現時点で`.ai-handoff/runtime/inbox/`・`outbox/`に未処理メッセージが無いことを確認済み（`processed/`のみ、過去のdry-run記録）。（2026-08-18追記：commit SHA・PR番号は当時未確定のまま放置されていたため、`git log`から確認し確定値へ補完した。）
+
+## Entry: Local AI Handoff V3 sync (orchestration script + detect-codex.ps1 fix)
+
+- Target repository: `digital-work-order`
+- Target branch: `feature/local-ai-handoff-v3-sync`
+- Foundation version: `1.0.0-dev.8`
+- Source repository: `ai-dev-foundation`
+- Source commit SHA: `e61527da466117132cc456c6feb822818b246d49`（`main`、local-ai-handoff V3（run-codex-handoff.ps1オーケストレーション＋detect-codex.ps1のWrite-Error修正）merge commit）
+- Synced date: `2026-08-18`
+- Synced by: `Claude Code（Local AI Handoff V3横展開作業の一環としての手動同期）`
+- Synchronized files:
+  - `.agents/skills/local-ai-handoff/SKILL.md`（更新：「Orchestration (V3)」節を追加）
+  - `.agents/skills/local-ai-handoff/detect-codex.ps1`（更新：`Write-Error`を`[Console]::Error.WriteLine`＋明示的`exit 1`へ修正。V3実装中に発覚した、`$ErrorActionPreference = 'Stop'`と組み合わさると自身の`exit 1`を迂回して例外が伝播するバグの修正）
+  - `.agents/skills/local-ai-handoff/run-codex-handoff.ps1`（新規：validate→detect→`codex exec -s read-only`起動→出力保存→結果確認、の7ステップを1コマンドにまとめたオーケストレーションスクリプト。`outbox`/`inbox`/`processed`間のファイル移動は行わない。sandboxモード変更・approval bypassのパラメータは存在しない）
+- Not changed: `.claude/skills/local-ai-handoff/SKILL.md`（wrapper）。foundation側テンプレート（`templates/.claude/skills/local-ai-handoff/SKILL.md.template`）と`diff`一致を確認済みのため今回は対象外。`.agents/skills/local-ai-handoff/validate-handoff-message.ps1`もfoundation正本と`diff`一致を確認済みのため今回は対象外（V2.1から変更なし）。
+- Local deviations found before synchronization: なし（V1/V2/V2.1導入時と同じ経路での追加更新）。
+- Verification performed: foundation正本4ファイル（`SKILL.md`・`detect-codex.ps1`・`run-codex-handoff.ps1`・`validate-handoff-message.ps1`）との`diff`による内容完全一致確認（前者3件は更新、`validate-handoff-message.ps1`は変更なしを確認）。wrapperがfoundationテンプレートと一致し変更不要であることを確認。secrets/token/個人情報キーワード検索（該当なし）。アプリケーションコード・`docs/design.md`の未変更確認。
 - Resulting commit SHA: `not yet created`
 - PR number: `not yet created`
 - Rollback commit or rollback method: 本同期は独立した1commitとして作成する予定のため、問題が判明した場合は当該commitを`git revert`で取り消す。
-- Notes: V2.1で追加された`repository`・`branch`必須フィールドにより、V2時点で作成済みの（もしあれば）未処理メッセージは新validatorで`exit 3`（フィールド欠落）になる。現時点で`.ai-handoff/runtime/inbox/`・`outbox/`に未処理メッセージが無いことを確認済み（`processed/`のみ、過去のdry-run記録）。
+- Notes: `run-codex-handoff.ps1`は既存の手動ステップ（validate実行→Codex検出→`codex exec`起動→出力確認）を1コマンドにまとめたものであり、権限や自律範囲を追加するものではない（foundation側`CHANGELOG.md` 1.0.0-dev.8参照）。Human Confirmation Pointsは変更なし。
