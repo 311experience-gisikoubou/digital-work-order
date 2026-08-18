@@ -80,6 +80,31 @@ Do not expose secrets, tokens, personal information, or production data to an ex
 - If a decision is NG, UNKNOWN, or not determinable, do not proceed on a guess. Stop and report.
 - AI agents do not auto-update `AGENTS.md`, `AGENTS.local.md`, or `docs/learnings.md`. An AI may propose improvements; changes are applied only after human approval.
 
+## Human Decision Boundary
+
+- Technical correctness and safety must be assessed by the AI workflow, not delegated to the human merely as a formality.
+- Before requesting human approval, the AI must complete the applicable technical checks: scope/diff review, specification consistency, tests, unintended-change review, Git state review, and risk assessment.
+- Do not ask the human to approve code, Git state, tests, architecture, migrations, security, or other technical matters that require engineering knowledge unless there is no reliable way for the AI to determine them. If undeterminable, report `UNKNOWN` and explain why instead of converting uncertainty into a human approval request.
+- Human confirmation should be limited to matters that genuinely require human judgment, especially:
+  - whether the business intent and requested behavior are correct;
+  - real-device look, feel, usability, and other perceptual judgments when applicable;
+  - permission for high-risk or irreversible operations such as merge or deletion.
+- A final audit report should lead with a plain-language result such as `PASS`, `NG`, or `UNKNOWN`, followed by only the human decisions that remain. Technical evidence may be included as supporting detail, but must not be presented as homework the human must understand before approving.
+- When the technical audit is `PASS` and no real-device or business judgment remains, the human should normally be asked only whether to authorize the high-risk operation.
+
+## Learning Gate
+
+- AI must evaluate a learning candidate when any of the following occurs:
+  - the user corrects the AI's process, safety judgment, role assignment, or explanation;
+  - the same class of mistake, failed attempt, or avoidable confusion occurs more than once;
+  - a new safety rule, reusable development rule, or reliable efficiency improvement is discovered;
+  - the user cannot reasonably judge a technical risk because the explanation assumes engineering knowledge.
+- Important candidates should be surfaced when discovered. At the end of a development session, surface at most 3 unresolved candidates.
+- Each candidate must include: trigger condition, proposed learning, and reason it is worth retaining.
+- Do not save, append, or promote a candidate automatically. Human approval is required before changing `docs/learnings.md`, `AGENTS.local.md`, or shared rules.
+- Before asking a non-engineer to make a technical judgment, explain in plain language what could go wrong, whether work should stop now, and what decision is actually needed from the human.
+- Do not turn ordinary one-off implementation details into permanent rules. Prefer reusable, generalizable lessons.
+
 ## Future Skills
 
 The following skills are expected to be useful after they are introduced into `.agents/skills/`:
