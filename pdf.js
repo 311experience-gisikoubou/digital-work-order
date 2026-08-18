@@ -337,9 +337,16 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
 
     var deviceCountItems = [];
     if (items && items.length) deviceCountItems = deviceCountItems.concat(items);
-    var castBarCount = order.castBarJaws && typeof order.castBarJaws === 'object'
-      ? (order.castBarJaws.upper ? 1 : 0) + (order.castBarJaws.lower ? 1 : 0)
-      : 0;
+    var castBarCount = 0;
+    if (order.castBarCounts && typeof order.castBarCounts === 'object') {
+      ['upper', 'lower'].forEach(function(jaw) {
+        var count = Number.parseInt(order.castBarCounts[jaw], 10) || 0;
+        castBarCount += Math.min(3, Math.max(0, count));
+      });
+    } else if (order.castBarJaws && typeof order.castBarJaws === 'object') {
+      // PR #11より前のデータは、顎ごとの選択を各1本として扱う。
+      castBarCount = (order.castBarJaws.upper ? 1 : 0) + (order.castBarJaws.lower ? 1 : 0);
+    }
     if (castBarCount > 0) deviceCountItems.push('キャストバー ×' + castBarCount);
     var isCastBarType = order.barType === '鋳造バー' || order.barType === 'キャストバー';
     if (order.barType && !(castBarCount > 0 && isCastBarType)) {
