@@ -80,6 +80,18 @@ Do not expose secrets, tokens, personal information, or production data to an ex
 - If a decision is NG, UNKNOWN, or not determinable, do not proceed on a guess. Stop and report.
 - AI agents do not auto-update `AGENTS.md`, `AGENTS.local.md`, or `docs/learnings.md`. An AI may propose improvements; changes are applied only after human approval.
 
+## Human Decision Boundary
+
+- Technical correctness and safety must be assessed by the AI workflow, not delegated to the human merely as a formality.
+- Before requesting human approval, the AI must complete the applicable technical checks: scope/diff review, specification consistency, tests, unintended-change review, Git state review, and risk assessment.
+- Do not ask the human to approve code, Git state, tests, architecture, migrations, security, or other technical matters that require engineering knowledge unless there is no reliable way for the AI to determine them. If undeterminable, report `UNKNOWN` and explain why instead of converting uncertainty into a human approval request.
+- Human confirmation should be limited to matters that genuinely require human judgment, especially:
+  - whether the business intent and requested behavior are correct;
+  - real-device look, feel, usability, and other perceptual judgments when applicable;
+  - permission for high-risk or irreversible operations such as merge or deletion.
+- A final audit report should lead with a plain-language result such as `PASS`, `NG`, or `UNKNOWN`, followed by only the human decisions that remain. Technical evidence may be included as supporting detail, but must not be presented as homework the human must understand before approving.
+- When the technical audit is `PASS` and no real-device or business judgment remains, the human should normally be asked only whether to authorize the high-risk operation.
+
 ## Learning Gate
 
 - AI must evaluate a learning candidate when any of the following occurs:
