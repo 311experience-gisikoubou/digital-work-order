@@ -238,9 +238,18 @@ function collectFormData() {
   const barType = ins === 'insurance' ? getToggleVal('bar-ins') : getToggleVal('bar-jishi');
   const castBarSelected = [...document.querySelectorAll(`.toggle-btn[data-group="bar-${insKey}"].active`)]
     .some(el => ['鋳造バー', 'キャストバー'].includes(el.dataset.val || el.textContent.trim()));
+  function getCastBarCount(jaw) {
+    const count = Number.parseInt(document.getElementById(`cast-bar-${jaw}-count-${insKey}`).value, 10);
+    return castBarSelected && Number.isFinite(count) ? Math.min(3, Math.max(0, count)) : 0;
+  }
+  const castBarCounts = {
+    upper: getCastBarCount('upper'),
+    lower: getCastBarCount('lower')
+  };
+  // 旧データとの互換用に、顎別選択の真偽値も保持する。
   const castBarJaws = {
-    upper: castBarSelected && document.getElementById(`chk-cast-bar-upper-${insKey}`).checked,
-    lower: castBarSelected && document.getElementById(`chk-cast-bar-lower-${insKey}`).checked
+    upper: castBarCounts.upper > 0,
+    lower: castBarCounts.lower > 0
   };
   const reinforcementWireCount = document.getElementById(`chk-kyokosen-${insKey}`).checked
     ? Number.parseInt(document.getElementById(`kyokosen-${insKey}`).value, 10) || 1
@@ -282,6 +291,7 @@ function collectFormData() {
     claspType,
     barType,
     castBarJaws,
+    castBarCounts,
     reinforcementWireCount,
     hasRimount: document.getElementById(`chk-rimount-${insKey}`).checked,
 
@@ -361,10 +371,19 @@ function resetForm() {
    'shade-guide','shade-number','delivery-date','next-appointment','next-appointment-date','next-appointment-time','remarks',
    'repair-detail','metalup-ins-detail','kyoko-ins-detail',
    'metalup-jishi-detail','kyoko-jishi-detail',
-   'articulator-type','articulator-detail'
+   'articulator-type','articulator-detail',
+   'cast-bar-upper-count-ins','cast-bar-lower-count-ins',
+   'cast-bar-upper-count-jishi','cast-bar-lower-count-jishi'
   ].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
+  });
+
+  ['cast-bar-upper-count-ins','cast-bar-lower-count-ins',
+   'cast-bar-upper-count-jishi','cast-bar-lower-count-jishi'
+  ].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '0';
   });
 
   // 歯式リセット
