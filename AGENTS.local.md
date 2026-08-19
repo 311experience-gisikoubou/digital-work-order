@@ -25,6 +25,20 @@ This repository contains the digital dental work order application.
 - Confirm the changed file list.
 - Confirm there are no unintended diffs.
 
+## Debug & Automated Verification
+
+- For debugging, PDF/print regressions, layout regressions, or deciding
+  whether a real-device check is actually necessary, use the
+  `debug-verification` skill (`.agents/skills/debug-verification/SKILL.md`).
+- It runs an automated-first verification workflow before requesting a human
+  check, and applies a three-question check before any real-device or manual
+  confirmation request. It specializes "Human Decision Boundary" above for
+  that recurring situation; it does not replace it.
+- Protected data for this repository is defined above in "Important
+  Protection Targets"; `debug-verification` does not redefine it.
+- This is a repository-local skill, not yet synchronized from
+  `ai-dev-foundation` — the same treatment as `manual-ui-smoke-test`.
+
 ## Changes That Usually Need Real-Device UI Checks
 
 - Handwriting
