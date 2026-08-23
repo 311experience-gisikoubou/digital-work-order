@@ -836,6 +836,15 @@
      技工所側 受注管理ビュー
      ============================= -->
 <div class="view" id="view-lab">
+  <section class="consumer-rules-panel" aria-labelledby="consumer-rules-title">
+    <div class="consumer-rules-heading">
+      <h2 id="consumer-rules-title">承認済み共通ルール</h2>
+      <button type="button" class="consumer-rules-import-button" id="consumer-rules-import-button">承認済み共通ルールを読み込む</button>
+      <input type="file" id="consumer-rules-import" accept="application/json,.json" hidden>
+    </div>
+    <p id="consumer-rules-count" class="consumer-rules-count" aria-live="polite">承認済み共通ルール：未読み込み</p>
+    <ul id="consumer-rules-list" class="consumer-rules-list" hidden></ul>
+  </section>
 
   <!-- サマリー -->
   <div class="summary-bar">
@@ -895,6 +904,7 @@
 <script src="modal.js"></script>
 <script src="pdf.js"></script>
 <script src="calendar.js"></script>
+<script src="consumer-rules.js"></script>
 
 </body>
 </html>
