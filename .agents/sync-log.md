@@ -93,7 +93,7 @@
   - `.agents/skills/local-ai-handoff/validate-handoff-message.ps1`（更新：上記2ガードを追加実装。exit code 6=repository drift、7=branch drift）
 - Not changed: `.claude/skills/local-ai-handoff/SKILL.md`（wrapper）。frontmatter（name/description）はV2から変更なく、foundation側テンプレートと内容一致を確認済みのため今回は対象外。
 - Local deviations found before synchronization: なし（V1/V2導入時と同じ経路での追加更新）。
-- Verification performed: foundation正本（`SKILL.md`・`validate-handoff-message.ps1`）との`diff`による内容完全一致確認。wrapperがfoundationテンプレートと一致し変更不要であることを確認。secrets/token/個人情報/患者情報キーワード検索（該当なし）。アプリケーションコード・`docs/design.md`の未変更確認。
+- Verification performed: foundation正本（`SKILL.md`・`validate-handoff-message.ps1`）との`diff`による内容完全一致確認。wrapperがfoundationテンプレートと一致し変更不要であることを確認。secrets/token/個人情報キーワード検索（該当なし）。アプリケーションコード・`docs/design.md`の未変更確認。
 - Resulting commit SHA: `e5a674d`
 - PR number: `#9`
 - Rollback commit or rollback method: 本同期は独立した1commitとして作成する予定のため、問題が判明した場合は当該commitを`git revert`で取り消す。
@@ -114,7 +114,7 @@
   - `.agents/skills/local-ai-handoff/run-codex-handoff.ps1`（新規：validate→detect→`codex exec -s read-only`起動→出力保存→結果確認、の7ステップを1コマンドにまとめたオーケストレーションスクリプト。`outbox`/`inbox`/`processed`間のファイル移動は行わない。sandboxモード変更・approval bypassのパラメータは存在しない）
 - Not changed: `.claude/skills/local-ai-handoff/SKILL.md`（wrapper）。foundation側テンプレート（`templates/.claude/skills/local-ai-handoff/SKILL.md.template`）と`diff`一致を確認済みのため今回は対象外。`.agents/skills/local-ai-handoff/validate-handoff-message.ps1`もfoundation正本と`diff`一致を確認済みのため今回は対象外（V2.1から変更なし）。
 - Local deviations found before synchronization: なし（V1/V2/V2.1導入時と同じ経路での追加更新）。
-- Verification performed: foundation正本4ファイル（`SKILL.md`・`detect-codex.ps1`・`run-codex-handoff.ps1`・`validate-handoff-message.ps1`）との`diff`による内容完全一致確認（前者3件は更新、`validate-handoff-message.ps1`は変更なしを確認）。wrapperがfoundationテンプレートと一致し変更不要であることを確認。secrets/token/個人情報/患者情報キーワード検索（該当なし）。アプリケーションコード・`docs/design.md`の未変更確認。
+- Verification performed: foundation正本4ファイル（`SKILL.md`・`detect-codex.ps1`・`run-codex-handoff.ps1`・`validate-handoff-message.ps1`）との`diff`による内容完全一致確認（前者3件は更新、`validate-handoff-message.ps1`は変更なしを確認）。wrapperがfoundationテンプレートと一致し変更不要であることを確認。secrets/token/個人情報キーワード検索（該当なし）。アプリケーションコード・`docs/design.md`の未変更確認。
 - Resulting commit SHA: `not yet created`
 - PR number: `not yet created`
 - Rollback commit or rollback method: 本同期は独立した1commitとして作成する予定のため、問題が判明した場合は当該commitを`git revert`で取り消す。
