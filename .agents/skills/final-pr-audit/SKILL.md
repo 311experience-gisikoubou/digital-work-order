@@ -7,6 +7,16 @@ description: Use after implementation and before PR creation, merge, or final co
 
 Use when work is complete or the user asks for final confirmation.
 
+## Evidence Source Selection
+
+Before checking merge readiness, identify where the audited change was actually created and verified. Do not require unrelated local-machine evidence merely because a local checkout may exist somewhere.
+
+- **Local-workspace change:** if the audited change was created, tested, or staged in a local checkout, verify the relevant local repository root, branch/HEAD, upstream, working tree, untracked files, stash state, and alignment with the remote/PR head.
+- **GitHub/remote-only change:** if the audited change was created directly on the remote branch and no local checkout participated in producing or testing that audited head, use GitHub/remote evidence: exact base/head SHA, merge-base, changed-file list, canonical PR/compare diff, PR state, mergeability, review/CI status, and exact-head file contents or tests. Do not block on an unrelated local working tree or stash.
+- **Mixed change:** if both local and remote paths participated, verify both and prove they refer to the same audited head.
+- Never substitute weaker evidence merely for convenience. If a required property cannot be proven from the actual execution location or an equivalent independent source, mark it `unavailable`/`UNKNOWN`; do not call it PASS.
+- Human relay work is not an evidence source. Do not ask a non-engineer human to copy technical state between tools when an accessible machine-readable source exists.
+
 ## Required Checks
 
 - Base and head branch
@@ -18,7 +28,7 @@ Use when work is complete or the user asks for final confirmation.
 - Dependency-manifest and lockfile diffs, if the repository has any (the specific file names are repository-specific — see `AGENTS.local.md`)
 - Consistency with the repository's design documentation (its "Source of Truth")
 - Consistency with the implementation report already given to the user
-- `git diff --check`
+- Diff hygiene: use `git diff --check` when the audited head exists in the local execution workspace; for remote-only work, inspect the canonical PR/compare diff with an equivalent whitespace/conflict-marker check and record that it is an equivalent remote diff-hygiene check rather than claiming the literal local command ran
 - The repository's format, lint, type-check, build, and selftest verification, as defined in `AGENTS.local.md`
 - The results already recorded by `test-gate` for this change
 - Security-relevant changes (see "Security Review" below)
@@ -49,28 +59,29 @@ When the PR title and body are available, confirm:
 - No unimplemented feature is described as complete, and no test that was not run is described as passing.
 - Stated changed-file counts, commit counts, version, branch, and SHAs match what was independently verified in this audit.
 - No known issue, unverified item, or Blocker is omitted from the description.
-- If the PR description cannot be obtained, state that limitation explicitly, and separate what was confirmed from local Git state from what could not be checked.
+- If some evidence source is unavailable, state that limitation explicitly and separate what was independently confirmed from what could not be checked. Do not describe remote-only verification as local verification, or vice versa.
 
 A material mismatch between the PR description and the actual diff is a Blocker. This audit does not modify the PR description; it only reports mismatches.
 
 ## Command Notes
 
-- Build output directories may be updated by a build command; verify tracked files remain unchanged afterward.
+- Build output directories may be updated by a build command; verify tracked files remain unchanged afterward when a local workspace was used.
 - For a migration checksum failure, first check for raw-byte or line-ending differences before treating it as a logic failure.
-- If GitHub PR data is unavailable locally, list browser-confirmation items instead of guessing.
+- If GitHub PR data is unavailable, mark GitHub-only checks unavailable rather than guessing or turning them into human browser homework when another machine-readable route can be used.
 - Audit approval is not merge execution.
 - For post-implementation verification execution and result tracking, use `test-gate`; final PR audit checks the `test-gate` results rather than re-running everything from scratch.
-- For actual post-merge verification and local `main` synchronization, use `post-merge-verification`.
+- For actual post-merge verification and any required local `main` synchronization, use `post-merge-verification`.
 
 ## Output
 
 Report:
 
 - Final judgment
-- Git state
+- Evidence source(s): local / remote-only / mixed
+- Git state relevant to those source(s)
 - Diff scope
 - Specification fit
-- Verification results
+- Verification results, distinguishing literal commands from equivalent remote checks
 - Security review result
 - PR description consistency result
 - Real-device confirmation
