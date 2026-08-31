@@ -7,13 +7,24 @@ description: Use after implementation, fixes, refactoring, UI changes, backend c
 
 Use after changes are made and the user asks to choose, run, or confirm required verification.
 
+## Evidence Location
+
+Before selecting checks, identify where the audited change exists and where verification can actually execute.
+
+- If the audited head exists in a local workspace, use that workspace and record its exact head/state.
+- If the audited head was created remotely and no local workspace participated, do not require an unrelated local checkout merely to satisfy habit. Use exact remote-head content and machine-readable GitHub/remote evidence where the check can be reproduced equivalently.
+- If both local and remote paths participated, prove both refer to the same audited head.
+- An alternative verification counts as `success` only when it operates on the exact audited source or canonical diff and is technically equivalent to the required property. Record the evidence source and do not claim a literal command ran when it did not.
+- If equivalence cannot be established, mark the check `unavailable` or `unrun`; never upgrade it to success.
+- Do not make a non-engineer human relay command output between tools when an accessible machine-readable source can provide the evidence.
+
 ## Required Workflow
 
 - Inspect changed files and changed content to determine which verification categories apply.
 - Select only the verification required for the change type; do not run unrelated checks.
 - Confirm generated-output or data-write risk before running any command that may create files or modify a database.
 - Run lighter checks before heavier checks.
-- Stop when a required earlier check fails, is interrupted, times out, or cannot run.
+- Stop when a required earlier check fails, is interrupted, times out, or cannot run without an accepted equivalent verification path.
 - Separate automated checks from real-device or manual confirmation.
 - Do not mark work complete until every required check is `success` or explicitly `unneeded`.
 - Record every check as exactly one of: `success`, `failure`, `unrun`, `unneeded`, `unavailable`, or `interrupted`.
@@ -22,7 +33,7 @@ Use after changes are made and the user asks to choose, run, or confirm required
 
 The categories below are common. The actual commands, and which categories apply, are repository-specific and must come from that repository's `AGENTS.local.md` ("Repository Commands"), not invented or guessed.
 
-- `git diff --check`
+- Diff hygiene (`git diff --check` locally, or a technically equivalent canonical remote-diff check for remote-only work)
 - Format check
 - Lint check
 - Type check
@@ -32,21 +43,22 @@ The categories below are common. The actual commands, and which categories apply
 - Selftest — a lightweight, repository-specific self-check distinct from the full test suite, when one exists
 - Migration-specific test, when the change touches schema or migrations (see `migration-safety`)
 
-Do not invent a command that is not listed in `AGENTS.local.md`, and do not assume a category exists there if it is not listed.
+Do not invent a repository command that is not listed in `AGENTS.local.md`, and do not assume a category exists there if it is not listed. An equivalent remote check is allowed only for the property it genuinely verifies; it does not create a nonexistent repository command.
 
 ## Selection Rules
 
-- Documentation-only changes: run `git diff --check`; verify encoding, heading/frontmatter structure, links, and content consistency as relevant. Mark build/test as `unneeded` when not required.
-- Changes confined to one part of the stack (for example, only the interface layer or only the backend layer): run `git diff --check`, any selftest relevant to that layer, then that layer's format/lint/type-check/build/test commands as listed in `AGENTS.local.md`.
+- Documentation-only changes: verify diff hygiene; verify encoding, heading/frontmatter structure, links, and content consistency as relevant. Mark build/test as `unneeded` when not required.
+- Changes confined to one part of the stack (for example, only the interface layer or only the backend layer): verify diff hygiene, any selftest relevant to that layer, then that layer's format/lint/type-check/build/test commands as listed in `AGENTS.local.md`.
 - Changes spanning multiple parts of the stack: run the checks that apply to each affected part.
 - Migration changes: also use `migration-safety`; verify existing migrations remain unchanged, run the repository's migration tests, and check fresh-apply, upgrade-from-existing, and integrity coverage.
 - Real-device or manual changes: report that confirmation separately from automated checks. If required and not performed, do not mark complete.
+- For a remote-only audited head, exact-head selftests may run in an isolated temporary environment only if the required files are fetched from that exact head and the test's behavior does not depend on omitted repository state. Record this as remote-head reconstructed verification, not repository-local execution.
 
 ## Default Order
 
 Run only required checks, normally in this order:
 
-1. `git diff --check`
+1. Diff hygiene
 2. Selftest, when relevant
 3. Format check
 4. Lint check
@@ -81,34 +93,37 @@ If changing the order, explain why.
 
 - Required test fails.
 - Test is interrupted or times out.
-- Required command does not exist in `AGENTS.local.md`.
-- Required command cannot run.
-- Unexpected generated files appear.
-- Unexpected tracked diff appears.
-- Working tree becomes dirty unexpectedly.
+- Required repository command does not exist in `AGENTS.local.md` and no accepted property-equivalent check applies.
+- Required check cannot run and no technically equivalent evidence path exists.
+- Unexpected generated files appear in a workspace that was actually used.
+- Unexpected tracked diff appears in a workspace that was actually used.
+- A local working tree used for the audited change becomes dirty unexpectedly.
 - Migration checksum or line-ending state is unclear.
 - Required real-device or manual confirmation is not performed.
-- A command is unknown.
+- A command or proposed equivalent is unknown.
 - A verification failure is confirmed to be a new regression rather than a known, pre-existing failure.
 - Any paid service, external API, automatic billing, or added dependency may be involved.
 
 ## Do Not Do
 
 - Do not guess commands.
-- Do not add dependencies or packages.
+- Do not add dependencies or packages merely to satisfy the gate.
 - Do not fix failing tests unless the user asks for a fix.
 - Do not modify migrations, application code, or docs as part of the gate.
 - Do not create PRs, merge, delete branches, commit, push, rebase, reset, force, or change Git configuration.
 - Do not infer real-device or manual success.
-- Do not report unrun checks as passing.
+- Do not report unrun or unavailable checks as passing.
+- Do not require an unrelated local working tree or stash when the audited head was produced and verified entirely through another evidence path.
 
 ## Output
 
 Report:
 
 - Skills used
+- Evidence source(s): local / remote-only / mixed
+- Audited head SHA when available
 - Changed files and selected verification
-- Commands run, working directory, and status
+- Commands or equivalent checks run, execution location, and status
 - Checks marked `unneeded` and why
 - Checks marked `unrun`, `unavailable`, or `interrupted` and why
 - For any failed check: whether it is a known, pre-existing failure or a new regression, and the evidence for that determination
