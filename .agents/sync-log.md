@@ -119,3 +119,35 @@
 - PR number: `not yet created`
 - Rollback commit or rollback method: 本同期は独立した1commitとして作成する予定のため、問題が判明した場合は当該commitを`git revert`で取り消す。
 - Notes: `run-codex-handoff.ps1`は既存の手動ステップ（validate実行→Codex検出→`codex exec`起動→出力確認）を1コマンドにまとめたものであり、権限や自律範囲を追加するものではない（foundation側`CHANGELOG.md` 1.0.0-dev.8参照）。Human Confirmation Pointsは変更なし。
+
+## Entry: Full common-rule resync to v1.0.0-dev.20
+
+- Target repository: `digital-work-order`
+- Target branch: `chore/sync-ai-dev-foundation-dev20`
+- Foundation version: `1.0.0-dev.20`
+- Source repository: `ai-dev-foundation`
+- Source commit SHA: `c296142882a90a627e4142e187363861478997bb`
+- Synced date: `2026-08-31`
+- Synced by: `ChatGPT（GitHub connectorによるremote-only手動同期）`
+- Synchronized files:
+  - `AGENTS.md`
+  - `.agents/skills/README.md`
+  - `.agents/skills/common-rule-integration-audit/SKILL.md`
+  - `.agents/skills/preflight-audit/SKILL.md`
+  - `.agents/skills/preflight-audit/operation-preflight.mjs`
+  - `.agents/skills/preflight-audit/operation-preflight-selftest.mjs`
+  - `.agents/skills/preflight-audit/security-preflight.mjs`
+  - `.agents/skills/preflight-audit/security-preflight-selftest.mjs`
+  - `.agents/skills/preflight-audit/security-history-audit.mjs`
+  - `.agents/skills/preflight-audit/security-history-audit-selftest.mjs`
+  - `.agents/skills/test-gate/SKILL.md`
+  - `.agents/skills/final-pr-audit/SKILL.md`
+- Existing current common files intentionally unchanged: `handoff` / `local-ai-handoff` / `migration-safety` / `post-merge-verification` はfoundation正本と一致していたため変更しない。
+- Repository-local files preserved: `AGENTS.local.md`、`.agents/skills/manual-ui-smoke-test/`、`.agents/skills/debug-verification/`、repository固有wrapper/運用を変更しない。
+- Excluded foundation files: `CORE.md` / `OPERATIONS.md` / `PROJECT_COMPLETION.md` / `VERSION` / `roles/` / `learnings/` / `templates/` はapplication同期対象外としてコピーしない。
+- Application scope preserved: `docs/design.md` / application code / PDF / localStorage / clasp / handwriting / tooth-chart / dependency files / data paths は変更しない。
+- Verification performed: source version/SHA固定、base=`main` SHA `ca18937aed494fae6f1494abbd77c25f558679a7`からfeature branch作成、merge-base=base・behind_by=0、preflight配下7ファイルを含む同期対象のcanonical blob一致を確認。foundation source headで3 selftest PASS済み。PR exact-headの最終remote diff/mergeability/review/CI監査はmerge前に実施する。
+- Resulting commit SHA: `pending squash merge`
+- PR number: `#17`
+- Rollback commit or rollback method: 問題が判明した場合はPR #17のsquash commitを通常の`git revert`で取り消す。
+- Notes: remote-only同期。実データへのアクセス、外部サービス追加、アプリのデータ経路変更は行っていない。mergeは別工程であり、人間の明示承認前には実行しない。
