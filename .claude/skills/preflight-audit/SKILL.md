@@ -1,6 +1,6 @@
 ---
 name: preflight-audit
-description: Use before starting implementation, bug fixes, refactoring, UI changes, backend changes, or design changes, especially when the user says implement, fix, change, refactor, add, update, or investigate before editing. Confirm repository state, branch safety, relevant docs/code/tests, intended change scope, migration need, forbidden areas, cost risk, and stop on dirty worktrees, main-branch work, unclear scope, specification conflicts, data risk, or possible additional cost.
+description: Use before implementation, fixes, refactoring, UI/backend/design changes, security-sensitive work, external-service use, data handling, installation, real-device work, network changes, or multi-step/long-running AI work. Confirm repository/data/AI/network/persistence boundaries, cost, human work burden, non-engineer operation boundaries, lifecycle impact, repeated manual work, progress communication, and whether a genuine human value decision exists. Fail closed on unsafe, unknown, destructive, externally sensitive, unnecessarily complex, improperly delegated, or insufficiently communicated paths.
 ---
 
 # Preflight Audit (Native Skill Wrapper)
