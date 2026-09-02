@@ -151,3 +151,21 @@
 - PR number: `#17`
 - Rollback commit or rollback method: 問題が判明した場合はPR #17のsquash commitを通常の`git revert`で取り消す。
 - Notes: remote-only同期。実データへのアクセス、外部サービス追加、アプリのデータ経路変更は行っていない。mergeは別工程であり、人間の明示承認前には実行しない。
+
+## Entry: Full common-rule resync to v1.0.0-dev.29
+
+- Target repository: `digital-work-order`
+- Target branch: `chore/foundation-dev29-current-status`
+- Foundation version: `1.0.0-dev.29`
+- Source repository: `ai-dev-foundation`
+- Source commit SHA: `d5eefabe03a83c4545b1c811fbad98b11d95ba97`
+- Synced date: `2026-09-03`
+- Synced by: `ChatGPT（GitHub connectorによるremote-only完全同期）`
+- Canonical shared surface: `AGENTS.md` + foundation `.agents/skills/` 全26ファイル。
+- Foundation sync audit equivalent: exact `AGENTS.md` blob and all shared skill trees/files match the fixed foundation source; missing=0 / stale=0.
+- Repository-local files preserved: `.agents/skills/debug-verification/`、`.agents/skills/manual-ui-smoke-test/`、`AGENTS.local.md`、local wrappers/settings。
+- Current status adoption: root `CURRENT_STATUS.md` を導入。`docs/session-handoff.md` は過去記録であり現在地点の正本とはしない。
+- Application scope preserved: `docs/design.md`、application HTML/CSS/JavaScript、PDF/print、localStorage、clasp、handwriting、tooth-chart、dependency/data pathsは変更しない。
+- PR number: `#19`
+- Rollback: 問題が判明した場合はPR #19のsquash commitを通常の`git revert`で取り消す。
+- Notes: application build/test/REAL_DEVICEはgovernance-only exact-copy同期のため不要。mergeは人間の明示承認前には実行しない。
