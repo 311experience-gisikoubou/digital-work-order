@@ -4,11 +4,12 @@
 
 ## 現在の状態
 
-共通開発フロー用スキルに加えて、共通ルール変更前の強制ゲート`common-rule-integration-audit`を持ちます。技術スタック固有の手順は各アプリケーションrepository側の`AGENTS.local.md`を参照します。
+共通開発フロー用スキルに加えて、共通ルール変更前の強制ゲート`common-rule-integration-audit`と、application repositoryへの同期実効性を確認する`foundation-sync-audit`を持ちます。技術スタック固有の手順は各アプリケーションrepository側の`AGENTS.local.md`を参照します。
 
 ## 完全共通（A分類・技術固有部分を含まない）
 
 - **`common-rule-integration-audit`**：共通ルール・共通スキル・共通学習を追加/変更する前に必ず実行する強制ゲート。既存正本との重複・類似・矛盾・陳腐化・scope・統合可能性を確認し、`MERGE_EXISTING` / `NEW_COMMON` / `LOCAL_ONLY` / `REJECT` / `HUMAN_DECISION`へ分類する。正本変更は人間承認後のみ。
+- **`foundation-sync-audit`**：application repositoryへ同期した`AGENTS.md`とfoundation側`.agents/skills/`の全共有ファイルを、実ファイルの同一性で確認する強制監査。欠落・古い共有ファイルは`STOP`とし、version表記・sync log・`AGENTS.md`一致だけで「完全同期済み」と判定しない。部分同期は部分同期として扱い、remote-onlyでは固定SHA間のblob/content比較を同等証拠として使う。
 - **`preflight-audit`**：実装・修正・リファクタリング前のGit状態・仕様・既存コード・テストの確認と、想定外差分・仕様矛盾・データ損失リスク・追加費用リスクでの停止。
 - **`post-merge-verification`**：GitHub上でPRがマージされた後の、マージ方式（squash／merge commit／rebase merge）確認、tree一致確認、local `main`のfast-forward同期、branch削除の安全判断。
 - **`handoff`**：作業を別のチャット・別のAI・別のセッションへ引き継ぐための、paste-ready Markdown形式での状況整理。
@@ -29,3 +30,4 @@
 - アプリケーションrepository側で、この同期コピーを直接編集しません。
 - アプリケーション固有の変更・追加手順は、そのアプリケーションrepository側の`AGENTS.local.md`に記載します。
 - 技術スタック固有の具体的コマンドも、共通スキルへは書かず`AGENTS.local.md`に記載します。
+- 完全同期・最新版・適用済みと表現する前に`foundation-sync-audit`または同等の固定SHA間remote比較をPASSさせます。部分同期は完全同期と表現しません。
