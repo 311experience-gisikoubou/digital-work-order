@@ -54,6 +54,38 @@ Do not invent a repository command that is not listed in `AGENTS.local.md`, and 
 - Real-device or manual changes: report that confirmation separately from automated checks. If required and not performed, do not mark complete.
 - For a remote-only audited head, exact-head selftests may run in an isolated temporary environment only if the required files are fetched from that exact head and the test's behavior does not depend on omitted repository state. Record this as remote-head reconstructed verification, not repository-local execution.
 
+## Real-Device Preparation Gate
+
+Before asking a human to begin real-device or other manual verification, prepare the verification so the human is confirming behavior rather than designing the test on the fly.
+
+Before the first human action, run the dependency-free preparation gate:
+
+```text
+node .agents/skills/test-gate/real-device-preparation-gate.mjs --manual-verification required --sample-data required --sample-data-prepared yes --sample-data-preparer ai-workflow --sample-data-source dev-preload --approved-test-environment yes --human-sample-data-entry no --ui-path-verified yes --manual-started no
+```
+
+Use the values that match the actual verification. The gate is fail-closed:
+
+- `PROCEED`: the real-device/manual preparation prerequisites are satisfied.
+- `STOP`: do not ask the human to start or continue. Return to AI-side preparation and resolve the reported prerequisite first.
+
+When sample/test data is required, `--sample-data-preparer` must be `ai-workflow`, `system`, or `provider`, and `--sample-data-source` must identify a prepared safe source such as `seed`, `fixture`, `dev-preload`, or `existing-test-data`. `--human-sample-data-entry yes` is always a stop condition for sample/test-data creation during REAL_DEVICE/manual verification.
+
+Preparation-gate self-test:
+
+```text
+node .agents/skills/test-gate/real-device-preparation-gate-selftest.mjs .agents/skills/test-gate/real-device-preparation-gate.mjs
+```
+
+- Report the estimated duration before the first manual action, together with the fixed total number of manual checks and the current/remaining counts. The estimate is a planning aid, not a guarantee, but it must be shown before verification starts.
+- Identify and prepare the required sample/test data in the approved non-production environment before the human check begins. Prefer existing seed/fixture/test data and reuse a single safe sample across checks where practical. Do not use production or real-person data merely because test data is missing.
+- Prove the intended test environment/data source is the approved non-production one when the repository has such a distinction. Complete any repository-specific safety prerequisite before inviting human interaction.
+- Inspect the actual UI/source and use labels and control names that really exist. Prepare the first human action in the same wording and order the UI presents it; do not invent intermediate fields or ask the human to discover the path.
+- If required sample data, environment proof, or an expected UI control is missing, do not start or continue the manual check. Mark the check `unrun` or `interrupted` as appropriate, return to preparation, and resolve the prerequisite first.
+- Do not make the human create or type sample/test data as part of REAL_DEVICE/manual verification. Required sample/test data must be prepared before the human check by the AI workflow, system, or verified provider through a seed, fixture, dev preload, or existing safe test-data route. A human-only UI write is not an exception for creating sample/test data: if no safe preparation route exists, keep the manual verification `unrun` and return to preparation. Human interaction may still be used for the actual behavior, visual, or operation-feel confirmation once the prepared sample state is ready.
+- Preparation steps are not extra verification items. Do not silently increase the announced check count during execution. If new evidence reveals that the original check plan is insufficient, stop, explain the reason, and re-plan before continuing.
+- Keep manual verification limited to properties that genuinely require a human/real device; continue to prefer automated evidence for backend logic, DTOs, persisted values, calculations, and other reproducible properties.
+
 ## Default Order
 
 Run only required checks, normally in this order:
@@ -100,6 +132,10 @@ If changing the order, explain why.
 - A local working tree used for the audited change becomes dirty unexpectedly.
 - Migration checksum or line-ending state is unclear.
 - Required real-device or manual confirmation is not performed.
+- `real-device-preparation-gate` returns `STOP`.
+- A required real-device/manual preparation prerequisite is missing: the applicable time estimate/check counts, sample/test data, approved environment proof, or verified UI path is not ready.
+- The human would need to create or type sample/test data for REAL_DEVICE/manual verification.
+- A sample-data gap or UI-path mismatch is discovered after manual verification has started; stop and return to preparation rather than improvising through it.
 - A command or proposed equivalent is unknown.
 - A verification failure is confirmed to be a new regression rather than a known, pre-existing failure.
 - Any paid service, external API, automatic billing, or added dependency may be involved.
@@ -112,6 +148,10 @@ If changing the order, explain why.
 - Do not modify migrations, application code, or docs as part of the gate.
 - Do not create PRs, merge, delete branches, commit, push, rebase, reset, force, or change Git configuration.
 - Do not infer real-device or manual success.
+- Do not begin real-device/manual verification before reporting the applicable duration estimate and fixed check count.
+- Do not ask the human to create, type, or improvise sample/test data during REAL_DEVICE/manual verification; prepare it first through an AI/system/provider route or keep the check `unrun`.
+- Do not ask the human to discover UI controls during a verification already in progress.
+- Do not guess UI labels or steps; verify them from the actual UI/source first.
 - Do not report unrun or unavailable checks as passing.
 - Do not require an unrelated local working tree or stash when the audited head was produced and verified entirely through another evidence path.
 
@@ -130,6 +170,7 @@ Report:
 - Verification counts (succeeded/failed/skipped/not run) per suite and in total, or why a count is unavailable
 - Generated-output or data-write risk
 - Real-device or manual confirmation status
+- For required real-device/manual verification: preparation-gate result, estimated duration, fixed total/current/remaining check counts, sample/test-data readiness and preparer/source, approved environment/data-source status, whether human sample-data entry is forbidden/absent, and the first verified UI action before the human check starts
 - Whether completion is allowed
 - Blockers
 
