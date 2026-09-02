@@ -1,6 +1,6 @@
 ---
 name: preflight-audit
-description: Use before implementation, fixes, refactoring, UI/backend/design changes, security-sensitive work, external-service use, data handling, installation, real-device work, or network changes. Confirm repository/data/AI/network/persistence boundaries, cost, human work burden, non-engineer operation boundaries, lifecycle impact, repeated manual work, and whether a genuine human value decision exists. Fail closed on unsafe, unknown, destructive, externally sensitive, unnecessarily complex, or improperly delegated paths.
+description: Use before implementation, fixes, refactoring, UI/backend/design changes, security-sensitive work, external-service use, data handling, installation, real-device work, network changes, or multi-step/long-running AI work. Confirm repository/data/AI/network/persistence boundaries, cost, human work burden, non-engineer operation boundaries, lifecycle impact, repeated manual work, progress communication, and whether a genuine human value decision exists. Fail closed on unsafe, unknown, destructive, externally sensitive, unnecessarily complex, improperly delegated, or insufficiently communicated paths.
 ---
 
 # Preflight Audit
@@ -15,6 +15,7 @@ description: Use before implementation, fixes, refactoring, UI/backend/design ch
 - **Simple is Best / simplest-safe:** preserve safety, privacy, data-loss prevention, recovery, auditability, required capability, and the human goal first. Among options meeting that floor, prefer fewer dependencies, services, data routes, configuration points, manual handoffs, recurring steps, and maintenance obligations.
 - Do not install/adopt ongoing software or services before lifecycle impact and ownership are clear.
 - Repeated manual handoffs, relay work, approvals, or setup are structural automation candidates. Do not solve only the single instance when the pattern is recurring.
+- Multi-step or long-running AI work must keep a non-engineer user oriented on current stage, meaning, next step, and whether user action is needed; do not make the user infer progress from technical logs.
 - Important rules must be classified as `DECLARATION_ONLY`, `OPERATIONAL`, or `TECHNICAL_ENFORCEMENT_REQUIRED`. Do not claim enforcement that does not exist.
 
 ## Execution / Evidence Location
@@ -62,9 +63,11 @@ Machine-gate self-test:
 node .agents/skills/preflight-audit/security-preflight-selftest.mjs .agents/skills/preflight-audit/security-preflight.mjs
 ```
 
-## Interactive / Real-Device Operation Gate
+## Interactive / AI Work Operation Gate
 
 Before asking a human to perform real-device, network, production, installation, service-adoption, or other interactive setup, run `operation-preflight.mjs`.
+
+Also run `operation-preflight.mjs` for AI-owned work classified as `multi-step` or `long-running`, including implementation, testing, audit, and recovery work. At task start, at a material phase change, and when the user's required action changes, send the user-visible progress update first and then run the gate for that checkpoint. If no human operation is required, use `--estimated-user-minutes 0` and `--estimated-user-steps 0`; do not invent human work merely to satisfy the gate.
 
 Required planning inputs:
 
@@ -76,7 +79,30 @@ Required planning inputs:
 - instruction mode;
 - `change-class`;
 - `lifecycle-impact yes|no`;
-- whether a repeated manual pattern exists.
+- whether a repeated manual pattern exists;
+- `ai-work-structure` as `single-step`, `multi-step`, or `long-running`;
+- `progress-update-event` as `none`, `task-start`, `phase-change`, or `user-action-change`.
+
+### Progress communication boundary
+
+For `single-step`, `--progress-update-event none` is allowed when no progress update is needed.
+
+For `multi-step` or `long-running`, `progress-update-event=none` is a fail-closed `STOP`. At each applicable checkpoint, the user-visible update must already have been sent and must contain all four items:
+
+- current stage;
+- why the current stage matters / its meaning;
+- what happens next;
+- whether user action is required, explicitly stating `none`/不要 when no action is needed.
+
+The gate requires:
+
+- `--progress-update-sent yes`
+- `--progress-current-stage-present yes`
+- `--progress-meaning-present yes`
+- `--progress-next-step-present yes`
+- `--progress-user-action-status-present yes`
+
+Do not substitute speculative future completion-time promises for progress visibility. When exact duration cannot be guaranteed, communicate the work scale and current phase, such as a short check, multi-stage audit, or final verification phase.
 
 For a non-engineer human:
 
@@ -147,13 +173,19 @@ If `yes`, the gate requires `--structural-automation-reviewed yes`. This means t
 ### Example: routine technical operation
 
 ```text
-node .agents/skills/preflight-audit/operation-preflight.mjs --scope network --estimated-user-minutes 5 --estimated-user-steps 3 --alternatives-reviewed yes --simplest-safe yes --work-impact low --safe-stop yes --scheduled-window no --human-profile non-engineer --human-role operator --technical-judgment-owner ai-workflow --instruction-mode stepwise-ui --change-class routine --lifecycle-impact no --repeated-manual-pattern no
+node .agents/skills/preflight-audit/operation-preflight.mjs --scope network --estimated-user-minutes 5 --estimated-user-steps 3 --alternatives-reviewed yes --simplest-safe yes --work-impact low --safe-stop yes --scheduled-window no --human-profile non-engineer --human-role operator --technical-judgment-owner ai-workflow --instruction-mode stepwise-ui --change-class routine --lifecycle-impact no --repeated-manual-pattern no --ai-work-structure single-step --progress-update-event none
+```
+
+### Example: multi-step AI work with no human operation
+
+```text
+node .agents/skills/preflight-audit/operation-preflight.mjs --scope interactive --estimated-user-minutes 0 --estimated-user-steps 0 --alternatives-reviewed yes --simplest-safe yes --work-impact none --safe-stop yes --scheduled-window no --human-profile non-engineer --human-role observer --technical-judgment-owner ai-workflow --instruction-mode stepwise-ui --change-class implementation --lifecycle-impact no --repeated-manual-pattern no --ai-work-structure multi-step --progress-update-event task-start --progress-update-sent yes --progress-current-stage-present yes --progress-meaning-present yes --progress-next-step-present yes --progress-user-action-status-present yes
 ```
 
 ### Example: fully managed software/service adoption
 
 ```text
-node .agents/skills/preflight-audit/operation-preflight.mjs --scope real-device --estimated-user-minutes 5 --estimated-user-steps 3 --alternatives-reviewed yes --simplest-safe yes --work-impact low --safe-stop yes --scheduled-window no --human-profile non-engineer --human-role operator --technical-judgment-owner ai-workflow --instruction-mode stepwise-ui --change-class install-adoption --lifecycle-impact yes --maintenance-plan-reviewed yes --maintenance-owner system --recovery-owner ai-workflow --removal-owner ai-workflow --estimated-user-maintenance-minutes-month 0 --repeated-manual-pattern no
+node .agents/skills/preflight-audit/operation-preflight.mjs --scope real-device --estimated-user-minutes 5 --estimated-user-steps 3 --alternatives-reviewed yes --simplest-safe yes --work-impact low --safe-stop yes --scheduled-window no --human-profile non-engineer --human-role operator --technical-judgment-owner ai-workflow --instruction-mode stepwise-ui --change-class install-adoption --lifecycle-impact yes --maintenance-plan-reviewed yes --maintenance-owner system --recovery-owner ai-workflow --removal-owner ai-workflow --estimated-user-maintenance-minutes-month 0 --repeated-manual-pattern no --ai-work-structure single-step --progress-update-event none
 ```
 
 Use `--scheduled-window yes` only for work deliberately scheduled into a work window.
@@ -172,9 +204,12 @@ The operation gate fails closed when required inputs are absent or when, among o
 - lifecycle impact exists but ownership is missing/unknown or makes the user the technical maintainer;
 - install/adoption or lifecycle-responsibility change bypasses lifecycle review;
 - a repeated manual pattern has not received structural automation review;
+- multi-step/long-running work has no applicable progress update event;
+- a required progress update was not actually sent;
+- current stage, meaning, next step, or user-action status is missing from the required update;
 - routine technical work is needlessly waiting on human confirmation.
 
-Do not split a known long operation into artificial small steps to bypass the gate. Do not describe an installation as simple while ignoring future upkeep. Do not hide a human value choice inside a technical label, and do not turn a technical decision into a human question merely because asking is easier than investigating.
+Do not split a known long operation into artificial small steps to bypass the gate. Do not describe an installation as simple while ignoring future upkeep. Do not hide a human value choice inside a technical label, and do not turn a technical decision into a human question merely because asking is easier than investigating. Do not classify multi-stage work as `single-step` merely to bypass progress communication.
 
 Operation-gate self-test:
 
@@ -263,13 +298,13 @@ Do not say “probably safe”.
 
 ## Stop Conditions
 
-Stop when the machine/operation gate says `STOP`, safety is `UNKNOWN` for a real-data path, confidential data may reach an external/unknown destination, destructive or production-impacting work lacks authorization, the relevant execution workspace/scope is unsafe or unclear, an unexpected diff/spec conflict exists, extra cost may occur without authorization, the non-engineer is made technical maintainer/technical decider, a genuine human value choice is unapproved, lifecycle ownership is unresolved where lifecycle impact exists, or a repeated manual pattern is being handled only as another one-off workaround.
+Stop when the machine/operation gate says `STOP`, safety is `UNKNOWN` for a real-data path, confidential data may reach an external/unknown destination, destructive or production-impacting work lacks authorization, the relevant execution workspace/scope is unsafe or unclear, an unexpected diff/spec conflict exists, extra cost may occur without authorization, the non-engineer is made technical maintainer/technical decider, a genuine human value choice is unapproved, lifecycle ownership is unresolved where lifecycle impact exists, a repeated manual pattern is being handled only as another one-off workaround, or required progress communication for multi-step/long-running AI work is missing.
 
 ## Automatic Proceed Rule
 
 If all applicable checks are `SAFE_CONFIRMED`, the next step is non-destructive and within approved scope, and no genuine human value/ownership choice remains unresolved, proceed automatically. Do not ask for technical confirmation merely because the work is complex.
 
-For interactive/real-device/network/production/installation/service-adoption work, the operation gate must also be `PROCEED` before asking the human to start.
+For interactive/real-device/network/production/installation/service-adoption work, the operation gate must also be `PROCEED` before asking the human to start. For `multi-step` or `long-running` AI work, the operation gate must be `PROCEED` at task start and at each applicable phase/user-action checkpoint before continuing that phase.
 
 ## Output
 
@@ -285,6 +320,7 @@ Report plainly:
 - change class and whether a genuine human decision exists
 - lifecycle-impact / lifecycle-ownership status when relevant
 - repeated-manual-pattern / structural-automation-review status
+- AI work structure / progress-update event and whether required progress communication is complete
 - what proceeds automatically
 - what is stopped and why
 - current state / expected change scope
