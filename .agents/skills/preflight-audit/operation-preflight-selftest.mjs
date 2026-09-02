@@ -29,6 +29,21 @@ const nonEngineerSafe = [
   '--instruction-mode', 'stepwise-ui',
 ];
 
+const progressSingle = [
+  '--ai-work-structure', 'single-step',
+  '--progress-update-event', 'none',
+];
+
+const progressTaskStart = [
+  '--ai-work-structure', 'multi-step',
+  '--progress-update-event', 'task-start',
+  '--progress-update-sent', 'yes',
+  '--progress-current-stage-present', 'yes',
+  '--progress-meaning-present', 'yes',
+  '--progress-next-step-present', 'yes',
+  '--progress-user-action-status-present', 'yes',
+];
+
 const routineBase = [
   '--scope', 'network',
   '--estimated-user-minutes', '5',
@@ -42,6 +57,7 @@ const routineBase = [
   '--lifecycle-impact', 'no',
   '--repeated-manual-pattern', 'no',
   ...nonEngineerSafe,
+  ...progressSingle,
 ];
 
 const lifecycleSafe = [
@@ -56,6 +72,10 @@ const lifecycleSafe = [
 expectStop([
   '--scope', 'network',
 ], 'USER_TIME_ESTIMATE_REQUIRED');
+
+expectStop([
+  ...routineBase.filter((v, i, a) => !(v === '--ai-work-structure' || a[i - 1] === '--ai-work-structure')),
+], 'AI_WORK_STRUCTURE_REQUIRED');
 
 expectStop([
   ...routineBase,
@@ -95,6 +115,61 @@ expectProceed([
   ...routineBase,
   '--change-class', 'architecture',
 ]);
+
+expectStop([
+  ...routineBase,
+  '--ai-work-structure', 'multi-step',
+  '--progress-update-event', 'none',
+], 'PROGRESS_UPDATE_REQUIRED_FOR_COMPLEX_WORK');
+
+expectStop([
+  ...routineBase,
+  '--ai-work-structure', 'multi-step',
+  '--progress-update-event', 'task-start',
+  '--progress-update-sent', 'no',
+  '--progress-current-stage-present', 'yes',
+  '--progress-meaning-present', 'yes',
+  '--progress-next-step-present', 'yes',
+  '--progress-user-action-status-present', 'yes',
+], 'PROGRESS_UPDATE_NOT_SENT');
+
+expectStop([
+  ...routineBase,
+  '--ai-work-structure', 'multi-step',
+  '--progress-update-event', 'task-start',
+  '--progress-update-sent', 'yes',
+  '--progress-current-stage-present', 'yes',
+  '--progress-meaning-present', 'no',
+  '--progress-next-step-present', 'yes',
+  '--progress-user-action-status-present', 'yes',
+], 'PROGRESS_MEANING_REQUIRED');
+
+expectProceed([
+  ...routineBase,
+  ...progressTaskStart,
+]);
+
+expectProceed([
+  ...routineBase,
+  '--ai-work-structure', 'long-running',
+  '--progress-update-event', 'phase-change',
+  '--progress-update-sent', 'yes',
+  '--progress-current-stage-present', 'yes',
+  '--progress-meaning-present', 'yes',
+  '--progress-next-step-present', 'yes',
+  '--progress-user-action-status-present', 'yes',
+]);
+
+expectStop([
+  ...routineBase,
+  '--ai-work-structure', 'long-running',
+  '--progress-update-event', 'user-action-change',
+  '--progress-update-sent', 'yes',
+  '--progress-current-stage-present', 'yes',
+  '--progress-meaning-present', 'yes',
+  '--progress-next-step-present', 'yes',
+  '--progress-user-action-status-present', 'no',
+], 'PROGRESS_USER_ACTION_STATUS_REQUIRED');
 
 expectStop([
   ...routineBase,
