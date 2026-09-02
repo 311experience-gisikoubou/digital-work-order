@@ -30,6 +30,13 @@ const humanDecision = argValue('--human-decision').toLowerCase();
 const nonEngineerExplanationReady = argValue('--nonengineer-explanation-ready').toLowerCase();
 const repeatedManualPattern = argValue('--repeated-manual-pattern').toLowerCase();
 const structuralAutomationReviewed = argValue('--structural-automation-reviewed').toLowerCase();
+const aiWorkStructure = argValue('--ai-work-structure').toLowerCase();
+const progressUpdateEvent = argValue('--progress-update-event').toLowerCase();
+const progressUpdateSent = argValue('--progress-update-sent').toLowerCase();
+const progressCurrentStagePresent = argValue('--progress-current-stage-present').toLowerCase();
+const progressMeaningPresent = argValue('--progress-meaning-present').toLowerCase();
+const progressNextStepPresent = argValue('--progress-next-step-present').toLowerCase();
+const progressUserActionStatusPresent = argValue('--progress-user-action-status-present').toLowerCase();
 const jsonOnly = args.includes('--json');
 
 const findings = [];
@@ -44,6 +51,8 @@ const allowedHumanRoles = new Set(['operator', 'observer', 'value-decider', 'tec
 const allowedTechnicalJudgmentOwners = new Set(['ai-workflow', 'system', 'provider', 'user', 'unknown']);
 const allowedInstructionModes = new Set(['stepwise-ui', 'stepwise-command', 'expert']);
 const allowedHumanDecisions = new Set(['approved', 'pending']);
+const allowedAiWorkStructures = new Set(['single-step', 'multi-step', 'long-running']);
+const allowedProgressEvents = new Set(['none', 'task-start', 'phase-change', 'user-action-change']);
 const allowedChangeClasses = new Set([
   'routine',
   'configuration',
@@ -89,6 +98,20 @@ if (!allowedTechnicalJudgmentOwners.has(technicalJudgmentOwner)) add('STOP', 'TE
 if (!allowedInstructionModes.has(instructionMode)) add('STOP', 'INSTRUCTION_MODE_REQUIRED');
 if (!allowedChangeClasses.has(changeClass)) add('STOP', 'CHANGE_CLASS_REQUIRED');
 if (!yesNo.has(repeatedManualPattern)) add('STOP', 'REPEATED_MANUAL_PATTERN_STATUS_REQUIRED');
+if (!allowedAiWorkStructures.has(aiWorkStructure)) add('STOP', 'AI_WORK_STRUCTURE_REQUIRED');
+if (!allowedProgressEvents.has(progressUpdateEvent)) add('STOP', 'PROGRESS_UPDATE_EVENT_REQUIRED');
+
+const progressRequired = aiWorkStructure === 'multi-step' || aiWorkStructure === 'long-running';
+if (progressRequired && progressUpdateEvent === 'none') {
+  add('STOP', 'PROGRESS_UPDATE_REQUIRED_FOR_COMPLEX_WORK', { aiWorkStructure });
+}
+if (progressUpdateEvent && progressUpdateEvent !== 'none') {
+  if (progressUpdateSent !== 'yes') add('STOP', 'PROGRESS_UPDATE_NOT_SENT', { progressUpdateEvent });
+  if (progressCurrentStagePresent !== 'yes') add('STOP', 'PROGRESS_CURRENT_STAGE_REQUIRED');
+  if (progressMeaningPresent !== 'yes') add('STOP', 'PROGRESS_MEANING_REQUIRED');
+  if (progressNextStepPresent !== 'yes') add('STOP', 'PROGRESS_NEXT_STEP_REQUIRED');
+  if (progressUserActionStatusPresent !== 'yes') add('STOP', 'PROGRESS_USER_ACTION_STATUS_REQUIRED');
+}
 
 if (alternativesReviewed === 'no') add('STOP', 'ALTERNATIVES_NOT_REVIEWED');
 if (simplestSafe === 'no') add('STOP', 'CHOSEN_PATH_NOT_SIMPLEST_SAFE');
@@ -191,6 +214,9 @@ if (!findings.some((f) => f.status === 'STOP')) {
     lifecycleImpact,
     repeatedManualPattern,
     structuralAutomationReviewed: structuralAutomationReviewed || null,
+    aiWorkStructure,
+    progressUpdateEvent,
+    progressUpdateSent: progressUpdateEvent === 'none' ? null : progressUpdateSent,
     maintenanceOwner: lifecycleImpact === 'yes' ? maintenanceOwner : null,
     recoveryOwner: lifecycleImpact === 'yes' ? recoveryOwner : null,
     removalOwner: lifecycleImpact === 'yes' ? removalOwner : null,
@@ -212,6 +238,9 @@ const output = {
   importantHumanChoice,
   lifecycleImpact: lifecycleImpact || '(missing)',
   repeatedManualPattern: repeatedManualPattern || '(missing)',
+  aiWorkStructure: aiWorkStructure || '(missing)',
+  progressUpdateEvent: progressUpdateEvent || '(missing)',
+  progressRequired,
   findings,
 };
 console.log(JSON.stringify(output, null, jsonOnly ? 0 : 2));
