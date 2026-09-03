@@ -22,61 +22,25 @@ jobs:
         shell: bash
         run: |
           python3 - <<'PY'
+          import base64
           from pathlib import Path
-
           agents = Path('AGENTS.md')
           text = agents.read_text(encoding='utf-8')
           old = '- 同種の伝書鳩・手作業・承認往復が繰り返される場合、個別対応だけで終えず、類似ケースを含む構造的な自動化候補として扱う。ただし自動化によって安全性を下げない。\n- 実装・変更・外部サービス利用・ネットワーク変更・データ経路変更の前には`preflight-audit`を実行する。'
-          new_bullet = '- 長時間・複数段階の作業では、同じ製品tree・製品の未commit差分・blocker・failure・route等が一定checkpoint期間変わらない停滞を状態付きで検出し、原因分析→Forced Reflection→別routeへの強制昇格を行う。管理ファイルだけのHEAD変更は製品進捗として扱わない。未完了でhuman gateが無い場合、ユーザーの状態確認質問に報告だけして停止せず、安全な次工程を継続する。詳細と機械gateは`preflight-audit`の`stagnation-watch.mjs`を正本とする。'
+          bullet = '- 長時間・複数段階の作業では、同じ製品tree・製品の未commit差分・blocker・failure・route等が一定checkpoint期間変わらない停滞を状態付きで検出し、原因分析→Forced Reflection→別routeへの強制昇格を行う。管理ファイルだけのHEAD変更は製品進捗として扱わない。未完了でhuman gateが無い場合、ユーザーの状態確認質問に報告だけして停止せず、安全な次工程を継続する。詳細と機械gateは`preflight-audit`の`stagnation-watch.mjs`を正本とする。'
           if text.count(old) != 1:
               raise SystemExit('AGENTS exact dev35 anchor mismatch')
-          text = text.replace(old, old.split('\n')[0] + '\n' + new_bullet + '\n' + old.split('\n')[1], 1)
-          agents.write_text(text, encoding='utf-8', newline='\n')
-
+          first, second = old.split('\n')
+          agents.write_text(text.replace(old, first + '\n' + bullet + '\n' + second, 1), encoding='utf-8', newline='\n')
           skill = Path('.agents/skills/preflight-audit/SKILL.md')
           text = skill.read_text(encoding='utf-8')
-          marker = '- Never use forced reflection as a reason to dump technical judgment onto a non-engineer. Technical escalation order remains observation → root-cause analysis → hypothesis reselection → route reselection → independent review. Human involvement is for genuine value/ownership or real-device subjective decisions, not as a technical escape hatch.\n\n### Example: routine technical operation'
+          tail = '- Never use forced reflection as a reason to dump technical judgment onto a non-engineer. Technical escalation order remains observation → root-cause analysis → hypothesis reselection → route reselection → independent review. Human involvement is for genuine value/ownership or real-device subjective decisions, not as a technical escape hatch.'
+          marker = tail + '\n\n### Example: routine technical operation'
           if text.count(marker) != 1:
               raise SystemExit('SKILL exact dev35 anchor mismatch')
-          section = r'''### Stateful Stagnation / Safe Continuation
-
-For multi-step or long-running work, use `stagnation-watch.mjs` as the stateful companion to the failure-count Forced Reflection gate. It prevents an unchanged blocker from remaining in ordinary retry/report mode merely because no one incremented `--same-class-failure-count`, and it prevents a status question from becoming a report-only terminal event when safe work is still incomplete.
-
-Run it at task start and again at meaningful checkpoints, including before answering a status check such as “進んだ？” / “どうなった？” when the work remains incomplete. A periodic monitor may also call it. The default interval is 60 minutes, but the enforcement logic is independent of the scheduler: if several intervals elapsed without a checkpoint, the next invocation accumulates the missed unchanged checkpoints and escalates immediately.
-
-Local checkout state is stored by default under `.git/ai-dev-foundation/stagnation/<work-id>.json`, so chat/session wording changes do not reset it. Remote-only callers can pass the previous `nextState` with `--state-json` and persist the returned `nextState` in an existing task-visible evidence channel such as the tracked Issue/PR state; do not create a separate long-lived business source merely for this runtime state.
-
-The default `--fingerprint-scope product` fingerprints the branch plus the committed product tree and uncommitted product changes while excluding governance-only paths (`.agents/`, `.claude/`, `.github/`, `AGENTS*.md`, `CURRENT_STATUS.md`). A governance-only HEAD change does not count as product progress. Use `--fingerprint-scope all` when the work itself is foundation/governance work. Add stable `--failure-signature`, `--blocker-signature`, `--observation-signature`, and `--route-signature` values when available. A genuinely new observation or route changes the fingerprint; cosmetic wording changes do not.
-
-Escalation is fail-closed:
-
-- first due unchanged checkpoint: `STAGNATION_L1_ROOT_CAUSE_REQUIRED` → ordinary retry/report mode stops; return to root-cause analysis;
-- second due unchanged checkpoint: `STAGNATION_L2_FORCED_REFLECTION_REQUIRED` → Forced Reflection is mandatory;
-- third or later unchanged checkpoint: `STAGNATION_HARD_STOP_ROUTE_CHANGE_REQUIRED` → the same route remains blocked until a new observation/hypothesis/route/material condition changes the fingerprint;
-- `workflow-status=in-progress` does not accumulate stagnation;
-- a valid human gate with `--continuation-action wait-human` pauses the checkpoint clock;
-- `work-state=incomplete --human-gate none --continuation-action report-only` stops with `SAFE_WORK_CONTINUATION_REQUIRED`;
-- `work-state=incomplete --human-gate none --continuation-action wait-human` stops with `UNNECESSARY_HUMAN_WAIT`;
-- genuine merge/production/destructive/value/ownership gates still use `human-gate=required` and may wait.
-
-Example:
-
-```text
-node .agents/skills/preflight-audit/stagnation-watch.mjs --target-root . --work-id issue-270 --gate-phase test-gate --work-state incomplete --human-gate none --continuation-action resume --workflow-status failed --pr-state none --failure-signature migration_0001_checksum_is_unchanged --route-signature ui6c-one-shot --interval-minutes 60
-```
-
-This gate intentionally does **not** install an always-on hourly GitHub Actions workflow in every repository. A permanent per-repository schedule would add recurring runner usage and maintenance. Existing AI/tool scheduling may invoke this gate when appropriate, while missed intervals are still enforced at the next checkpoint.
-
-Stagnation self-test:
-
-```text
-node .agents/skills/preflight-audit/stagnation-watch-selftest.mjs .agents/skills/preflight-audit/stagnation-watch.mjs
-```
-'''
-          replacement = marker.split('\n\n### Example: routine technical operation')[0] + '\n\n' + section + '\n### Example: routine technical operation'
-          text = text.replace(marker, replacement, 1)
-          skill.write_text(text, encoding='utf-8', newline='\n')
-
+          section_b64 = 'IyMjIFN0YXRlZnVsIFN0YWduYXRpb24gLyBTYWZlIENvbnRpbnVhdGlvbgoKRm9yIG11bHRpLXN0ZXAgb3IgbG9uZy1ydW5uaW5nIHdvcmssIHVzZSBgc3RhZ25hdGlvbi13YXRjaC5tanNgIGFzIHRoZSBzdGF0ZWZ1bCBjb21wYW5pb24gdG8gdGhlIGZhaWx1cmUtY291bnQgRm9yY2VkIFJlZmxlY3Rpb24gZ2F0ZS4gSXQgcHJldmVudHMgYW4gdW5jaGFuZ2VkIGJsb2NrZXIgZnJvbSByZW1haW5pbmcgaW4gb3JkaW5hcnkgcmV0cnkvcmVwb3J0IG1vZGUgbWVyZWx5IGJlY2F1c2Ugbm8gb25lIGluY3JlbWVudGVkIGAtLXNhbWUtY2xhc3MtZmFpbHVyZS1jb3VudGAsIGFuZCBpdCBwcmV2ZW50cyBhIHN0YXR1cyBxdWVzdGlvbiBmcm9tIGJlY29taW5nIGEgcmVwb3J0LW9ubHkgdGVybWluYWwgZXZlbnQgd2hlbiBzYWZlIHdvcmsgaXMgc3RpbGwgaW5jb21wbGV0ZS4KClJ1biBpdCBhdCB0YXNrIHN0YXJ0IGFuZCBhZ2FpbiBhdCBtZWFuaW5nZnVsIGNoZWNrcG9pbnRzLCBpbmNsdWRpbmcgYmVmb3JlIGFuc3dlcmluZyBhIHN0YXR1cyBjaGVjayBzdWNoIGFzIOKAnOmAsuOCk+OBoO+8n+KAnSAvIOKAnOOBqeOBhuOBquOBo+OBn++8n+KAnSB3aGVuIHRoZSB3b3JrIHJlbWFpbnMgaW5jb21wbGV0ZS4gQSBwZXJpb2RpYyBtb25pdG9yIG1heSBhbHNvIGNhbGwgaXQuIFRoZSBkZWZhdWx0IGludGVydmFsIGlzIDYwIG1pbnV0ZXMsIGJ1dCB0aGUgZW5mb3JjZW1lbnQgbG9naWMgaXMgaW5kZXBlbmRlbnQgb2YgdGhlIHNjaGVkdWxlcjogaWYgc2V2ZXJhbCBpbnRlcnZhbHMgZWxhcHNlZCB3aXRob3V0IGEgY2hlY2twb2ludCwgdGhlIG5leHQgaW52b2NhdGlvbiBhY2N1bXVsYXRlcyB0aGUgbWlzc2VkIHVuY2hhbmdlZCBjaGVja3BvaW50cyBhbmQgZXNjYWxhdGVzIGltbWVkaWF0ZWx5LgoKTG9jYWwgY2hlY2tvdXQgc3RhdGUgaXMgc3RvcmVkIGJ5IGRlZmF1bHQgdW5kZXIgYC5naXQvYWktZGV2LWZvdW5kYXRpb24vc3RhZ25hdGlvbi88d29yay1pZD4uanNvbmAsIHNvIGNoYXQvc2Vzc2lvbiB3b3JkaW5nIGNoYW5nZXMgZG8gbm90IHJlc2V0IGl0LiBSZW1vdGUtb25seSBjYWxsZXJzIGNhbiBwYXNzIHRoZSBwcmV2aW91cyBgbmV4dFN0YXRlYCB3aXRoIGAtLXN0YXRlLWpzb25gIGFuZCBwZXJzaXN0IHRoZSByZXR1cm5lZCBgbmV4dFN0YXRlYCBpbiBhbiBleGlzdGluZyB0YXNrLXZpc2libGUgZXZpZGVuY2UgY2hhbm5lbCBzdWNoIGFzIHRoZSB0cmFja2VkIElzc3VlL1BSIHN0YXRlOyBkbyBub3QgY3JlYXRlIGEgc2VwYXJhdGUgbG9uZy1saXZlZCBidXNpbmVzcyBzb3VyY2UgbWVyZWx5IGZvciB0aGlzIHJ1bnRpbWUgc3RhdGUuCgpUaGUgZGVmYXVsdCBgLS1maW5nZXJwcmludC1zY29wZSBwcm9kdWN0YCBmaW5nZXJwcmludHMgdGhlIGJyYW5jaCBwbHVzIHRoZSBjb21taXR0ZWQgcHJvZHVjdCB0cmVlIGFuZCB1bmNvbW1pdHRlZCBwcm9kdWN0IGNoYW5nZXMgd2hpbGUgZXhjbHVkaW5nIGdvdmVybmFuY2Utb25seSBwYXRocyAoYC5hZ2VudHMvYCwgYC5jbGF1ZGUvYCwgYC5naXRodWIvYCwgYEFHRU5UUyoubWRgLCBgQ1VSUkVOVF9TVEFUVVMubWRgKS4gQSBnb3Zlcm5hbmNlLW9ubHkgSEVBRCBjaGFuZ2UgZG9lcyBub3QgY291bnQgYXMgcHJvZHVjdCBwcm9ncmVzcy4gVXNlIGAtLWZpbmdlcnByaW50LXNjb3BlIGFsbGAgd2hlbiB0aGUgd29yayBpdHNlbGYgaXMgZm91bmRhdGlvbi9nb3Zlcm5hbmNlIHdvcmsuIEFkZCBzdGFibGUgYC0tZmFpbHVyZS1zaWduYXR1cmVgLCBgLS1ibG9ja2VyLXNpZ25hdHVyZWAsIGAtLW9ic2VydmF0aW9uLXNpZ25hdHVyZWAsIGFuZCBgLS1yb3V0ZS1zaWduYXR1cmVgIHZhbHVlcyB3aGVuIGF2YWlsYWJsZS4gQSBnZW51aW5lbHkgbmV3IG9ic2VydmF0aW9uIG9yIHJvdXRlIGNoYW5nZXMgdGhlIGZpbmdlcnByaW50OyBjb3NtZXRpYyB3b3JkaW5nIGNoYW5nZXMgZG8gbm90LgoKRXNjYWxhdGlvbiBpcyBmYWlsLWNsb3NlZDoKCi0gZmlyc3QgZHVlIHVuY2hhbmdlZCBjaGVja3BvaW50OiBgU1RBR05BVElPTl9MMV9ST09UX0NBVVNFX1JFUVVJUkVEYCDihpIgb3JkaW5hcnkgcmV0cnkvcmVwb3J0IG1vZGUgc3RvcHM7IHJldHVybiB0byByb290LWNhdXNlIGFuYWx5c2lzOwotIHNlY29uZCBkdWUgdW5jaGFuZ2VkIGNoZWNrcG9pbnQ6IGBTVEFHTkFUSU9OX0wyX0ZPUkNFRF9SRUZMRUNUSU9OX1JFUVVJUkVEYCDihpIgRm9yY2VkIFJlZmxlY3Rpb24gaXMgbWFuZGF0b3J5OwotIHRoaXJkIG9yIGxhdGVyIHVuY2hhbmdlZCBjaGVja3BvaW50OiBgU1RBR05BVElPTl9IQVJEX1NUT1BfUk9VVEVfQ0hBTkdFX1JFUVVJUkVEYCDihpIgdGhlIHNhbWUgcm91dGUgcmVtYWlucyBibG9ja2VkIHVudGlsIGEgbmV3IG9ic2VydmF0aW9uL2h5cG90aGVzaXMvcm91dGUvbWF0ZXJpYWwgY29uZGl0aW9uIGNoYW5nZXMgdGhlIGZpbmdlcnByaW50OwotIGB3b3JrZmxvdy1zdGF0dXM9aW4tcHJvZ3Jlc3NgIGRvZXMgbm90IGFjY3VtdWxhdGUgc3RhZ25hdGlvbjsKLSBhIHZhbGlkIGh1bWFuIGdhdGUgd2l0aCBgLS1jb250aW51YXRpb24tYWN0aW9uIHdhaXQtaHVtYW5gIHBhdXNlcyB0aGUgY2hlY2twb2ludCBjbG9jazsKLSBgd29yay1zdGF0ZT1pbmNvbXBsZXRlIC0taHVtYW4tZ2F0ZSBub25lIC0tY29udGludWF0aW9uLWFjdGlvbiByZXBvcnQtb25seWAgc3RvcHMgd2l0aCBgU0FGRV9XT1JLX0NPTlRJTlVBVElPTl9SRVFVSVJFRGA7Ci0gYHdvcmstc3RhdGU9aW5jb21wbGV0ZSAtLWh1bWFuLWdhdGUgbm9uZSAtLWNvbnRpbnVhdGlvbi1hY3Rpb24gd2FpdC1odW1hbmAgc3RvcHMgd2l0aCBgVU5ORUNFU1NBUllfSFVNQU5fV0FJVGA7Ci0gZ2VudWluZSBtZXJnZS9wcm9kdWN0aW9uL2Rlc3RydWN0aXZlL3ZhbHVlL293bmVyc2hpcCBnYXRlcyBzdGlsbCB1c2UgYGh1bWFuLWdhdGU9cmVxdWlyZWRgIGFuZCBtYXkgd2FpdC4KCkV4YW1wbGU6CgpgYGB0ZXh0Cm5vZGUgLmFnZW50cy9za2lsbHMvcHJlZmxpZ2h0LWF1ZGl0L3N0YWduYXRpb24td2F0Y2gubWpzIC0tdGFyZ2V0LXJvb3QgLiAtLXdvcmstaWQgaXNzdWUtMjcwIC0tZ2F0ZS1waGFzZSB0ZXN0LWdhdGUgLS13b3JrLXN0YXRlIGluY29tcGxldGUgLS1odW1hbi1nYXRlIG5vbmUgLS1jb250aW51YXRpb24tYWN0aW9uIHJlc3VtZSAtLXdvcmtmbG93LXN0YXR1cyBmYWlsZWQgLS1wci1zdGF0ZSBub25lIC0tZmFpbHVyZS1zaWduYXR1cmUgbWlncmF0aW9uXzAwMDFfY2hlY2tzdW1faXNfdW5jaGFuZ2VkIC0tcm91dGUtc2lnbmF0dXJlIHVpNmMtb25lLXNob3QgLS1pbnRlcnZhbC1taW51dGVzIDYwCmBgYAoKVGhpcyBnYXRlIGludGVudGlvbmFsbHkgZG9lcyAqKm5vdCoqIGluc3RhbGwgYW4gYWx3YXlzLW9uIGhvdXJseSBHaXRIdWIgQWN0aW9ucyB3b3JrZmxvdyBpbiBldmVyeSByZXBvc2l0b3J5LiBBIHBlcm1hbmVudCBwZXItcmVwb3NpdG9yeSBzY2hlZHVsZSB3b3VsZCBhZGQgcmVjdXJyaW5nIHJ1bm5lciB1c2FnZSBhbmQgbWFpbnRlbmFuY2UuIEV4aXN0aW5nIEFJL3Rvb2wgc2NoZWR1bGluZyBtYXkgaW52b2tlIHRoaXMgZ2F0ZSB3aGVuIGFwcHJvcHJpYXRlLCB3aGlsZSBtaXNzZWQgaW50ZXJ2YWxzIGFyZSBzdGlsbCBlbmZvcmNlZCBhdCB0aGUgbmV4dCBjaGVja3BvaW50LgoKU3RhZ25hdGlvbiBzZWxmLXRlc3Q6CgpgYGB0ZXh0Cm5vZGUgLmFnZW50cy9za2lsbHMvcHJlZmxpZ2h0LWF1ZGl0L3N0YWduYXRpb24td2F0Y2gtc2VsZnRlc3QubWpzIC5hZ2VudHMvc2tpbGxzL3ByZWZsaWdodC1hdWRpdC9zdGFnbmF0aW9uLXdhdGNoLm1qcwpgYGAK'
+          section = base64.b64decode(section_b64).decode('utf-8')
+          skill.write_text(text.replace(marker, tail + '\n\n' + section + '\n### Example: routine technical operation', 1), encoding='utf-8', newline='\n')
           log = Path('.agents/sync-log.md')
           existing = log.read_text(encoding='utf-8') if log.exists() else '# Foundation Sync Log\n'
           if '1.0.0-dev.37' not in existing:
