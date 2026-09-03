@@ -94,6 +94,44 @@ Machine-gate self-test:
 node .agents/skills/foundation-sync-audit/foundation-sync-audit-selftest.mjs .agents/skills/foundation-sync-audit/foundation-sync-audit.mjs
 ```
 
+## Safe Bootstrap
+
+For a repository that has not yet adopted the foundation, use the bootstrap gate instead of manually copying the canonical surface file by file.
+
+Dry-run planning is the default:
+
+```text
+node .agents/skills/foundation-sync-audit/foundation-bootstrap.mjs --source-root <foundation-root> --target-root <application-root> --json
+```
+
+Apply only on a dedicated feature branch:
+
+```text
+node .agents/skills/foundation-sync-audit/foundation-bootstrap.mjs --source-root <foundation-root> --target-root <application-root> --apply --json
+```
+
+The bootstrap gate is deliberately narrow and fail-closed:
+
+- it refuses `main` / `master`, detached HEAD, a non-root target checkout, and a dirty target working tree;
+- it copies only the canonical `AGENTS.md` + `.agents/skills/` surface;
+- when the target already uses Claude native skills (`CLAUDE.md` or `.claude/skills/`), it also copies the foundation Claude wrapper templates to the matching `.claude/skills/<skill>/SKILL.md` paths;
+- it never creates, edits, or overwrites `AGENTS.local.md`, business specifications, application code, secrets, runtime data, or repository-local skills;
+- if a canonical/wrapper target path already exists with different content, it stops before changing anything instead of overwriting the target;
+- after copying, it automatically runs `foundation-sync-audit`; if that post-copy audit fails, files created by the bootstrap attempt are removed on a best-effort rollback;
+- it creates no commit, push, PR, merge, network service, daemon, external dependency, or new permission.
+
+This is an initial-adoption helper, not a stale-foundation overwrite tool. Existing repositories with differing canonical files remain `STOP` and must use the normal reviewed synchronization workflow rather than using bootstrap to overwrite history.
+
+Bootstrap self-test:
+
+```text
+node .agents/skills/foundation-sync-audit/foundation-bootstrap-selftest.mjs \
+  .agents/skills/foundation-sync-audit/foundation-bootstrap.mjs \
+  .agents/skills/foundation-sync-audit/foundation-sync-audit.mjs
+```
+
+The self-test covers dry-run behavior, feature-branch apply, Claude configured/not-configured behavior, `AGENTS.local.md` preservation, protected-branch rejection, dirty-tree rejection, target-conflict rejection, and rollback after post-copy audit failure.
+
 ## Remote-Only Equivalent
 
 If the synchronization or audit is performed through GitHub/remote-only tooling and the two local checkouts are not available, use equivalent machine-readable evidence:

@@ -4,12 +4,12 @@
 
 ## 現在の状態
 
-共通開発フロー用スキルに加えて、共通ルール変更前の強制ゲート`common-rule-integration-audit`と、application repositoryへの同期実効性を確認する`foundation-sync-audit`を持ちます。技術スタック固有の手順は各アプリケーションrepository側の`AGENTS.local.md`を参照します。
+共通開発フロー用スキルに加えて、共通ルール変更前の強制ゲート`common-rule-integration-audit`と、application repositoryへの同期実効性を確認し、未導入repositoryへの安全bootstrapも支援する`foundation-sync-audit`を持ちます。技術スタック固有の手順は各アプリケーションrepository側の`AGENTS.local.md`を参照します。
 
 ## 完全共通（A分類・技術固有部分を含まない）
 
 - **`common-rule-integration-audit`**：共通ルール・共通スキル・共通学習を追加/変更する前に必ず実行する強制ゲート。既存正本との重複・類似・矛盾・陳腐化・scope・統合可能性を確認し、`MERGE_EXISTING` / `NEW_COMMON` / `LOCAL_ONLY` / `REJECT` / `HUMAN_DECISION`へ分類する。正本変更は人間承認後のみ。
-- **`foundation-sync-audit`**：application repositoryへ同期した`AGENTS.md`とfoundation側`.agents/skills/`の全共有ファイルを実ファイル同一性で確認し、さらにClaude native skillが設定されたrepositoryでは`templates/.claude/skills/`とapplication側`.claude/skills/`のwrapperも確認する強制監査。foundation側wrapper template自体の`name` / `description` / canonical参照も検証し、欠落・古い共有ファイル・欠落/古いnative wrapperは`STOP`とする。version表記・sync log・canonical本文一致だけで「実効的に完全同期済み」と判定しない。
+- **`foundation-sync-audit`**：application repositoryへ同期した`AGENTS.md`とfoundation側`.agents/skills/`の全共有ファイルを実ファイル同一性で確認し、さらにClaude native skillが設定されたrepositoryでは`templates/.claude/skills/`とapplication側`.claude/skills/`のwrapperも確認する強制監査。未導入repository向けには、feature branch・clean tree・競合なしを必須にしてcanonical/wrapperをコピーし、直後に同監査を実行する`foundation-bootstrap.mjs`を持つ。既存の異なるcanonicalは上書きせず`STOP`する。version表記・sync log・canonical本文一致だけで「実効的に完全同期済み」と判定しない。
 - **`preflight-audit`**：実装・修正・リファクタリング前のGit状態・仕様・既存コード・テストの確認と、想定外差分・仕様矛盾・データ損失リスク・追加費用リスクでの停止。
 - **`post-merge-verification`**：GitHub上でPRがマージされた後の、マージ方式（squash／merge commit／rebase merge）確認、tree一致確認、local `main`のfast-forward同期、branch削除の安全判断。
 - **`handoff`**：作業を別のチャット・別のAI・別のセッションへ引き継ぐための、paste-ready Markdown形式での状況整理。
