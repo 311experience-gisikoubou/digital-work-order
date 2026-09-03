@@ -187,3 +187,10 @@
 - Verification: PR作成前の固定SHA remote auditでcanonical missing/staleとClaude wrapper missing/staleを0件にする。最終結果はPR exact headで再監査する。
 - PR number: `pending creation`。
 - Rollback: 本同期PRのsquash commitを通常の`git revert`で取り消す。
+
+## 2026-09-04 — ai-dev-foundation 1.0.0-dev.37
+
+- Source commit: `e45cd1b3e961e9ca2f99d626248f2eefa611b748`
+- Sync: `AGENTS.md` + canonical `.agents/skills/` changed surface
+- Method: fail-closed dev.35 → dev.37 remote-only update
+- Verification: exact canonical blob identity + stagnation selftest
