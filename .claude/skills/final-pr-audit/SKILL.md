@@ -1,6 +1,6 @@
 ---
 name: final-pr-audit
-description: Use after implementation and before PR creation, merge, or final completion reports, or when the user asks for a final review, PR audit, merge readiness check, or whether it is safe to proceed. Verify base/head branch and SHA, commit count, changed files, diff scope, migration and dependency-manifest diffs, design consistency, report consistency, the repository's format/lint/type-check/build/selftest verification, generated tracked diffs, real-device status, GitHub information limits, and blockers, and separate audit approval from merge execution.
+description: Use after implementation and before PR creation, merge, or final completion reports, or when the user asks for a final review, PR audit, merge readiness check, or whether it is safe to proceed. Verify base/head branch and SHA, commit count, changed files, diff scope, migration and dependency-manifest diffs, design consistency, report consistency, the repository's format/lint/type-check/build/selftest verification, generated tracked diffs, real-device status, GitHub information limits, and blockers; then complete safe mechanical pre-merge preparation so the only normal human action left is explicit merge approval.
 ---
 
 # Final PR Audit (Native Skill Wrapper)

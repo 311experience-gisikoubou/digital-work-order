@@ -169,3 +169,21 @@
 - PR number: `#19`
 - Rollback: 問題が判明した場合はPR #19のsquash commitを通常の`git revert`で取り消す。
 - Notes: application build/test/REAL_DEVICEはgovernance-only exact-copy同期のため不要。mergeは人間の明示承認前には実行しない。
+
+## Entry: Effective skill sync to v1.0.0-dev.30
+
+- Target repository: `digital-work-order`
+- Target branch: `chore/foundation-dev30-effective-skill-sync`
+- Foundation version: `1.0.0-dev.30`
+- Source repository: `ai-dev-foundation`
+- Source commit SHA: `e4f0520cfeab21c086cc817c3ce33bda3b2841ea`
+- Synced date: `2026-09-03`
+- Synced by: `ChatGPT（GitHub connectorによるremote-only実効同期）`
+- Canonical surface: `AGENTS.md` + foundation `.agents/skills/` の全共有ファイルを固定SHAで比較する。
+- Native adapter surface: Claude Code利用repositoryのため、foundation `templates/.claude/skills/*/SKILL.md.template` と `.claude/skills/<skill>/SKILL.md` も完全同期条件とする。
+- Files updated: `.agents/skills/README.md`、`common-rule-integration-audit/SKILL.md`、`foundation-sync-audit` のSKILL/gate/selftest、Claude wrapperの `common-rule-integration-audit` / `foundation-sync-audit` 追加、`preflight-audit` / `final-pr-audit` 更新。
+- Repository-local extras preserved: `.agents/skills/debug-verification/`、`.agents/skills/manual-ui-smoke-test/`、`.claude/skills/debug-verification/`、`.claude/skills/manual-ui-smoke-test/` はfoundation対象外extraとして保持する。
+- Application scope preserved: `docs/design.md`、application HTML/CSS/JavaScript、PDF/print、localStorage、clasp、handwriting、tooth-chart、dependency/data pathsは変更しない。
+- Verification: PR作成前の固定SHA remote auditでcanonical missing/staleとClaude wrapper missing/staleを0件にする。最終結果はPR exact headで再監査する。
+- PR number: `pending creation`。
+- Rollback: 本同期PRのsquash commitを通常の`git revert`で取り消す。

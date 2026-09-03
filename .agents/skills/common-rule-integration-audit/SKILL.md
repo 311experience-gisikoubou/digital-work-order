@@ -1,3 +1,8 @@
+---
+name: common-rule-integration-audit
+description: Use before adding or changing common rules, common skills, common learnings, or cross-repository operational procedures. Search existing canonical sources first, classify the proposal as MERGE_EXISTING / NEW_COMMON / LOCAL_ONLY / REJECT / HUMAN_DECISION, and stop source-of-truth writes until required human approval.
+---
+
 # common-rule-integration-audit
 
 ## Purpose
