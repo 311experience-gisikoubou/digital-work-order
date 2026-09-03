@@ -37,6 +37,12 @@ const progressCurrentStagePresent = argValue('--progress-current-stage-present')
 const progressMeaningPresent = argValue('--progress-meaning-present').toLowerCase();
 const progressNextStepPresent = argValue('--progress-next-step-present').toLowerCase();
 const progressUserActionStatusPresent = argValue('--progress-user-action-status-present').toLowerCase();
+const sameClassFailureCountRaw = argValue('--same-class-failure-count');
+const postFailureAction = argValue('--post-failure-action').toLowerCase();
+const materialChangeReviewed = argValue('--material-change-reviewed').toLowerCase();
+const forcedReflectionReviewed = argValue('--forced-reflection-reviewed').toLowerCase();
+const reflectionRecorded = argValue('--reflection-recorded').toLowerCase();
+const reflectionBasis = argValue('--reflection-basis').toLowerCase();
 const jsonOnly = args.includes('--json');
 
 const findings = [];
@@ -53,6 +59,23 @@ const allowedInstructionModes = new Set(['stepwise-ui', 'stepwise-command', 'exp
 const allowedHumanDecisions = new Set(['approved', 'pending']);
 const allowedAiWorkStructures = new Set(['single-step', 'multi-step', 'long-running']);
 const allowedProgressEvents = new Set(['none', 'task-start', 'phase-change', 'user-action-change']);
+const allowedPostFailureActions = new Set([
+  'not-applicable',
+  'retry-same',
+  'retry-materially-changed',
+  'root-cause-analysis',
+  'hypothesis-reselection',
+  'route-reselection',
+  'independent-review',
+  'stop',
+]);
+const allowedReflectionBases = new Set([
+  'new-observation',
+  'new-hypothesis',
+  'new-route',
+  'materially-changed-condition',
+  'insufficient-observation',
+]);
 const allowedChangeClasses = new Set([
   'routine',
   'configuration',
@@ -79,6 +102,8 @@ const hasMinutes = minutesRaw.trim() !== '';
 const hasSteps = stepsRaw.trim() !== '';
 const estimatedUserMinutes = hasMinutes ? Number(minutesRaw) : Number.NaN;
 const estimatedUserSteps = hasSteps ? Number(stepsRaw) : Number.NaN;
+const hasSameClassFailureCount = sameClassFailureCountRaw.trim() !== '';
+const sameClassFailureCount = hasSameClassFailureCount ? Number(sameClassFailureCountRaw) : Number.NaN;
 
 if (!hasMinutes || !Number.isFinite(estimatedUserMinutes) || estimatedUserMinutes < 0) {
   add('STOP', 'USER_TIME_ESTIMATE_REQUIRED');
@@ -100,6 +125,48 @@ if (!allowedChangeClasses.has(changeClass)) add('STOP', 'CHANGE_CLASS_REQUIRED')
 if (!yesNo.has(repeatedManualPattern)) add('STOP', 'REPEATED_MANUAL_PATTERN_STATUS_REQUIRED');
 if (!allowedAiWorkStructures.has(aiWorkStructure)) add('STOP', 'AI_WORK_STRUCTURE_REQUIRED');
 if (!allowedProgressEvents.has(progressUpdateEvent)) add('STOP', 'PROGRESS_UPDATE_EVENT_REQUIRED');
+if (!hasSameClassFailureCount || !Number.isInteger(sameClassFailureCount) || sameClassFailureCount < 0) {
+  add('STOP', 'SAME_CLASS_FAILURE_COUNT_REQUIRED');
+}
+if (!allowedPostFailureActions.has(postFailureAction)) add('STOP', 'POST_FAILURE_ACTION_REQUIRED');
+
+if (Number.isInteger(sameClassFailureCount) && sameClassFailureCount >= 0) {
+  if (sameClassFailureCount === 0 && postFailureAction !== 'not-applicable') {
+    add('STOP', 'POST_FAILURE_ACTION_INVALID_WITHOUT_FAILURE', { postFailureAction });
+  }
+  if (sameClassFailureCount > 0 && postFailureAction === 'not-applicable') {
+    add('STOP', 'POST_FAILURE_ACTION_REQUIRED_AFTER_FAILURE', { sameClassFailureCount });
+  }
+  if (postFailureAction === 'retry-materially-changed') {
+    if (!yesNo.has(materialChangeReviewed)) {
+      add('STOP', 'MATERIAL_CHANGE_REVIEW_STATUS_REQUIRED');
+    } else if (materialChangeReviewed !== 'yes') {
+      add('STOP', 'MATERIAL_CHANGE_NOT_REVIEWED');
+    }
+  }
+  if (sameClassFailureCount >= 2 && postFailureAction === 'retry-same') {
+    add('STOP', 'LOOP_DETECTED_THIRD_SAME_METHOD_BLOCKED', { sameClassFailureCount });
+  }
+
+  const thirdResolutionAttempt = sameClassFailureCount >= 2 && postFailureAction === 'retry-materially-changed';
+  if (thirdResolutionAttempt) {
+    if (!yesNo.has(forcedReflectionReviewed)) {
+      add('STOP', 'FORCED_REFLECTION_STATUS_REQUIRED');
+    } else if (forcedReflectionReviewed !== 'yes') {
+      add('STOP', 'FORCED_REFLECTION_REQUIRED_BEFORE_THIRD_ATTEMPT');
+    }
+    if (!yesNo.has(reflectionRecorded)) {
+      add('STOP', 'FORCED_REFLECTION_RECORD_STATUS_REQUIRED');
+    } else if (reflectionRecorded !== 'yes') {
+      add('STOP', 'FORCED_REFLECTION_RECORD_REQUIRED');
+    }
+    if (!allowedReflectionBases.has(reflectionBasis)) {
+      add('STOP', 'REFLECTION_BASIS_REQUIRED');
+    } else if (reflectionBasis === 'insufficient-observation') {
+      add('STOP', 'OBSERVATION_INSUFFICIENT_RETURN_TO_INVESTIGATION');
+    }
+  }
+}
 
 const progressRequired = aiWorkStructure === 'multi-step' || aiWorkStructure === 'long-running';
 if (progressRequired && progressUpdateEvent === 'none') {
@@ -217,6 +284,12 @@ if (!findings.some((f) => f.status === 'STOP')) {
     aiWorkStructure,
     progressUpdateEvent,
     progressUpdateSent: progressUpdateEvent === 'none' ? null : progressUpdateSent,
+    sameClassFailureCount: Number.isInteger(sameClassFailureCount) ? sameClassFailureCount : null,
+    postFailureAction: postFailureAction || null,
+    materialChangeReviewed: postFailureAction === 'retry-materially-changed' ? materialChangeReviewed : null,
+    forcedReflectionReviewed: sameClassFailureCount >= 2 && postFailureAction === 'retry-materially-changed' ? forcedReflectionReviewed : null,
+    reflectionRecorded: sameClassFailureCount >= 2 && postFailureAction === 'retry-materially-changed' ? reflectionRecorded : null,
+    reflectionBasis: sameClassFailureCount >= 2 && postFailureAction === 'retry-materially-changed' ? reflectionBasis : null,
     maintenanceOwner: lifecycleImpact === 'yes' ? maintenanceOwner : null,
     recoveryOwner: lifecycleImpact === 'yes' ? recoveryOwner : null,
     removalOwner: lifecycleImpact === 'yes' ? removalOwner : null,
@@ -241,6 +314,12 @@ const output = {
   aiWorkStructure: aiWorkStructure || '(missing)',
   progressUpdateEvent: progressUpdateEvent || '(missing)',
   progressRequired,
+  sameClassFailureCount: Number.isInteger(sameClassFailureCount) ? sameClassFailureCount : null,
+  postFailureAction: postFailureAction || '(missing)',
+  materialChangeReviewed: materialChangeReviewed || null,
+  forcedReflectionReviewed: forcedReflectionReviewed || null,
+  reflectionRecorded: reflectionRecorded || null,
+  reflectionBasis: reflectionBasis || null,
   findings,
 };
 console.log(JSON.stringify(output, null, jsonOnly ? 0 : 2));

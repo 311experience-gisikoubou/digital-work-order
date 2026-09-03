@@ -56,6 +56,8 @@ const routineBase = [
   '--change-class', 'routine',
   '--lifecycle-impact', 'no',
   '--repeated-manual-pattern', 'no',
+  '--same-class-failure-count', '0',
+  '--post-failure-action', 'not-applicable',
   ...nonEngineerSafe,
   ...progressSingle,
 ];
@@ -76,6 +78,108 @@ expectStop([
 expectStop([
   ...routineBase.filter((v, i, a) => !(v === '--ai-work-structure' || a[i - 1] === '--ai-work-structure')),
 ], 'AI_WORK_STRUCTURE_REQUIRED');
+
+expectStop([
+  ...routineBase.filter((v, i, a) => !(v === '--same-class-failure-count' || a[i - 1] === '--same-class-failure-count')),
+], 'SAME_CLASS_FAILURE_COUNT_REQUIRED');
+
+expectStop([
+  ...routineBase.filter((v, i, a) => !(v === '--post-failure-action' || a[i - 1] === '--post-failure-action')),
+], 'POST_FAILURE_ACTION_REQUIRED');
+
+expectStop([
+  ...routineBase,
+  '--same-class-failure-count', '1',
+  '--post-failure-action', 'not-applicable',
+], 'POST_FAILURE_ACTION_REQUIRED_AFTER_FAILURE');
+
+expectProceed([
+  ...routineBase,
+  '--same-class-failure-count', '1',
+  '--post-failure-action', 'retry-same',
+]);
+
+expectStop([
+  ...routineBase,
+  '--same-class-failure-count', '2',
+  '--post-failure-action', 'retry-same',
+], 'LOOP_DETECTED_THIRD_SAME_METHOD_BLOCKED');
+
+expectStop([
+  ...routineBase,
+  '--same-class-failure-count', '2',
+  '--post-failure-action', 'retry-materially-changed',
+], 'MATERIAL_CHANGE_REVIEW_STATUS_REQUIRED');
+
+expectStop([
+  ...routineBase,
+  '--same-class-failure-count', '2',
+  '--post-failure-action', 'retry-materially-changed',
+  '--material-change-reviewed', 'yes',
+], 'FORCED_REFLECTION_STATUS_REQUIRED');
+
+expectStop([
+  ...routineBase,
+  '--same-class-failure-count', '2',
+  '--post-failure-action', 'retry-materially-changed',
+  '--material-change-reviewed', 'yes',
+  '--forced-reflection-reviewed', 'no',
+  '--reflection-recorded', 'yes',
+  '--reflection-basis', 'new-observation',
+], 'FORCED_REFLECTION_REQUIRED_BEFORE_THIRD_ATTEMPT');
+
+expectStop([
+  ...routineBase,
+  '--same-class-failure-count', '2',
+  '--post-failure-action', 'retry-materially-changed',
+  '--material-change-reviewed', 'yes',
+  '--forced-reflection-reviewed', 'yes',
+  '--reflection-basis', 'new-observation',
+], 'FORCED_REFLECTION_RECORD_STATUS_REQUIRED');
+
+expectStop([
+  ...routineBase,
+  '--same-class-failure-count', '2',
+  '--post-failure-action', 'retry-materially-changed',
+  '--material-change-reviewed', 'yes',
+  '--forced-reflection-reviewed', 'yes',
+  '--reflection-recorded', 'yes',
+  '--reflection-basis', 'insufficient-observation',
+], 'OBSERVATION_INSUFFICIENT_RETURN_TO_INVESTIGATION');
+
+expectProceed([
+  ...routineBase,
+  '--same-class-failure-count', '2',
+  '--post-failure-action', 'retry-materially-changed',
+  '--material-change-reviewed', 'yes',
+  '--forced-reflection-reviewed', 'yes',
+  '--reflection-recorded', 'yes',
+  '--reflection-basis', 'new-observation',
+]);
+
+expectProceed([
+  ...routineBase,
+  '--same-class-failure-count', '2',
+  '--post-failure-action', 'root-cause-analysis',
+]);
+
+expectProceed([
+  ...routineBase,
+  '--same-class-failure-count', '2',
+  '--post-failure-action', 'hypothesis-reselection',
+]);
+
+expectProceed([
+  ...routineBase,
+  '--same-class-failure-count', '2',
+  '--post-failure-action', 'route-reselection',
+]);
+
+expectProceed([
+  ...routineBase,
+  '--same-class-failure-count', '2',
+  '--post-failure-action', 'independent-review',
+]);
 
 expectStop([
   ...routineBase,

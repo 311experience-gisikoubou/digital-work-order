@@ -1,6 +1,6 @@
 ---
 name: preflight-audit
-description: Use before implementation, fixes, refactoring, UI/backend/design changes, security-sensitive work, external-service use, data handling, installation, real-device work, network changes, or multi-step/long-running AI work. Confirm repository/data/AI/network/persistence boundaries, cost, human work burden, non-engineer operation boundaries, lifecycle impact, repeated manual work, progress communication, and whether a genuine human value decision exists. Fail closed on unsafe, unknown, destructive, externally sensitive, unnecessarily complex, improperly delegated, or insufficiently communicated paths.
+description: Use before implementation, fixes, refactoring, UI/backend/design changes, security-sensitive work, external-service use, data handling, installation, real-device work, network changes, or multi-step/long-running AI work. Confirm repository/data/AI/network/persistence boundaries, cost, human work burden, non-engineer operation boundaries, lifecycle impact, repeated manual work, progress communication, and whether a genuine human value decision exists. Fail closed on unsafe, unknown, destructive, externally sensitive, unnecessarily complex, improperly delegated, insufficiently communicated, or unreflected repeated-failure paths.
 ---
 
 # Preflight Audit
@@ -67,7 +67,7 @@ node .agents/skills/preflight-audit/security-preflight-selftest.mjs .agents/skil
 
 Before asking a human to perform real-device, network, production, installation, service-adoption, or other interactive setup, run `operation-preflight.mjs`.
 
-Also run `operation-preflight.mjs` for AI-owned work classified as `multi-step` or `long-running`, including implementation, testing, audit, and recovery work. At task start, at a material phase change, and when the user's required action changes, send the user-visible progress update first and then run the gate for that checkpoint. If no human operation is required, use `--estimated-user-minutes 0` and `--estimated-user-steps 0`; do not invent human work merely to satisfy the gate.
+Also run `operation-preflight.mjs` for AI-owned work classified as `multi-step` or `long-running`, including implementation, testing, audit, and recovery work. At task start, at a material phase change, when the user's required action changes, and before retrying a failed same-class approach, send any required user-visible progress update first and then run the gate for that checkpoint. If no human operation is required, use `--estimated-user-minutes 0` and `--estimated-user-steps 0`; do not invent human work merely to satisfy the gate.
 
 Required planning inputs:
 
@@ -81,7 +81,11 @@ Required planning inputs:
 - `lifecycle-impact yes|no`;
 - whether a repeated manual pattern exists;
 - `ai-work-structure` as `single-step`, `multi-step`, or `long-running`;
-- `progress-update-event` as `none`, `task-start`, `phase-change`, or `user-action-change`.
+- `progress-update-event` as `none`, `task-start`, `phase-change`, or `user-action-change`;
+- `same-class-failure-count` as the number of failed **resolution interventions** already observed in the same-loop candidate before the proposed next action. Read-only investigation, log inspection, comparison, and observation do not increment this count merely because they fail to prove the hypothesis;
+- `post-failure-action` as `not-applicable`, `retry-same`, `retry-materially-changed`, `root-cause-analysis`, `hypothesis-reselection`, `route-reselection`, `independent-review`, or `stop`;
+- when `post-failure-action=retry-materially-changed`, `material-change-reviewed yes|no`;
+- after two same-class resolution-intervention failures, a third resolution intervention also requires `forced-reflection-reviewed yes`, `reflection-recorded yes`, and `reflection-basis` as `new-observation`, `new-hypothesis`, `new-route`, `materially-changed-condition`, or `insufficient-observation`.
 
 ### Progress communication boundary
 
@@ -170,22 +174,47 @@ Always classify `--repeated-manual-pattern yes|no`.
 
 If `yes`, the gate requires `--structural-automation-reviewed yes`. This means the AI considered the broader class of similar handoffs/work rather than only the current instance. The review may conclude safe automation is not currently possible, but that conclusion must be technically justified and safety may not be weakened merely to automate.
 
+### Anti-loop / Forced Reflection
+
+Always provide `--same-class-failure-count` and `--post-failure-action`; omission is fail-closed. This section is the executable semantic source in synchronized application repositories. `learnings/L-0004.md` remains the foundation-side rationale/history record and is not a runtime dependency of application repositories.
+
+The threshold is a deliberate **forced-reflection breakpoint**, not a claim that two failures are statistically optimal.
+
+- Count failed **resolution interventions**, not ordinary observation. Reading logs/code/settings, read-only diagnosis, comparison, reproduction for cause isolation, and independent review do not increment the count merely because they do not solve the problem.
+- Treat attempts as the same-loop candidate when the cause hypothesis, solution route/principle, or repeated human operation is substantially the same. Command spelling, AI/session, minor flags, or cosmetic path changes do not reset the loop.
+- No prior failed resolution intervention: `--same-class-failure-count 0 --post-failure-action not-applicable`.
+- After one failed resolution intervention, a second same-method attempt is allowed if otherwise safe: `--same-class-failure-count 1 --post-failure-action retry-same`.
+- After two failed resolution interventions, normal retry mode ends. `--post-failure-action retry-same` is a mandatory `STOP` with `LOOP_DETECTED_THIRD_SAME_METHOD_BLOCKED`.
+- The reflection phase itself may proceed as `root-cause-analysis`, `hypothesis-reselection`, `route-reselection`, `independent-review`, or `stop`; these are not a third resolution attempt.
+- Before any third resolution intervention, first externalize the forced reflection using an existing task-visible evidence channel (current progress report, PR/[AI_HANDOFF] record, or equivalent existing work record). Do not create a new long-lived source file only for this purpose.
+- That reflection must state: the two failed interventions and observed results; the current hypothesis status (`否定` / `弱まった` / `未確定`); the new basis (`新しい観測` / `新しい仮説` / `別経路` / `実質的な条件変更`); and the next action.
+- A third resolution intervention is represented as `retry-materially-changed` and requires `--material-change-reviewed yes --forced-reflection-reviewed yes --reflection-recorded yes` plus a valid `--reflection-basis`.
+- `reflection-basis=insufficient-observation` means the third intervention is not authorized; the gate returns `OBSERVATION_INSUFFICIENT_RETURN_TO_INVESTIGATION` so work returns to observation/root-cause analysis.
+- A valid reflection does **not** erase the previous two failures. It only allows one half-open-style attempt under a substantively changed basis. If that attempt fails, do not continue with the same basis; return to observation/reflection again.
+- Never use forced reflection as a reason to dump technical judgment onto a non-engineer. Technical escalation order remains observation → root-cause analysis → hypothesis reselection → route reselection → independent review. Human involvement is for genuine value/ownership or real-device subjective decisions, not as a technical escape hatch.
+
 ### Example: routine technical operation
 
 ```text
-node .agents/skills/preflight-audit/operation-preflight.mjs --scope network --estimated-user-minutes 5 --estimated-user-steps 3 --alternatives-reviewed yes --simplest-safe yes --work-impact low --safe-stop yes --scheduled-window no --human-profile non-engineer --human-role operator --technical-judgment-owner ai-workflow --instruction-mode stepwise-ui --change-class routine --lifecycle-impact no --repeated-manual-pattern no --ai-work-structure single-step --progress-update-event none
+node .agents/skills/preflight-audit/operation-preflight.mjs --scope network --estimated-user-minutes 5 --estimated-user-steps 3 --alternatives-reviewed yes --simplest-safe yes --work-impact low --safe-stop yes --scheduled-window no --human-profile non-engineer --human-role operator --technical-judgment-owner ai-workflow --instruction-mode stepwise-ui --change-class routine --lifecycle-impact no --repeated-manual-pattern no --same-class-failure-count 0 --post-failure-action not-applicable --ai-work-structure single-step --progress-update-event none
+```
+
+### Example: third resolution attempt after forced reflection
+
+```text
+node .agents/skills/preflight-audit/operation-preflight.mjs --scope interactive --estimated-user-minutes 0 --estimated-user-steps 0 --alternatives-reviewed yes --simplest-safe yes --work-impact none --safe-stop yes --scheduled-window no --human-profile non-engineer --human-role observer --technical-judgment-owner ai-workflow --instruction-mode stepwise-ui --change-class implementation --lifecycle-impact no --repeated-manual-pattern no --same-class-failure-count 2 --post-failure-action retry-materially-changed --material-change-reviewed yes --forced-reflection-reviewed yes --reflection-recorded yes --reflection-basis new-observation --ai-work-structure multi-step --progress-update-event phase-change --progress-update-sent yes --progress-current-stage-present yes --progress-meaning-present yes --progress-next-step-present yes --progress-user-action-status-present yes
 ```
 
 ### Example: multi-step AI work with no human operation
 
 ```text
-node .agents/skills/preflight-audit/operation-preflight.mjs --scope interactive --estimated-user-minutes 0 --estimated-user-steps 0 --alternatives-reviewed yes --simplest-safe yes --work-impact none --safe-stop yes --scheduled-window no --human-profile non-engineer --human-role observer --technical-judgment-owner ai-workflow --instruction-mode stepwise-ui --change-class implementation --lifecycle-impact no --repeated-manual-pattern no --ai-work-structure multi-step --progress-update-event task-start --progress-update-sent yes --progress-current-stage-present yes --progress-meaning-present yes --progress-next-step-present yes --progress-user-action-status-present yes
+node .agents/skills/preflight-audit/operation-preflight.mjs --scope interactive --estimated-user-minutes 0 --estimated-user-steps 0 --alternatives-reviewed yes --simplest-safe yes --work-impact none --safe-stop yes --scheduled-window no --human-profile non-engineer --human-role observer --technical-judgment-owner ai-workflow --instruction-mode stepwise-ui --change-class implementation --lifecycle-impact no --repeated-manual-pattern no --same-class-failure-count 0 --post-failure-action not-applicable --ai-work-structure multi-step --progress-update-event task-start --progress-update-sent yes --progress-current-stage-present yes --progress-meaning-present yes --progress-next-step-present yes --progress-user-action-status-present yes
 ```
 
 ### Example: fully managed software/service adoption
 
 ```text
-node .agents/skills/preflight-audit/operation-preflight.mjs --scope real-device --estimated-user-minutes 5 --estimated-user-steps 3 --alternatives-reviewed yes --simplest-safe yes --work-impact low --safe-stop yes --scheduled-window no --human-profile non-engineer --human-role operator --technical-judgment-owner ai-workflow --instruction-mode stepwise-ui --change-class install-adoption --lifecycle-impact yes --maintenance-plan-reviewed yes --maintenance-owner system --recovery-owner ai-workflow --removal-owner ai-workflow --estimated-user-maintenance-minutes-month 0 --repeated-manual-pattern no --ai-work-structure single-step --progress-update-event none
+node .agents/skills/preflight-audit/operation-preflight.mjs --scope real-device --estimated-user-minutes 5 --estimated-user-steps 3 --alternatives-reviewed yes --simplest-safe yes --work-impact low --safe-stop yes --scheduled-window no --human-profile non-engineer --human-role operator --technical-judgment-owner ai-workflow --instruction-mode stepwise-ui --change-class install-adoption --lifecycle-impact yes --maintenance-plan-reviewed yes --maintenance-owner system --recovery-owner ai-workflow --removal-owner ai-workflow --estimated-user-maintenance-minutes-month 0 --repeated-manual-pattern no --same-class-failure-count 0 --post-failure-action not-applicable --ai-work-structure single-step --progress-update-event none
 ```
 
 Use `--scheduled-window yes` only for work deliberately scheduled into a work window.
@@ -204,12 +233,17 @@ The operation gate fails closed when required inputs are absent or when, among o
 - lifecycle impact exists but ownership is missing/unknown or makes the user the technical maintainer;
 - install/adoption or lifecycle-responsibility change bypasses lifecycle review;
 - a repeated manual pattern has not received structural automation review;
+- same-class failure count or post-failure action is missing/invalid;
+- two failed resolution interventions already occurred and the proposed next action is the same method again;
+- a third resolution intervention is proposed without forced reflection and an externalized reflection record;
+- the forced reflection says observation is insufficient but a retry is still proposed;
+- a materially changed retry is claimed without reviewing that the change is actually material;
 - multi-step/long-running work has no applicable progress update event;
 - a required progress update was not actually sent;
 - current stage, meaning, next step, or user-action status is missing from the required update;
 - routine technical work is needlessly waiting on human confirmation.
 
-Do not split a known long operation into artificial small steps to bypass the gate. Do not describe an installation as simple while ignoring future upkeep. Do not hide a human value choice inside a technical label, and do not turn a technical decision into a human question merely because asking is easier than investigating. Do not classify multi-stage work as `single-step` merely to bypass progress communication.
+Do not split a known long operation into artificial small steps to bypass the gate. Do not describe an installation as simple while ignoring future upkeep. Do not hide a human value choice inside a technical label, and do not turn a technical decision into a human question merely because asking is easier than investigating. Do not classify multi-stage work as `single-step` merely to bypass progress communication. Do not reset, relabel, or cosmetically alter the same-loop candidate merely to bypass forced reflection.
 
 Operation-gate self-test:
 
@@ -298,7 +332,7 @@ Do not say “probably safe”.
 
 ## Stop Conditions
 
-Stop when the machine/operation gate says `STOP`, safety is `UNKNOWN` for a real-data path, confidential data may reach an external/unknown destination, destructive or production-impacting work lacks authorization, the relevant execution workspace/scope is unsafe or unclear, an unexpected diff/spec conflict exists, extra cost may occur without authorization, the non-engineer is made technical maintainer/technical decider, a genuine human value choice is unapproved, lifecycle ownership is unresolved where lifecycle impact exists, a repeated manual pattern is being handled only as another one-off workaround, or required progress communication for multi-step/long-running AI work is missing.
+Stop when the machine/operation gate says `STOP`, safety is `UNKNOWN` for a real-data path, confidential data may reach an external/unknown destination, destructive or production-impacting work lacks authorization, the relevant execution workspace/scope is unsafe or unclear, an unexpected diff/spec conflict exists, extra cost may occur without authorization, the non-engineer is made technical maintainer/technical decider, a genuine human value choice is unapproved, lifecycle ownership is unresolved where lifecycle impact exists, a repeated manual pattern is being handled only as another one-off workaround, `LOOP_DETECTED_THIRD_SAME_METHOD_BLOCKED` is raised after two failed resolution interventions, a third resolution intervention lacks the required forced-reflection evidence, or required progress communication for multi-step/long-running AI work is missing.
 
 ## Automatic Proceed Rule
 
@@ -320,6 +354,8 @@ Report plainly:
 - change class and whether a genuine human decision exists
 - lifecycle-impact / lifecycle-ownership status when relevant
 - repeated-manual-pattern / structural-automation-review status
+- same-class failure count / post-failure action / material-change review status when relevant
+- forced-reflection reviewed / reflection-recorded / reflection-basis status when a third resolution intervention is considered
 - AI work structure / progress-update event and whether required progress communication is complete
 - what proceeds automatically
 - what is stopped and why
