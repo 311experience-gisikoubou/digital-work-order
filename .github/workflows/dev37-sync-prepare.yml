@@ -1,0 +1,108 @@
+name: dev37 foundation sync verify
+
+on:
+  push:
+    branches:
+      - chore/foundation-dev37-sync
+    paths:
+      - .github/workflows/dev37-sync-prepare.yml
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chore/foundation-dev37-sync
+          fetch-depth: 0
+      - name: Apply exact dev37 documentation additions
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          agents = Path('AGENTS.md')
+          text = agents.read_text(encoding='utf-8')
+          old = '- 同種の伝書鳩・手作業・承認往復が繰り返される場合、個別対応だけで終えず、類似ケースを含む構造的な自動化候補として扱う。ただし自動化によって安全性を下げない。\n- 実装・変更・外部サービス利用・ネットワーク変更・データ経路変更の前には`preflight-audit`を実行する。'
+          new_bullet = '- 長時間・複数段階の作業では、同じ製品tree・製品の未commit差分・blocker・failure・route等が一定checkpoint期間変わらない停滞を状態付きで検出し、原因分析→Forced Reflection→別routeへの強制昇格を行う。管理ファイルだけのHEAD変更は製品進捗として扱わない。未完了でhuman gateが無い場合、ユーザーの状態確認質問に報告だけして停止せず、安全な次工程を継続する。詳細と機械gateは`preflight-audit`の`stagnation-watch.mjs`を正本とする。'
+          if text.count(old) != 1:
+              raise SystemExit('AGENTS exact dev35 anchor mismatch')
+          text = text.replace(old, old.split('\n')[0] + '\n' + new_bullet + '\n' + old.split('\n')[1], 1)
+          agents.write_text(text, encoding='utf-8', newline='\n')
+
+          skill = Path('.agents/skills/preflight-audit/SKILL.md')
+          text = skill.read_text(encoding='utf-8')
+          marker = '- Never use forced reflection as a reason to dump technical judgment onto a non-engineer. Technical escalation order remains observation → root-cause analysis → hypothesis reselection → route reselection → independent review. Human involvement is for genuine value/ownership or real-device subjective decisions, not as a technical escape hatch.\n\n### Example: routine technical operation'
+          if text.count(marker) != 1:
+              raise SystemExit('SKILL exact dev35 anchor mismatch')
+          section = r'''### Stateful Stagnation / Safe Continuation
+
+For multi-step or long-running work, use `stagnation-watch.mjs` as the stateful companion to the failure-count Forced Reflection gate. It prevents an unchanged blocker from remaining in ordinary retry/report mode merely because no one incremented `--same-class-failure-count`, and it prevents a status question from becoming a report-only terminal event when safe work is still incomplete.
+
+Run it at task start and again at meaningful checkpoints, including before answering a status check such as “進んだ？” / “どうなった？” when the work remains incomplete. A periodic monitor may also call it. The default interval is 60 minutes, but the enforcement logic is independent of the scheduler: if several intervals elapsed without a checkpoint, the next invocation accumulates the missed unchanged checkpoints and escalates immediately.
+
+Local checkout state is stored by default under `.git/ai-dev-foundation/stagnation/<work-id>.json`, so chat/session wording changes do not reset it. Remote-only callers can pass the previous `nextState` with `--state-json` and persist the returned `nextState` in an existing task-visible evidence channel such as the tracked Issue/PR state; do not create a separate long-lived business source merely for this runtime state.
+
+The default `--fingerprint-scope product` fingerprints the branch plus the committed product tree and uncommitted product changes while excluding governance-only paths (`.agents/`, `.claude/`, `.github/`, `AGENTS*.md`, `CURRENT_STATUS.md`). A governance-only HEAD change does not count as product progress. Use `--fingerprint-scope all` when the work itself is foundation/governance work. Add stable `--failure-signature`, `--blocker-signature`, `--observation-signature`, and `--route-signature` values when available. A genuinely new observation or route changes the fingerprint; cosmetic wording changes do not.
+
+Escalation is fail-closed:
+
+- first due unchanged checkpoint: `STAGNATION_L1_ROOT_CAUSE_REQUIRED` → ordinary retry/report mode stops; return to root-cause analysis;
+- second due unchanged checkpoint: `STAGNATION_L2_FORCED_REFLECTION_REQUIRED` → Forced Reflection is mandatory;
+- third or later unchanged checkpoint: `STAGNATION_HARD_STOP_ROUTE_CHANGE_REQUIRED` → the same route remains blocked until a new observation/hypothesis/route/material condition changes the fingerprint;
+- `workflow-status=in-progress` does not accumulate stagnation;
+- a valid human gate with `--continuation-action wait-human` pauses the checkpoint clock;
+- `work-state=incomplete --human-gate none --continuation-action report-only` stops with `SAFE_WORK_CONTINUATION_REQUIRED`;
+- `work-state=incomplete --human-gate none --continuation-action wait-human` stops with `UNNECESSARY_HUMAN_WAIT`;
+- genuine merge/production/destructive/value/ownership gates still use `human-gate=required` and may wait.
+
+Example:
+
+```text
+node .agents/skills/preflight-audit/stagnation-watch.mjs --target-root . --work-id issue-270 --gate-phase test-gate --work-state incomplete --human-gate none --continuation-action resume --workflow-status failed --pr-state none --failure-signature migration_0001_checksum_is_unchanged --route-signature ui6c-one-shot --interval-minutes 60
+```
+
+This gate intentionally does **not** install an always-on hourly GitHub Actions workflow in every repository. A permanent per-repository schedule would add recurring runner usage and maintenance. Existing AI/tool scheduling may invoke this gate when appropriate, while missed intervals are still enforced at the next checkpoint.
+
+Stagnation self-test:
+
+```text
+node .agents/skills/preflight-audit/stagnation-watch-selftest.mjs .agents/skills/preflight-audit/stagnation-watch.mjs
+```
+'''
+          replacement = marker.split('\n\n### Example: routine technical operation')[0] + '\n\n' + section + '\n### Example: routine technical operation'
+          text = text.replace(marker, replacement, 1)
+          skill.write_text(text, encoding='utf-8', newline='\n')
+
+          log = Path('.agents/sync-log.md')
+          existing = log.read_text(encoding='utf-8') if log.exists() else '# Foundation Sync Log\n'
+          if '1.0.0-dev.37' not in existing:
+              if not existing.endswith('\n'):
+                  existing += '\n'
+              existing += '\n## 2026-09-04 — ai-dev-foundation 1.0.0-dev.37\n\n- Source commit: `e45cd1b3e961e9ca2f99d626248f2eefa611b748`\n- Sync: `AGENTS.md` + canonical `.agents/skills/` changed surface\n- Method: fail-closed dev.35 → dev.37 remote-only update\n- Verification: exact canonical blob identity + stagnation selftest\n'
+              log.write_text(existing, encoding='utf-8', newline='\n')
+          PY
+      - name: Verify exact canonical blobs and selftest
+        shell: bash
+        run: |
+          test "$(git hash-object AGENTS.md)" = "71426485f8790f02c026da430b06e0d9957c0359"
+          test "$(git hash-object .agents/skills/preflight-audit/SKILL.md)" = "0dcfef063edfd3641c3c889fdbe31aa8ad3af247"
+          test "$(git hash-object .agents/skills/preflight-audit/stagnation-watch.mjs)" = "68b64a22cb8e3d38951d076c427fc12d166064a5"
+          test "$(git hash-object .agents/skills/preflight-audit/stagnation-watch-selftest.mjs)" = "6f184870428de74e501c521528e903c4facee80e"
+          node --check .agents/skills/preflight-audit/stagnation-watch.mjs
+          node --check .agents/skills/preflight-audit/stagnation-watch-selftest.mjs
+          node .agents/skills/preflight-audit/stagnation-watch-selftest.mjs .agents/skills/preflight-audit/stagnation-watch.mjs
+          git diff --check
+      - name: Commit final sync and remove one-shot workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/dev37-sync-prepare.yml
+          git add AGENTS.md .agents/skills/preflight-audit/SKILL.md .agents/skills/preflight-audit/stagnation-watch.mjs .agents/skills/preflight-audit/stagnation-watch-selftest.mjs .agents/sync-log.md
+          git diff --cached --check
+          git commit -m 'Sync AI foundation dev.37 stagnation enforcement'
+          git push origin HEAD:chore/foundation-dev37-sync
