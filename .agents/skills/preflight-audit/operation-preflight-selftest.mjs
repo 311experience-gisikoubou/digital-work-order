@@ -111,17 +111,62 @@ expectStop([
   '--post-failure-action', 'retry-materially-changed',
 ], 'MATERIAL_CHANGE_REVIEW_STATUS_REQUIRED');
 
+expectStop([
+  ...routineBase,
+  '--same-class-failure-count', '2',
+  '--post-failure-action', 'retry-materially-changed',
+  '--material-change-reviewed', 'yes',
+], 'FORCED_REFLECTION_STATUS_REQUIRED');
+
+expectStop([
+  ...routineBase,
+  '--same-class-failure-count', '2',
+  '--post-failure-action', 'retry-materially-changed',
+  '--material-change-reviewed', 'yes',
+  '--forced-reflection-reviewed', 'no',
+  '--reflection-recorded', 'yes',
+  '--reflection-basis', 'new-observation',
+], 'FORCED_REFLECTION_REQUIRED_BEFORE_THIRD_ATTEMPT');
+
+expectStop([
+  ...routineBase,
+  '--same-class-failure-count', '2',
+  '--post-failure-action', 'retry-materially-changed',
+  '--material-change-reviewed', 'yes',
+  '--forced-reflection-reviewed', 'yes',
+  '--reflection-basis', 'new-observation',
+], 'FORCED_REFLECTION_RECORD_STATUS_REQUIRED');
+
+expectStop([
+  ...routineBase,
+  '--same-class-failure-count', '2',
+  '--post-failure-action', 'retry-materially-changed',
+  '--material-change-reviewed', 'yes',
+  '--forced-reflection-reviewed', 'yes',
+  '--reflection-recorded', 'yes',
+  '--reflection-basis', 'insufficient-observation',
+], 'OBSERVATION_INSUFFICIENT_RETURN_TO_INVESTIGATION');
+
 expectProceed([
   ...routineBase,
   '--same-class-failure-count', '2',
   '--post-failure-action', 'retry-materially-changed',
   '--material-change-reviewed', 'yes',
+  '--forced-reflection-reviewed', 'yes',
+  '--reflection-recorded', 'yes',
+  '--reflection-basis', 'new-observation',
 ]);
 
 expectProceed([
   ...routineBase,
   '--same-class-failure-count', '2',
   '--post-failure-action', 'root-cause-analysis',
+]);
+
+expectProceed([
+  ...routineBase,
+  '--same-class-failure-count', '2',
+  '--post-failure-action', 'hypothesis-reselection',
 ]);
 
 expectProceed([

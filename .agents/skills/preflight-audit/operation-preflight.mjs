@@ -40,6 +40,9 @@ const progressUserActionStatusPresent = argValue('--progress-user-action-status-
 const sameClassFailureCountRaw = argValue('--same-class-failure-count');
 const postFailureAction = argValue('--post-failure-action').toLowerCase();
 const materialChangeReviewed = argValue('--material-change-reviewed').toLowerCase();
+const forcedReflectionReviewed = argValue('--forced-reflection-reviewed').toLowerCase();
+const reflectionRecorded = argValue('--reflection-recorded').toLowerCase();
+const reflectionBasis = argValue('--reflection-basis').toLowerCase();
 const jsonOnly = args.includes('--json');
 
 const findings = [];
@@ -61,9 +64,17 @@ const allowedPostFailureActions = new Set([
   'retry-same',
   'retry-materially-changed',
   'root-cause-analysis',
+  'hypothesis-reselection',
   'route-reselection',
   'independent-review',
   'stop',
+]);
+const allowedReflectionBases = new Set([
+  'new-observation',
+  'new-hypothesis',
+  'new-route',
+  'materially-changed-condition',
+  'insufficient-observation',
 ]);
 const allowedChangeClasses = new Set([
   'routine',
@@ -135,6 +146,25 @@ if (Number.isInteger(sameClassFailureCount) && sameClassFailureCount >= 0) {
   }
   if (sameClassFailureCount >= 2 && postFailureAction === 'retry-same') {
     add('STOP', 'LOOP_DETECTED_THIRD_SAME_METHOD_BLOCKED', { sameClassFailureCount });
+  }
+
+  const thirdResolutionAttempt = sameClassFailureCount >= 2 && postFailureAction === 'retry-materially-changed';
+  if (thirdResolutionAttempt) {
+    if (!yesNo.has(forcedReflectionReviewed)) {
+      add('STOP', 'FORCED_REFLECTION_STATUS_REQUIRED');
+    } else if (forcedReflectionReviewed !== 'yes') {
+      add('STOP', 'FORCED_REFLECTION_REQUIRED_BEFORE_THIRD_ATTEMPT');
+    }
+    if (!yesNo.has(reflectionRecorded)) {
+      add('STOP', 'FORCED_REFLECTION_RECORD_STATUS_REQUIRED');
+    } else if (reflectionRecorded !== 'yes') {
+      add('STOP', 'FORCED_REFLECTION_RECORD_REQUIRED');
+    }
+    if (!allowedReflectionBases.has(reflectionBasis)) {
+      add('STOP', 'REFLECTION_BASIS_REQUIRED');
+    } else if (reflectionBasis === 'insufficient-observation') {
+      add('STOP', 'OBSERVATION_INSUFFICIENT_RETURN_TO_INVESTIGATION');
+    }
   }
 }
 
@@ -257,6 +287,9 @@ if (!findings.some((f) => f.status === 'STOP')) {
     sameClassFailureCount: Number.isInteger(sameClassFailureCount) ? sameClassFailureCount : null,
     postFailureAction: postFailureAction || null,
     materialChangeReviewed: postFailureAction === 'retry-materially-changed' ? materialChangeReviewed : null,
+    forcedReflectionReviewed: sameClassFailureCount >= 2 && postFailureAction === 'retry-materially-changed' ? forcedReflectionReviewed : null,
+    reflectionRecorded: sameClassFailureCount >= 2 && postFailureAction === 'retry-materially-changed' ? reflectionRecorded : null,
+    reflectionBasis: sameClassFailureCount >= 2 && postFailureAction === 'retry-materially-changed' ? reflectionBasis : null,
     maintenanceOwner: lifecycleImpact === 'yes' ? maintenanceOwner : null,
     recoveryOwner: lifecycleImpact === 'yes' ? recoveryOwner : null,
     removalOwner: lifecycleImpact === 'yes' ? removalOwner : null,
@@ -284,6 +317,9 @@ const output = {
   sameClassFailureCount: Number.isInteger(sameClassFailureCount) ? sameClassFailureCount : null,
   postFailureAction: postFailureAction || '(missing)',
   materialChangeReviewed: materialChangeReviewed || null,
+  forcedReflectionReviewed: forcedReflectionReviewed || null,
+  reflectionRecorded: reflectionRecorded || null,
+  reflectionBasis: reflectionBasis || null,
   findings,
 };
 console.log(JSON.stringify(output, null, jsonOnly ? 0 : 2));
