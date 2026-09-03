@@ -193,6 +193,41 @@ The threshold is a deliberate **forced-reflection breakpoint**, not a claim that
 - A valid reflection does **not** erase the previous two failures. It only allows one half-open-style attempt under a substantively changed basis. If that attempt fails, do not continue with the same basis; return to observation/reflection again.
 - Never use forced reflection as a reason to dump technical judgment onto a non-engineer. Technical escalation order remains observation → root-cause analysis → hypothesis reselection → route reselection → independent review. Human involvement is for genuine value/ownership or real-device subjective decisions, not as a technical escape hatch.
 
+### Stateful Stagnation / Safe Continuation
+
+For multi-step or long-running work, use `stagnation-watch.mjs` as the stateful companion to the failure-count Forced Reflection gate. It prevents an unchanged blocker from remaining in ordinary retry/report mode merely because no one incremented `--same-class-failure-count`, and it prevents a status question from becoming a report-only terminal event when safe work is still incomplete.
+
+Run it at task start and again at meaningful checkpoints, including before answering a status check such as “進んだ？” / “どうなった？” when the work remains incomplete. A periodic monitor may also call it. The default interval is 60 minutes, but the enforcement logic is independent of the scheduler: if several intervals elapsed without a checkpoint, the next invocation accumulates the missed unchanged checkpoints and escalates immediately.
+
+Local checkout state is stored by default under `.git/ai-dev-foundation/stagnation/<work-id>.json`, so chat/session wording changes do not reset it. Remote-only callers can pass the previous `nextState` with `--state-json` and persist the returned `nextState` in an existing task-visible evidence channel such as the tracked Issue/PR state; do not create a separate long-lived business source merely for this runtime state.
+
+The default `--fingerprint-scope product` fingerprints branch/HEAD plus product working-tree changes while excluding governance-only paths (`.agents/`, `.claude/`, `.github/`, `AGENTS*.md`, `CURRENT_STATUS.md`). Use `--fingerprint-scope all` when the work itself is foundation/governance work. Add stable `--failure-signature`, `--blocker-signature`, `--observation-signature`, and `--route-signature` values when available. A genuinely new observation or route changes the fingerprint; cosmetic wording changes do not.
+
+Escalation is fail-closed:
+
+- first due unchanged checkpoint: `STAGNATION_L1_ROOT_CAUSE_REQUIRED` → ordinary retry/report mode stops; return to root-cause analysis;
+- second due unchanged checkpoint: `STAGNATION_L2_FORCED_REFLECTION_REQUIRED` → Forced Reflection is mandatory;
+- third or later unchanged checkpoint: `STAGNATION_HARD_STOP_ROUTE_CHANGE_REQUIRED` → the same route remains blocked until a new observation/hypothesis/route/material condition changes the fingerprint;
+- `workflow-status=in-progress` does not accumulate stagnation;
+- a valid human gate with `--continuation-action wait-human` pauses the checkpoint clock;
+- `work-state=incomplete --human-gate none --continuation-action report-only` stops with `SAFE_WORK_CONTINUATION_REQUIRED`;
+- `work-state=incomplete --human-gate none --continuation-action wait-human` stops with `UNNECESSARY_HUMAN_WAIT`;
+- genuine merge/production/destructive/value/ownership gates still use `human-gate=required` and may wait.
+
+Example:
+
+```text
+node .agents/skills/preflight-audit/stagnation-watch.mjs --target-root . --work-id issue-270 --gate-phase test-gate --work-state incomplete --human-gate none --continuation-action resume --workflow-status failed --pr-state none --failure-signature migration_0001_checksum_is_unchanged --route-signature ui6c-one-shot --interval-minutes 60
+```
+
+This gate intentionally does **not** install an always-on hourly GitHub Actions workflow in every repository. A permanent per-repository schedule would add recurring runner usage and maintenance. Existing AI/tool scheduling may invoke this gate when appropriate, while missed intervals are still enforced at the next checkpoint.
+
+Stagnation self-test:
+
+```text
+node .agents/skills/preflight-audit/stagnation-watch-selftest.mjs .agents/skills/preflight-audit/stagnation-watch.mjs
+```
+
 ### Example: routine technical operation
 
 ```text
