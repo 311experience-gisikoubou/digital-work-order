@@ -9,10 +9,11 @@ description: Use when synchronizing ai-dev-foundation into an application reposi
 
 Verify that an application repository is actually using the intended `ai-dev-foundation` shared files before stating that the foundation is synchronized, current, applied, or effective.
 
-This closes two gaps:
+This closes three gaps:
 
 - a common rule is merged in the foundation while the copied `.agents/skills/` gate in an application remains older;
-- the canonical `.agents/skills/` copy is current, but a configured AI-native discovery adapter such as Claude Code's `.claude/skills/` wrapper is missing or stale, so the skill may not auto-trigger as intended.
+- the canonical `.agents/skills/` copy is current, but a configured AI-native discovery adapter such as Claude Code's `.claude/skills/` wrapper is missing or stale, so the skill may not auto-trigger as intended;
+- an already-adopted application requires a foundation version update and repeated manual file copying would otherwise risk overwriting repository-local changes or silently missing added/removed shared files.
 
 A version label, sync log entry, matching `AGENTS.md`, or matching canonical skill body alone is not proof of an effective current sync when a configured native adapter is stale.
 
@@ -26,7 +27,8 @@ Run this audit when any of the following applies:
 - when the application behaves as if a common rule or machine gate that should exist is not active;
 - during post-merge verification of a synchronization PR when the source foundation files are available;
 - when a sync log and the actual shared-file contents may have drifted;
-- when an AI-native skill loader is configured and its wrapper/adapter files may have drifted from the canonical skills.
+- when an AI-native skill loader is configured and its wrapper/adapter files may have drifted from the canonical skills;
+- before and after updating an already-adopted repository from one exact foundation version to another.
 
 Do not ask a non-engineer human to compare files, versions, SHAs, copied skill contents, or native wrappers when machine-readable local or GitHub evidence is available.
 
@@ -120,7 +122,7 @@ The bootstrap gate is deliberately narrow and fail-closed:
 - after copying, it automatically runs `foundation-sync-audit`; if that post-copy audit fails, files created by the bootstrap attempt are removed on a best-effort rollback;
 - it creates no commit, push, PR, merge, network service, daemon, external dependency, or new permission.
 
-This is an initial-adoption helper, not a stale-foundation overwrite tool. Existing repositories with differing canonical files remain `STOP` and must use the normal reviewed synchronization workflow rather than using bootstrap to overwrite history.
+This is an initial-adoption helper. If a repository already has an older foundation, use the safe update helper below rather than using bootstrap to overwrite existing canonical files.
 
 Bootstrap self-test:
 
@@ -131,6 +133,64 @@ node .agents/skills/foundation-sync-audit/foundation-bootstrap-selftest.mjs \
 ```
 
 The self-test covers dry-run behavior, feature-branch apply, Claude configured/not-configured behavior, `AGENTS.local.md` preservation, protected-branch rejection, dirty-tree rejection, target-conflict rejection, and rollback after post-copy audit failure.
+
+## Safe Existing Update
+
+For a repository that already adopted a known older foundation version, use `foundation-update.mjs` instead of manually copying changed files.
+
+The updater requires two trusted foundation checkouts:
+
+- `--from-root`: the exact older foundation source that the target is expected to match;
+- `--source-root`: the exact newer foundation source to update to.
+
+Dry-run planning is the default:
+
+```text
+node .agents/skills/foundation-sync-audit/foundation-update.mjs \
+  --from-root <old-foundation-root> \
+  --source-root <new-foundation-root> \
+  --target-root <application-root> \
+  --json
+```
+
+Apply only on a dedicated feature branch:
+
+```text
+node .agents/skills/foundation-sync-audit/foundation-update.mjs \
+  --from-root <old-foundation-root> \
+  --source-root <new-foundation-root> \
+  --target-root <application-root> \
+  --apply --json
+```
+
+The updater is deliberately fail-closed:
+
+- it refuses `main` / `master`, detached HEAD, a non-root target checkout, a dirty target working tree, invalid source surfaces, and equal source version labels;
+- for a path present in both old and new canonical surfaces, the target must match the old source byte-for-byte before replacement is allowed;
+- for a path removed by the new foundation, deletion is allowed only when the target still matches the old source byte-for-byte;
+- for a newly added canonical path, an absent target path may be created; an existing different file/directory is a collision and causes `STOP`;
+- when Claude native skills are configured, the same old-match/new-update rules apply to foundation wrapper templates;
+- target-only `.agents/skills/` and `.claude/skills/` entries remain untouched;
+- `AGENTS.local.md`, repository-local specifications, application code, secrets, runtime data, and any path outside the foundation surfaces are never part of the update plan;
+- after applying the plan, the updater automatically runs `foundation-sync-audit` against the new source; if the audit fails or an apply step errors, changed foundation files are restored on a best-effort rollback;
+- it creates no commit, push, PR, merge, network service, daemon, external dependency, or new permission.
+
+Important STOP results include:
+
+- `FOUNDATION_UPDATE_TARGET_DRIFT`: a target shared file no longer matches the trusted old foundation and must not be overwritten;
+- `FOUNDATION_UPDATE_TARGET_MISSING_OLD`: an old canonical/wrapper path is unexpectedly missing;
+- `FOUNDATION_UPDATE_NEW_PATH_CONFLICT`: a new foundation path collides with repository-owned content;
+- `FOUNDATION_UPDATE_POST_AUDIT_FAILED`: the new full-current audit failed after apply and rollback was attempted.
+
+Update self-test:
+
+```text
+node .agents/skills/foundation-sync-audit/foundation-update-selftest.mjs \
+  .agents/skills/foundation-sync-audit/foundation-update.mjs \
+  .agents/skills/foundation-sync-audit/foundation-sync-audit.mjs
+```
+
+The self-test covers dry-run/apply behavior, additions, replacements, removals, Claude configured/not-configured behavior, `AGENTS.local.md` and target-only skill preservation, protected-branch rejection, dirty-tree rejection, drift/missing/collision rejection, and rollback after post-update audit failure.
 
 ## Remote-Only Equivalent
 
@@ -144,6 +204,8 @@ If the synchronization or audit is performed through GitHub/remote-only tooling 
 6. Treat missing/different canonical files or configured native wrappers as `STOP`.
 7. Record the source foundation `VERSION` and source commit SHA in the synchronization evidence/log.
 8. Do not treat a matching top-level `AGENTS.md`, a version string, or a sync-log statement as a substitute for file equality and configured-adapter equality.
+
+For a remote-only version update, additionally fix the exact old foundation SHA and prove that every target path to be replaced/deleted matches the old source before writing the new blob. Newly introduced paths must be absent or already identical to the new source. If old-state identity cannot be proved, report `STOP` instead of overwriting.
 
 If equivalent evidence cannot be obtained, report `UNKNOWN`/`STOP`; do not convert the gap into manual copy-and-paste work for the non-engineer human.
 
@@ -195,6 +257,8 @@ Do not claim `FULL_CURRENT` when:
 - only `AGENTS.md` or only a selected subset was synchronized;
 - the sync log says current but file comparison disagrees;
 - the comparison itself cannot be completed with trustworthy evidence.
+
+For an existing-foundation update, also stop instead of overwriting when the target does not exactly match the trusted old foundation on a path that would be replaced/deleted, or when a newly introduced foundation path collides with repository-owned content.
 
 ## Key Principle
 
