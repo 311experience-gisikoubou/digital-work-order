@@ -209,6 +209,43 @@ For a remote-only version update, additionally fix the exact old foundation SHA 
 
 If equivalent evidence cannot be obtained, report `UNKNOWN`/`STOP`; do not convert the gap into manual copy-and-paste work for the non-engineer human.
 
+### Remote-Only Direct Git Update Planner
+
+When remote-only GitHub tooling exposes exact blob/tree/commit/ref operations, prefer the direct Git Data route over generating a one-shot workflow merely to transport Foundation files.
+
+Build a machine-readable manifest from the exact old Foundation source, exact new Foundation source, and exact target branch head, then run:
+
+```text
+node .agents/skills/foundation-sync-audit/foundation-remote-update-plan.mjs --manifest <manifest.json>
+```
+
+The planner is read-only. It validates only Foundation-owned target paths (`AGENTS.md`, `.agents/skills/**`, and configured `.claude/skills/**`) and fails closed when:
+
+- a replace/delete target no longer matches the trusted old blob SHA;
+- a newly introduced path collides with different target content;
+- the target branch is `main` / `master` (including `refs/heads/...` form);
+- a manifest contains duplicate, invalid, or out-of-surface paths;
+- exact source/target commit or base-tree identifiers are missing/invalid.
+
+On PASS it emits `FOUNDATION_REMOTE_UPDATE_PLAN_READY` with a Git Data contract:
+
+1. create each required new blob in the target repository and verify the created SHA equals the trusted new-source blob SHA;
+2. create a tree from the exact target-head base tree using only the planned canonical entries;
+3. create a commit whose parent is the exact target head used for planning;
+4. update the feature-branch ref with `force=false`; if the branch moved, the update must fail rather than overwrite concurrent work;
+5. perform the normal full Foundation sync audit at the resulting exact head before claiming `FULL_CURRENT`.
+
+The planner does not replace source-surface enumeration or the post-write full audit. Callers must still enumerate the exact canonical/wrapper surfaces described above and include every path being replaced, added, or deleted. `AGENTS.local.md`, application code, business specifications, data paths, target-only skills, sync logs, secrets, and runtime data are outside this write plan.
+
+Planner self-test:
+
+```text
+node .agents/skills/foundation-sync-audit/foundation-remote-update-plan-selftest.mjs \
+  .agents/skills/foundation-sync-audit/foundation-remote-update-plan.mjs
+```
+
+This direct route adds no token, cross-repository secret, service, daemon, or recurring workflow. If exact Git Data operations are unavailable, fall back to another already-approved safe route; do not weaken old-state identity checks merely to avoid a tooling limitation.
+
 ## Partial Sync Handling
 
 Partial synchronization is allowed only when explicitly scoped and recorded as partial. It must not be described as a full/current foundation sync.
