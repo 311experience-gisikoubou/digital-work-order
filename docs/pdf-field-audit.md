@@ -28,15 +28,15 @@ Branch: `audit/pdf-field-reflection`
 - 手書きメモ: `memoStrokes`
 - 納品日 / 次回Ap: `deliveryDate`, `nextAppointment`
 
-## Confirmed mismatch
+## Resolved mismatch
 
 ### A-01 修理詳細の二重表示
 
-`repairDetail` は修理発注時に備考先頭へ `修理詳細：...` として連結される一方、左列にも `修理詳細` 行として表示されている。
+`repairDetail` は修理発注時に備考先頭へ `修理詳細：...` として連結される一方、左列にも `修理詳細` 行として表示されていた。
 
 確定仕様: 修理詳細は備考先頭へ反映。
 
-Recommended fix: `pdf.js` の左列 `row(L, '修理詳細', order.repairDetail)` を削除し、備考先頭への反映のみ残す。
+Implemented fix: `pdf.js` の左列 `row(L, '修理詳細', order.repairDetail)` を削除し、備考先頭への反映のみ残した。
 
 ## Protection scope
 
@@ -48,12 +48,12 @@ Recommended fix: `pdf.js` の左列 `row(L, '修理詳細', order.repairDetail)`
 - クラスプロジック
 - 保存形式
 
-## Verification required after implementation
+## Verification after implementation
 
-- `node --check pdf.js`
-- `git diff --check`
-- changed-file / unintended-diff review
-- iPad Safari 実機PDF確認
+- JavaScript syntax property: `success` by remote-only equivalent evidence. The canonical exact-head diff removes one complete standalone statement only; the literal `node --check pdf.js` command was not run in a local workspace.
+- Diff hygiene (`git diff --check` property): `success` by canonical remote diff; the implementation commit is `+0 / -1` in `pdf.js` with no added whitespace.
+- changed-file / unintended-diff review: `success`; implementation commit changes only `pdf.js` by one deletion.
+- `debug-verification` three-question check: real-device iPad Safari confirmation is `unneeded` for this fix because the intended property (duplicate row removed while remarks rendering remains) is fully determined by exact-head code and canonical diff. No layout/CSS, persistence, drawing, clasp, or tooth-structure change was made.
 
 ## Merge
 
