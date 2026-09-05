@@ -194,3 +194,14 @@
 - Sync: `AGENTS.md` + canonical `.agents/skills/` changed surface
 - Method: fail-closed dev.35 → dev.37 remote-only update
 - Verification: exact canonical blob identity + stagnation selftest
+
+## 2026-09-05 — ai-dev-foundation 1.0.0-dev.42
+
+- Source commit: `9b2a6f36e8daec69af5081ecab1e343dcbbe152a`
+- Target branch: `chore/foundation-dev42-sync`
+- Sync: `AGENTS.md` job-fit-first common rule update.
+- Already current and therefore not rewritten: `.agents/skills/foundation-sync-audit/SKILL.md`, `foundation-remote-update-plan.mjs`, `foundation-remote-update-plan-selftest.mjs` (exact Foundation blob SHAs already matched before this sync).
+- Repository-local files preserved: `AGENTS.local.md`, repository-local skills/wrappers/settings, application code and data paths.
+- Verification: Foundation `AGENTS.md` blob `ccf1907cb5746fa5306a6906510475c8be3177ae` matched after update; branch diff before this log entry was `AGENTS.md` only, +4/-1, behind_by=0.
+- Method: GitHub remote-only minimal sync; no runtime, dependency, production, secret, or real-data change.
+- Merge: explicit user authorization required; do not merge as part of synchronization preparation.
