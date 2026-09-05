@@ -4,7 +4,8 @@ This repository contains the digital dental work order application.
 
 ## Required Reading (Local)
 
-- Read `docs/learnings.md` and `docs/session-handoff.md` at the start of work, when they exist.
+- Read `CURRENT_STATUS.md` at the start of work; it is the current-state checkpoint for this repository.
+- Read `docs/learnings.md` when it exists. Treat `docs/session-handoff.md` as historical handoff context, not as the current-state source of truth.
 
 ## Project Context
 

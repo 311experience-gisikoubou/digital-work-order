@@ -4,22 +4,23 @@
 仕様書・履歴・議事録を複製せず、現在の作業状態だけを保ちます。
 
 - Status: `ACTIVE`
-- Current phase: `maintenance / current-state cleanup`
+- Current phase: `maintenance / backlog selection`
 - Current branch: `main`
 - Current PR: `N/A`
-- Last completed gate: `Foundation dev.40 sync PR #27 post-merge PASS`
+- Last completed gate: `Foundation dev.42 sync PR #31 post-merge PASS`
 - Current blocker: `NONE`
-- Next action: `Issue #12を現行のCURRENT_STATUS正本運用と照合し、obsolete/closeまたは最小更新を判定する`
-- PC-free work: `Issue #12の現行ルール照合・整理; 次のproduct backlog/spec監査`
+- Next action: `product backlog / docs/design.md を監査し、次の最優先製品タスクを1件選ぶ`
+- PC-free work: `product backlog / 仕様監査; 次タスクのIssue化・優先順位付け`
 - PC-required work: `NONE（新しいUI/PDF/Apple Pencil変更を開始するまでは不要）`
 - User action required: `NO`
 - Merge authorized: `NO`
-- Last updated: `2026-09-05`
+- Last updated: `2026-09-06`
 
 ## Optional short notes
 
 - 現在、open product PRはない。
-- `docs/session-handoff.md` は過去セッション記録であり、現在地点の正本は `CURRENT_STATUS.md`。Issue #12はこの後の運用変更より前の内容を含むため再監査対象。
+- 現在地点の正本は `CURRENT_STATUS.md`。`docs/session-handoff.md` は過去のhandoff文脈として保持し、現在地点の正本には使わない。
+- Issue #12の「単一current-state checkpoint」という目的は `CURRENT_STATUS.md` 運用で満たす。残存していた開始時参照の不整合を今回の保守PRで解消し、merge時にIssue #12をcloseする。
 - Foundation同期の証拠は同期PRに残し、statusへ詳細を複製しない。
 
 ## Rules
