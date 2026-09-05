@@ -263,7 +263,6 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
     if (keyOrderType) row(L, '発注形態', keyOrderType);
     if (!order.hasRimount) row(L, '区分', order.insuranceType === 'insurance' ? '保険' : '自費');
     if (order.priority && order.priority !== 'normal') row(L, '優先度', order.priority);
-    if (order.repairDetail) row(L, '修理詳細', order.repairDetail);
 
     // ── 歯式番号欄（7番まで・欠損部を強調）─────────
     var missingSet = new Set(order.selectedTeeth || []);
