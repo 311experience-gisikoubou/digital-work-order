@@ -6,10 +6,10 @@
 - Status: `ACTIVE`
 - Current phase: `paper work order Phase 2 / Issue #37 design-only`
 - Current branch: `design/paper-ocr-privacy-boundary`
-- Current PR: `N/A（Draft PR作成前）`
-- Last completed gate: `PR #36 merged; main includes 60b9bb8`
+- Current PR: `#38（Draft）`
+- Last completed gate: `Issue #37 design scope / diff / privacy audit PASS`
 - Current blocker: `NONE`
-- Next action: `Issue #37の設計差分を検証してDraft PRを作成`
+- Next action: `Draft PR #38の設計レビュー（mergeしない）`
 - PC-free work: `Issue #37の設計レビュー / Draft PR監査`
 - PC-required work: `NONE`
 - User action required: `NO（design-only、mergeしない）`
