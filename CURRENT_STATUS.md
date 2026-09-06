@@ -4,21 +4,21 @@
 仕様書・履歴・議事録を複製せず、現在の作業状態だけを保ちます。
 
 - Status: `ACTIVE`
-- Current phase: `paper work order intake / final audit`
-- Current branch: `feat/lab-paper-work-order-import`
-- Current PR: `#36`
-- Last completed gate: `iPad Safari real-device PASS; docs/design.md reflection PASS`
+- Current phase: `paper work order Phase 2 / Issue #37 design-only`
+- Current branch: `design/paper-ocr-privacy-boundary`
+- Current PR: `N/A（Draft PR作成前）`
+- Last completed gate: `PR #36 merged; main includes 60b9bb8`
 - Current blocker: `NONE`
-- Next action: `final PR audit → Ready → explicit merge authorization`
-- PC-free work: `final PR audit / PR metadata verification`
+- Next action: `Issue #37の設計差分を検証してDraft PRを作成`
+- PC-free work: `Issue #37の設計レビュー / Draft PR監査`
 - PC-required work: `NONE`
-- User action required: `YES（PR #36 のmerge判断のみ）`
+- User action required: `NO（design-only、mergeしない）`
 - Merge authorized: `NO`
 - Last updated: `2026-09-07`
 
 ## Optional short notes
 
-- PR #36 が現在のproduct PR。mergeには明示承認が必要。
+- PR #36はmerge済み。現在タスクはIssue #37のPhase 2設計のみ。OCR実装は後続Issue。
 - 現在地点の正本は `CURRENT_STATUS.md`。`docs/session-handoff.md` は過去のhandoff文脈として保持し、現在地点の正本には使わない。
 - 紙指示書画像取り込みPhase 1は一時プレビューのみ。OCR・データ化は別Phase。
 - Foundation同期の証拠は同期PRに残し、statusへ詳細を複製しない。
