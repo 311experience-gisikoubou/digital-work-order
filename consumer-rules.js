@@ -20,6 +20,7 @@
   });
   const EXPORT_KEYS = ['schemaVersion', 'targetApp', 'generatedAt', 'rules'];
   const RULE_KEYS = ['ruleId', 'version', 'conditionCode', 'actionCode', 'approvedAt'];
+  let paperWorkOrderObjectUrl = '';
 
   function isPlainObject(value) {
     return value !== null && typeof value === 'object' && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
@@ -110,7 +111,80 @@
     reader.readAsText(file, 'utf-8');
   }
 
-  function init() {
+  function releasePaperWorkOrderObjectUrl() {
+    if (!paperWorkOrderObjectUrl) return;
+    URL.revokeObjectURL(paperWorkOrderObjectUrl);
+    paperWorkOrderObjectUrl = '';
+  }
+
+  function clearPaperWorkOrderPreview() {
+    releasePaperWorkOrderObjectUrl();
+    const preview = document.getElementById('paper-work-order-preview');
+    const previewWrap = document.getElementById('paper-work-order-preview-wrap');
+    const filename = document.getElementById('paper-work-order-filename');
+    const status = document.getElementById('paper-work-order-status');
+    const input = document.getElementById('paper-work-order-import');
+    if (preview) preview.removeAttribute('src');
+    if (previewWrap) previewWrap.hidden = true;
+    if (filename) filename.textContent = '';
+    if (status) status.textContent = '画像は端末内でのみ一時表示し、保存・外部送信しません。';
+    if (input) input.value = '';
+  }
+
+  function showPaperWorkOrderPreview(file) {
+    if (!file || typeof file.type !== 'string' || !file.type.startsWith('image/')) {
+      clearPaperWorkOrderPreview();
+      const status = document.getElementById('paper-work-order-status');
+      if (status) status.textContent = '画像ファイルを選択してください。';
+      return;
+    }
+
+    clearPaperWorkOrderPreview();
+    paperWorkOrderObjectUrl = URL.createObjectURL(file);
+    const preview = document.getElementById('paper-work-order-preview');
+    const previewWrap = document.getElementById('paper-work-order-preview-wrap');
+    const filename = document.getElementById('paper-work-order-filename');
+    const status = document.getElementById('paper-work-order-status');
+    const input = document.getElementById('paper-work-order-import');
+    if (preview) preview.src = paperWorkOrderObjectUrl;
+    if (previewWrap) previewWrap.hidden = false;
+    if (filename) filename.textContent = file.name || '撮影した画像';
+    if (status) status.textContent = '端末内で一時表示中です。データ化機能はまだ実行しません。';
+    if (input) input.value = '';
+  }
+
+  function initPaperWorkOrderImport() {
+    const labView = document.getElementById('view-lab');
+    if (!labView || document.getElementById('paper-work-order-import-panel')) return;
+
+    const panel = document.createElement('section');
+    panel.id = 'paper-work-order-import-panel';
+    panel.className = 'consumer-rules-panel';
+    panel.setAttribute('aria-labelledby', 'paper-work-order-import-title');
+    panel.innerHTML = `
+      <div class="consumer-rules-heading">
+        <h2 id="paper-work-order-import-title">紙指示書の取り込み</h2>
+        <button type="button" class="consumer-rules-import-button" id="paper-work-order-import-button">紙指示書を取り込む</button>
+        <input type="file" id="paper-work-order-import" accept="image/*" capture="environment" hidden>
+      </div>
+      <p id="paper-work-order-status" class="consumer-rules-count" aria-live="polite">画像は端末内でのみ一時表示し、保存・外部送信しません。</p>
+      <div id="paper-work-order-preview-wrap" hidden style="margin-top:12px;">
+        <div id="paper-work-order-filename" style="font-size:13px;font-weight:700;margin-bottom:8px;word-break:break-all;"></div>
+        <img id="paper-work-order-preview" alt="取り込んだ紙指示書のプレビュー" style="display:block;max-width:100%;max-height:70vh;border:1px solid var(--border-color);border-radius:var(--radius-sm);object-fit:contain;background:#fff;">
+        <button type="button" class="btn-secondary" id="paper-work-order-discard" style="margin-top:10px;">画像を破棄</button>
+      </div>`;
+
+    labView.insertBefore(panel, labView.firstChild);
+
+    const input = document.getElementById('paper-work-order-import');
+    const button = document.getElementById('paper-work-order-import-button');
+    const discard = document.getElementById('paper-work-order-discard');
+    button.addEventListener('click', () => input.click());
+    input.addEventListener('change', () => showPaperWorkOrderPreview(input.files && input.files[0]));
+    discard.addEventListener('click', clearPaperWorkOrderPreview);
+  }
+
+  function initConsumerRules() {
     const input = document.getElementById('consumer-rules-import');
     const button = document.getElementById('consumer-rules-import-button');
     if (!input || !button) return;
@@ -121,6 +195,12 @@
     });
   }
 
+  function init() {
+    initConsumerRules();
+    initPaperWorkOrderImport();
+  }
+
   root.ConsumerRuleConsumer = Object.freeze({ parseConsumerExportText, validateConsumerExport, formatRule, init });
   if (typeof document !== 'undefined') init();
+  if (typeof root.addEventListener === 'function') root.addEventListener('beforeunload', releasePaperWorkOrderObjectUrl);
 }(globalThis));
