@@ -4,15 +4,15 @@
 仕様書・履歴・議事録を複製せず、現在の作業状態だけを保ちます。
 
 - Status: `ACTIVE`
-- Current phase: `paper work order Phase 2 / Issue #37 design-only`
+- Current phase: `paper work order Phase 2 / Issue #37 final audit complete`
 - Current branch: `design/paper-ocr-privacy-boundary`
-- Current PR: `#38（Draft）`
-- Last completed gate: `Issue #37 design scope / diff / privacy audit PASS`
+- Current PR: `#38（Ready）`
+- Last completed gate: `PR #38 final-pr-audit PASS; Ready for review`
 - Current blocker: `NONE`
-- Next action: `Draft PR #38の設計レビュー（mergeしない）`
-- PC-free work: `Issue #37の設計レビュー / Draft PR監査`
+- Next action: `explicit merge authorization`
+- PC-free work: `merge authorization待ち`
 - PC-required work: `NONE`
-- User action required: `NO（design-only、mergeしない）`
+- User action required: `YES（PR #38のmerge判断のみ）`
 - Merge authorized: `NO`
 - Last updated: `2026-09-07`
 
