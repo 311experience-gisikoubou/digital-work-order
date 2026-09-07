@@ -6,8 +6,8 @@
 - Status: `ACTIVE`
 - Current phase: `paper work order / Issue #45 manual-entry reference UI implementation`
 - Current branch: `feat/paper-image-reference-input`
-- Current PR: `pending (Draft PR after local audit)`
-- Last completed gate: `Issue #45 implementation + 30/30 relevant automated tests PASS; git diff --check PASS`
+- Current PR: `#47 (Draft)`
+- Last completed gate: `Issue #45 implementation + 30/30 relevant automated tests PASS; git diff --check PASS; Draft PR #47 opened`
 - Current blocker: `NONE before iPad Safari layout check`
 - Next action: `final local audit -> commit/push -> Draft PR -> iPad Safari landscape/portrait check`
 - PC-free work: `Draft PR metadata/current-head audit after push`
