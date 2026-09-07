@@ -6,10 +6,10 @@
 - Status: `ACTIVE`
 - Current phase: `paper work order Phase 2 / Issue #41 local verification complete`
 - Current branch: `feat/paper-ocr-camera-robustness`
-- Current PR: `NONE (not created)`
+- Current PR: `#42 (Draft)`
 - Last completed gate: `Issue #41: 34 automated tests PASS / 0 FAIL / 0 skipped / 0 cancelled; 3 JS syntax checks PASS; host branch/scope/git diff --check audit PASS`
-- Current blocker: `Actual iPad camera effectiveness unverified; PR not created`
-- Next action: `commit/push ? Draft PR ? prepare synthetic iPad camera verification`
+- Current blocker: `Actual iPad camera effectiveness unverified; PR #42 Draft`
+- Next action: `prepare synthetic iPad camera verification ? 2 real-device checks ? final current-head audit`
 - PC-free work: `Review docs/issue41-verification.md`
 - PC-required work: `Issue #41 synthetic iPad camera verification (not started)`
 - User action required: `NO for this local task`
