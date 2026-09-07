@@ -187,7 +187,7 @@
 
 ## 14. 紙指示書のローカルデータ化（Phase 2設計 / Issue #37）
 
-本節の承認済み境界は `OPERATIONAL`、必要な強制レベルは `TECHNICAL_ENFORCEMENT_REQUIRED`。Issue #39でOCR・候補確認・フォーム反映/照合を実装した（14.5）。Issue #39の合成fixtureによるiPad Safari実機検証はPASS。Issue #41のiPad Safari撮影確認はユーザー報告で有効性NG（4候補すべて空欄）、安全性/fail-closedはPASS。今回の前処理追加後の実機結果は未確認で、実データ用途の準備完了とは扱わない。画像自動破棄は未実装。
+本節の承認済み境界は `OPERATIONAL`、必要な強制レベルは `TECHNICAL_ENFORCEMENT_REQUIRED`。Issue #39でOCR・候補確認・フォーム反映/照合を実装した（14.5）。Issue #39の合成fixtureによるiPad Safari実機検証はPASS。Issue #41ではPC画面上の架空指示書を使うiPad Safari撮影確認を前処理前後の2回実施し、どちらも4候補すべて空欄で有効性NG、安全性/fail-closedはPASS。原因切り分け用の集計診断を実装済みで、次は印刷した架空指示書による1回の診断確認を行う。実データ用途の準備完了とは扱わない。画像自動破棄は未実装。
 
 ### 14.1 初期の処理・通信境界
 
