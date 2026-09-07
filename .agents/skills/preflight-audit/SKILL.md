@@ -1,6 +1,6 @@
 ---
 name: preflight-audit
-description: Use before implementation, fixes, refactoring, UI/backend/design changes, security-sensitive work, external-service use, data handling, installation, real-device work, network changes, or multi-step/long-running AI work. Confirm repository/data/AI/network/persistence boundaries, cost, human work burden, non-engineer operation boundaries, lifecycle impact, repeated manual work, progress communication, and whether a genuine human value decision exists. Fail closed on unsafe, unknown, destructive, externally sensitive, unnecessarily complex, improperly delegated, insufficiently communicated, or unreflected repeated-failure paths.
+description: Use before implementation, fixes, refactoring, UI/backend/design changes, security-sensitive work, external-service use, data handling, installation, real-device work, network changes, or multi-step/long-running AI work. Confirm repository/work-ownership/data/AI/network/persistence boundaries, duplicate-implementation risk, cost, human work burden, non-engineer operation boundaries, lifecycle impact, repeated manual work, progress communication, and whether a genuine human value decision exists. Fail closed on unsafe, unknown, destructive, externally sensitive, unnecessarily complex, improperly delegated, insufficiently communicated, or unreflected repeated-failure paths.
 ---
 
 # Preflight Audit
@@ -18,6 +18,18 @@ description: Use before implementation, fixes, refactoring, UI/backend/design ch
 - Multi-step or long-running AI work must keep a non-engineer user oriented on current stage, meaning, next step, and whether user action is needed; do not make the user infer progress from technical logs.
 - Important rules must be classified as `DECLARATION_ONLY`, `OPERATIONAL`, or `TECHNICAL_ENFORCEMENT_REQUIRED`. Do not claim enforcement that does not exist.
 
+## AI Route Selection
+
+At job start, and whenever the execution AI or route may materially change, select the execution/review route as a technical preflight decision rather than a fixed historical assignment.
+
+- First apply hard constraints: required permissions/tools, execution environment, data/privacy boundary, safety, required quality/capability, context continuity, and independent-review separation.
+- Then compare job fit across the AI/routes that remain viable. Typical strengths may inform the choice, but AI names alone do not permanently own categories such as implementation, testing, Git work, code reading, design review, or audit.
+- When reliable current signals are available, include usage, remaining quota/capacity, expected processing load/time, and expected incremental cost. Do not invent or infer remaining quota from stale or missing evidence.
+- The objective is combined safe development efficiency across available AI capacity, not maximizing utilization of one provider or one model.
+- If two routes are materially equivalent in capability, safety, quality, permissions, and context, prefer the route with healthier remaining capacity and lower expected incremental cost. If usage is becoming concentrated and equivalent safe work can move to another AI, rebalance automatically within already-approved boundaries.
+- If usage/remaining-capacity evidence is unavailable, do not claim the current allocation is optimal. Use job fit plus known safety/permission/cost facts and record the usage signal as unavailable rather than guessing.
+- Never reduce required safety, quality, independent review, data protection, or human approval to save quota or cost. A new recurring charge, subscription, paid tier, or changed cost commitment remains a genuine human value/ownership gate.
+- Do not ask a non-engineer user to choose between Codex, Claude, or another available AI when the selection can be resolved technically from the evidence above.
 ## Execution / Evidence Location
 
 Before repository checks, identify where the proposed or audited change actually exists.
@@ -27,6 +39,15 @@ Before repository checks, identify where the proposed or audited change actually
 - **Mixed path:** if both local and remote environments participate, inspect both and prove they refer to the same intended head before treating them as one change.
 - The evidence path does not weaken safety checks. A property that cannot be proven from the actual execution location or an equivalent independent source is `UNKNOWN`/`NEEDS_CHECK`, not PASS.
 - Do not turn missing tool access into non-engineer relay work when another machine-readable route exists.
+
+## Work Ownership / Duplicate-Implementation Check
+
+Before creating a new feature branch, Issue, PR, or product implementation, confirm the work owner and canonical current-state source.
+
+- Confirm that the requested work belongs to the current repository / common-foundation scope.
+- Check available `CURRENT_STATUS.md`, Issue, PR, branch, and specification evidence for the same task already being active in a dedicated application project or another workstream.
+- If another dedicated project / repository already owns the same product task, do not create or update a parallel product branch, Issue, PR, or implementation from the current workstream. Use that state only as observation material for cross-project governance when relevant, then continue with the next safe task owned by the current workstream.
+- Change work ownership only when explicit transfer, completion, or restart evidence exists. If ownership is unclear and affects scope, mark it `NEEDS_CHECK` / `STOP`; do not ask a non-engineer human to compare Git/PR details that the AI can retrieve.
 
 ## Machine Gate
 
@@ -367,7 +388,7 @@ Do not say “probably safe”.
 
 ## Stop Conditions
 
-Stop when the machine/operation gate says `STOP`, safety is `UNKNOWN` for a real-data path, confidential data may reach an external/unknown destination, destructive or production-impacting work lacks authorization, the relevant execution workspace/scope is unsafe or unclear, an unexpected diff/spec conflict exists, extra cost may occur without authorization, the non-engineer is made technical maintainer/technical decider, a genuine human value choice is unapproved, lifecycle ownership is unresolved where lifecycle impact exists, a repeated manual pattern is being handled only as another one-off workaround, `LOOP_DETECTED_THIRD_SAME_METHOD_BLOCKED` is raised after two failed resolution interventions, a third resolution intervention lacks the required forced-reflection evidence, or required progress communication for multi-step/long-running AI work is missing.
+Stop when the machine/operation gate says `STOP`, safety is `UNKNOWN` for a real-data path, confidential data may reach an external/unknown destination, destructive or production-impacting work lacks authorization, the relevant execution workspace/scope or work ownership is unsafe or unclear, duplicate product implementation would be created, an unexpected diff/spec conflict exists, extra cost may occur without authorization, the non-engineer is made technical maintainer/technical decider, a genuine human value choice is unapproved, lifecycle ownership is unresolved where lifecycle impact exists, a repeated manual pattern is being handled only as another one-off workaround, `LOOP_DETECTED_THIRD_SAME_METHOD_BLOCKED` is raised after two failed resolution interventions, a third resolution intervention lacks the required forced-reflection evidence, or required progress communication for multi-step/long-running AI work is missing.
 
 ## Automatic Proceed Rule
 
@@ -382,6 +403,7 @@ Report plainly:
 - 使用スキル
 - `PROCEED` / `STOP` / `UNKNOWN`
 - execution/evidence source(s): local / remote-only / mixed
+- work ownership / duplicate-implementation status
 - overall project progress when relevant
 - estimated human operation time and manual-step load
 - work impact and safe stopping point
