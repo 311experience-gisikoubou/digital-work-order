@@ -205,3 +205,15 @@
 - Verification: Foundation `AGENTS.md` blob `ccf1907cb5746fa5306a6906510475c8be3177ae` matched after update; branch diff before this log entry was `AGENTS.md` only, +4/-1, behind_by=0.
 - Method: GitHub remote-only minimal sync; no runtime, dependency, production, secret, or real-data change.
 - Merge: explicit user authorization required; do not merge as part of synchronization preparation.
+
+## 2026-09-07 — ai-dev-foundation 1.0.0-dev.45
+
+- Source commit: `ad2c9c88bb88776cc798f252b5177ebdbf13b779`
+- Previous trusted Foundation: `1.0.0-dev.42` @ `9b2a6f36e8daec69af5081ecab1e343dcbbe152a`
+- Target branch: `chore/foundation-dev45-sync`
+- Sync: canonical `AGENTS.md` + `.agents/skills/` surface and configured Claude native wrappers where applicable.
+- Method: fail-closed `foundation-update.mjs` existing-foundation update; target paths had to match trusted dev.42 before replacement.
+- Verification: post-update `foundation-sync-audit` PASS / `FOUNDATION_SYNC_MATCH` against exact dev.45 source; canonical missing/stale = 0; configured wrapper missing/stale = 0.
+- Repository-local files preserved: `AGENTS.local.md`, target-only skills/wrappers/settings, application code, business specifications, dependencies, runtime and data paths.
+- Product/runtime/data change: none; REAL_DEVICE not required.
+- Merge: explicit user authorization required; do not merge as part of synchronization preparation.
