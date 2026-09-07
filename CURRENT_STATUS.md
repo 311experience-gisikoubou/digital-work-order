@@ -4,22 +4,23 @@
 仕様書・履歴・議事録を複製せず、現在の作業状態だけを保ちます。
 
 - Status: `ACTIVE`
-- Current phase: `paper work order Phase 2 / Issue #41 preprocessing implemented + automated verification PASS`
+- Current phase: `paper work order Phase 2 / Issue #41 aggregate OCR diagnostics implemented + automated verification PASS`
 - Current branch: `feat/paper-ocr-camera-robustness`
 - Current PR: `#42 (Draft)`
-- Last completed gate: `Host local branch/scope/diff/test/security audit PASS; 42/42 automated tests PASS / 0 FAIL / 0 skipped / 0 cancelled; 4 JS syntax checks PASS; operation preflight PROCEED`
-- Current blocker: `iPad camera retest pending; first attempt effectiveness NG (all four blank), safety PASS`
-- Next action: `After push: prepared iPad camera retest, then final current-head PR audit`
-- PC-free work: `Review docs/issue41-verification.md`
-- PC-required work: `Prepared iPad camera retest`
-- User action required: `NO until the prepared iPad camera retest`
+- Last completed gate: `Host local scope/diff/security audit PASS; 45/45 automated tests PASS / 0 FAIL / 0 skipped / 0 cancelled; changed JS syntax checks PASS; git diff --check PASS`
+- Current blocker: `Two iPad Safari screen-photo attempts were effectiveness NG (all four blank) while safety/fail-closed PASS; OCR-stage vs parser-stage cause not yet isolated on real device`
+- Next action: `Commit/push aggregate diagnostics, then one iPad Safari diagnostic retest using a printed fictional sheet with ocrDebug=1, then final current-head PR audit`
+- PC-free work: `PR #42 review after push`
+- PC-required work: `Printed-fictional-sheet iPad Safari diagnostic retest`
+- User action required: `YES only for the prepared printed-fictional-sheet iPad retest after push`
 - Merge authorized: `NO`
 - Last updated: `2026-09-07`
 
 ## Optional short notes
 
-- Issue #41 implementation, fixture recipe and local evidence: `docs/issue41-verification.md`.
-- Parser constraints and approval/privacy behavior remain conservative; no real-data or camera success claim.
+- Issue #41 evidence: `docs/issue41-verification.md`.
+- Aggregate diagnostics expose counts/booleans only; recognized text and candidate values are not shown or persisted.
+- Parser constraints, approval/privacy behavior and confidence >=80 remain conservative.
 - PR #42 remains Draft; merge is not authorized.
 
 ## Rules

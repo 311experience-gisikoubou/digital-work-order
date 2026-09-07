@@ -113,8 +113,20 @@
       if (canvas) { canvas.width = 0; canvas.height = 0; }
     }
   }
-  async function recognize(file, baseURI, onWorker) {
+  function countLabelHits(texts) {
+    let hits = 0;
+    for (const raw of texts) {
+      const line = String(raw || '').normalize('NFKC');
+      for (const key of Object.keys(fields)) {
+        const labelPattern = aliases[key].map(label => [...label].join('[ \\t]*')).join('|');
+        if (new RegExp(`^[ \\t]*(?:${labelPattern})[ \\t]*[:：]`).test(line)) { hits += 1; break; }
+      }
+    }
+    return hits;
+  }
+  async function recognize(file, baseURI, onWorker, options) {
     if (!(file instanceof Blob) || !file.type.startsWith('image/')) throw new Error('image-required');
+    const withDiagnostics = Boolean(options && options.diagnostics);
     const controller = new AbortController();
     const worker = await root.Tesseract.createWorker('jpn', 1, {
       ...localOptions(baseURI), logger: () => {}, errorHandler: () => {}
@@ -125,10 +137,20 @@
       image = await preprocess(file, controller.signal);
       if (controller.signal.aborted) throw new Error('ocr-cancelled');
       const result = await worker.recognize(image, {}, { text: true, blocks: true });
-      // Low-confidence lines stay unresolved. Scores never approve a field.
       const lines = (result.data.blocks || []).flatMap(block => block.paragraphs || [])
         .flatMap(paragraph => paragraph.lines || []);
-      return parseCandidates(lines.filter(line => line.confidence >= 80).map(line => line.text).join('\n'));
+      const confidentLines = lines.filter(line => line.confidence >= 80);
+      const candidates = parseCandidates(confidentLines.map(line => line.text).join('\n'));
+      if (!withDiagnostics) return candidates;
+      const diagnostics = Object.freeze({
+        rawLineCount: lines.length,
+        confidentLineCount: confidentLines.length,
+        labelHitsBeforeFilter: countLabelHits(lines.map(line => line.text)),
+        labelHitsAfterFilter: countLabelHits(confidentLines.map(line => line.text)),
+        candidateCount: Object.values(candidates).filter(value => value !== '').length,
+        fields: Object.freeze(Object.fromEntries(Object.keys(fields).map(key => [key, candidates[key] !== ''])))
+      });
+      return Object.freeze({ candidates, diagnostics });
     } finally { image = null; await worker.terminate(); }
   }
   root.PaperOCR = Object.freeze({ fields, labels, parseCandidates, dateValue, copyApproved, localOptions, workingSize, normalizePixels, preprocess, recognize });

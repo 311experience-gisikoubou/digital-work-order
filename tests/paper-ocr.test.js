@@ -110,6 +110,32 @@ test('recognition filters low-confidence lines and always terminates after recog
   delete globalThis.Tesseract;
 });
 
+test('diagnostics are opt-in, aggregate-only and never change candidate output', async (t) => {
+  const browser = fakeBrowser();
+  globalThis.createImageBitmap = browser.createImageBitmap;
+  globalThis.document = browser.document;
+  t.after(() => { delete globalThis.createImageBitmap; delete globalThis.document; delete globalThis.Tesseract; });
+  const lines = [
+    { text: '患者名：架空患者', confidence: 80 },
+    { text: '医院名：不確実', confidence: 79.99 },
+    { text: '納期：2026/10/20', confidence: 80 }
+  ];
+  globalThis.Tesseract = { createWorker: async () => ({
+    recognize: async () => ({ data: { blocks: [{ paragraphs: [{ lines }] }] } }), terminate: async () => {}
+  }) };
+  const file = new Blob(['fictional'], { type: 'image/png' });
+  const withoutDiagnostics = await globalThis.PaperOCR.recognize(file, 'http://localhost/app/', () => {});
+  const outcome = await globalThis.PaperOCR.recognize(file, 'http://localhost/app/', () => {}, { diagnostics: true });
+  assert.deepEqual(outcome.candidates, withoutDiagnostics);
+  assert.deepEqual(outcome.diagnostics, {
+    rawLineCount: 3, confidentLineCount: 2, labelHitsBeforeFilter: 3, labelHitsAfterFilter: 2,
+    candidateCount: 2, fields: { clinicName: false, doctorName: false, patientName: true, deliveryDate: true }
+  });
+  const serialized = JSON.stringify(outcome.diagnostics);
+  assert.doesNotMatch(serialized, /架空患者|不確実|2026-10-20|2026\/10\/20/);
+  delete globalThis.Tesseract;
+});
+
 test('dynamic markup wires every OCR review control uniquely with accessible status', () => {
   const html = fs.readFileSync('index.html', 'utf8');
   const lab = fs.readFileSync('consumer-rules.js', 'utf8');

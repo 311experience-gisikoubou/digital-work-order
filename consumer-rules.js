@@ -24,6 +24,14 @@
   let paperWorkOrderFile = null;
   let resetPaperWorkOrderOCR = () => {};
 
+  // Debug-only diagnostics gate. Aggregate counts/booleans only; never candidate text. Off by default.
+  function isOcrDebugEnabled() {
+    try {
+      const search = typeof location !== 'undefined' && typeof location.search === 'string' ? location.search : '';
+      return /(?:^|[?&])ocrDebug=1(?:&|$)/.test(search);
+    } catch (_) { return false; }
+  }
+
   function isPlainObject(value) {
     return value !== null && typeof value === 'object' && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
   }
@@ -191,6 +199,17 @@
       <div class="paper-candidate"><label for="paper-deliveryDate">納期の候補</label><input id="paper-deliveryDate" type="date" autocomplete="off"><label><input id="paper-approve-deliveryDate" type="checkbox">納期を承認</label></div>
       <button type="button" class="btn-primary" id="paper-copy">選択した候補を承認してフォームへ反映</button>
     </div>
+${isOcrDebugEnabled() ? `    <div id="paper-ocr-debug" aria-live="polite">
+      <p>診断（診断用。件数のみで文字は含みません）</p>
+      <dl>
+        <dt>OCR行数</dt><dd id="paper-ocr-debug-raw-lines">-</dd>
+        <dt>信頼度80以上の行数</dt><dd id="paper-ocr-debug-confident-lines">-</dd>
+        <dt>ラベル一致数（信頼度フィルタ前）</dt><dd id="paper-ocr-debug-label-hits-before">-</dd>
+        <dt>ラベル一致数（信頼度フィルタ後）</dt><dd id="paper-ocr-debug-label-hits-after">-</dd>
+        <dt>最終候補件数</dt><dd id="paper-ocr-debug-candidate-count">-</dd>
+        <dt>項目別候補有無</dt><dd id="paper-ocr-debug-fields">-</dd>
+      </dl>
+    </div>` : ''}
 `;
 
     labView.insertBefore(panel, labView.firstChild);
@@ -209,10 +228,26 @@
     if (!root.PaperOCR) return;
     const { fields, labels, recognize, copyApproved } = root.PaperOCR;
     let generation = 0, worker = null, busy = false, timer = null;
+    const debugEnabled = isOcrDebugEnabled();
     const status = message => { get('paper-ocr-status').textContent = message; };
     const resetReview = () => {
       get('paper-review').hidden = true;
       for (const key of Object.keys(fields)) { get(`paper-${key}`).value = ''; get(`paper-approve-${key}`).checked = false; }
+    };
+    // Aggregate counts/booleans only; never candidate text. No-op unless ocrDebug=1.
+    const clearDebugPanel = () => {
+      if (!debugEnabled) return;
+      const ids = ['paper-ocr-debug-raw-lines', 'paper-ocr-debug-confident-lines', 'paper-ocr-debug-label-hits-before', 'paper-ocr-debug-label-hits-after', 'paper-ocr-debug-candidate-count', 'paper-ocr-debug-fields'];
+      for (const id of ids) { const el = get(id); if (el) el.textContent = '-'; }
+    };
+    const showDiagnostics = diagnostics => {
+      if (!debugEnabled || !diagnostics) return;
+      get('paper-ocr-debug-raw-lines').textContent = String(diagnostics.rawLineCount);
+      get('paper-ocr-debug-confident-lines').textContent = String(diagnostics.confidentLineCount);
+      get('paper-ocr-debug-label-hits-before').textContent = String(diagnostics.labelHitsBeforeFilter);
+      get('paper-ocr-debug-label-hits-after').textContent = String(diagnostics.labelHitsAfterFilter);
+      get('paper-ocr-debug-candidate-count').textContent = String(diagnostics.candidateCount);
+      get('paper-ocr-debug-fields').textContent = Object.keys(fields).map(key => `${labels[key]}:${diagnostics.fields[key] ? '有' : '無'}`).join(' ');
     };
     const stop = () => {
       generation += 1;
@@ -221,6 +256,7 @@
       busy = false;
       get('paper-ocr-start').disabled = !paperWorkOrderFile;
       resetReview();
+      clearDebugPanel();
     };
     resetPaperWorkOrderOCR = () => {
       stop();
@@ -235,11 +271,13 @@
       status('端末内で読み取り中です。手入力は引き続き利用できます。');
       timer = setTimeout(() => { if (run === generation) { stop(); status('読み取りが時間内に完了しませんでした。画像は保持しています。再試行または手入力してください。'); } }, 120000);
       try {
-        const candidates = await recognize(paperWorkOrderFile, document.baseURI, active => {
+        const outcome = await recognize(paperWorkOrderFile, document.baseURI, active => {
           if (run !== generation) { active.terminate().catch(() => {}); throw new Error('stale-run'); }
           worker = active;
-        });
+        }, debugEnabled ? { diagnostics: true } : undefined);
         if (run !== generation) return;
+        const candidates = debugEnabled ? outcome.candidates : outcome;
+        if (debugEnabled) showDiagnostics(outcome.diagnostics);
         for (const key of Object.keys(fields)) get(`paper-${key}`).value = candidates[key];
         get('paper-review').hidden = false;
         status('未承認の候補です。画像と照合・修正し、反映する項目を選んでください。空欄は読み取れなかった項目です。');

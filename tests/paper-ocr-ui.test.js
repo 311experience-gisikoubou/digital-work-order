@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const keys = ['clinicName', 'doctorName', 'patientName', 'deliveryDate'];
-function setup() {
+function setup(options) {
+  const { search = '' } = options || {};
   const nodes = new Map(), events = {}, revoked = [], created = [];
   class Element {
     constructor() { this.value = ''; this.checked = false; this.hidden = false; this.files = []; this.listeners = {}; this.textContent = ''; }
@@ -25,7 +26,7 @@ function setup() {
   let terminateCount = 0, recognizeResult = async () => ({ data: { blocks: [{ paragraphs: [{ lines: [
     { text: '患者名：架空患者', confidence: 99 }, { text: '納期：2026/10/20', confidence: 99 }
   ] }] }] } });
-  const scope = { Blob, AbortController,
+  const scope = { Blob, AbortController, location: { search },
     createImageBitmap: async () => ({ width: 2, height: 1, close() {} }),
     URL: class extends URL { static createObjectURL(file) { created.push(file); return 'blob:synthetic-' + created.length; } static revokeObjectURL(url) { revoked.push(url); } },
     document: { baseURI: 'http://localhost/app/index.html', getElementById: id => nodes.get(id), createElement: name => name === 'canvas' ? {
@@ -124,4 +125,35 @@ test('invalid image selection preserves Phase 1 clearing semantics', async () =>
   ui.get('paper-work-order-import').files = [new Blob(['synthetic'], { type: 'text/plain' })];
   ui.get('paper-work-order-import').fire('change');
   assert.equal(ui.get('paper-work-order-preview-wrap').hidden, true); assert.equal(ui.get('paper-patientName').value, '');
+});
+
+test('diagnostic UI is opt-in and shows aggregate-only counts', async () => {
+  const normal = setup();
+  assert.equal(normal.get('paper-ocr-debug'), undefined);
+  const ui = setup({ search: '?ocrDebug=1' });
+  ui.select();
+  await ui.get('paper-ocr-start').click();
+  assert.equal(ui.get('paper-ocr-debug-raw-lines').textContent, '2');
+  assert.equal(ui.get('paper-ocr-debug-confident-lines').textContent, '2');
+  assert.equal(ui.get('paper-ocr-debug-label-hits-before').textContent, '2');
+  assert.equal(ui.get('paper-ocr-debug-label-hits-after').textContent, '2');
+  assert.equal(ui.get('paper-ocr-debug-candidate-count').textContent, '2');
+  const fields = ui.get('paper-ocr-debug-fields').textContent;
+  assert.match(fields, /患者名:有/); assert.match(fields, /納期:有/);
+  const diagnosticText = [fields, ui.get('paper-ocr-debug-raw-lines').textContent,
+    ui.get('paper-ocr-debug-confident-lines').textContent].join(' ');
+  assert.doesNotMatch(diagnosticText, /架空患者|2026\/10\/20|2026-10-20/);
+});
+
+test('diagnostics reset on new run, cancel, replacement, discard and pagehide', async () => {
+  const ui = setup({ search: '?ocrDebug=1' });
+  const raw = () => ui.get('paper-ocr-debug-raw-lines').textContent;
+  ui.select(); await ui.get('paper-ocr-start').click(); assert.equal(raw(), '2');
+  ui.get('paper-cancel').click(); assert.equal(raw(), '-');
+  ui.select(); await ui.get('paper-ocr-start').click(); assert.equal(raw(), '2');
+  ui.select(); assert.equal(raw(), '-');
+  await ui.get('paper-ocr-start').click(); assert.equal(raw(), '2');
+  ui.get('paper-work-order-discard').click(); assert.equal(raw(), '-');
+  ui.select(); await ui.get('paper-ocr-start').click(); assert.equal(raw(), '2');
+  ui.events.pagehide(); assert.equal(raw(), '-');
 });
