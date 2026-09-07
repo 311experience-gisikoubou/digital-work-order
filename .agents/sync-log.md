@@ -229,3 +229,12 @@
 - Repository-local files, product/runtime/dependency/data paths preserved.
 - REAL_DEVICE: NOT_REQUIRED.
 - Merge: explicit user authorization required; do not merge as part of synchronization preparation.
+
+## 2026-09-08 - ai-dev-foundation 1.0.0-dev.47
+- source commit: c78a61a77023983cf7e2e15f921b6f68568763ec
+- trusted previous foundation: 1.0.0-dev.46 (9e3486d3b9ef37dff33d7c2f0a6beb3620b64e6b)
+- target branch: chore/foundation-dev47-sync
+- method: fail-closed foundation-update.mjs
+- post-update foundation-sync-audit: PASS
+- product/runtime/data changes: none; repository-local files preserved
+- merge: requires fresh explicit human authorization
