@@ -172,8 +172,8 @@ function fakeBrowser() {
 
 test('OCR working dimensions are bounded without upscaling or losing aspect ratio', () => {
   const size = globalThis.PaperOCR.workingSize;
-  assert.deepEqual(size(4032, 3024), { width: 1600, height: 1200 });
-  assert.deepEqual(size(3024, 4032), { width: 1200, height: 1600 });
+  assert.deepEqual(size(4032, 3024), { width: 2400, height: 1800 });
+  assert.deepEqual(size(3024, 4032), { width: 1800, height: 2400 });
   assert.deepEqual(size(1050, 525), { width: 1050, height: 525 });
   for (const value of [0, -1, NaN, Infinity, 1.5]) assert.throws(() => size(value, 1));
 });
@@ -196,7 +196,7 @@ test('preprocessing uses smoothed bounded canvas and releases bitmap, pixels and
   vm.runInNewContext(fs.readFileSync('paper-ocr.js', 'utf8'), browser);
   const blob = await browser.PaperOCR.preprocess(new Blob());
   assert.equal(await blob.text(), 'processed');
-  assert.deepEqual(browser.context.draw.slice(1), [0, 0, 1600, 800]);
+  assert.deepEqual(browser.context.draw.slice(1), [0, 0, 2400, 1200]);
   assert.equal(browser.context.imageSmoothingEnabled, true);
   assert.equal(browser.context.imageSmoothingQuality, 'high');
   assert.equal(browser.bitmap.closed, 1);

@@ -15,7 +15,7 @@ Two iPad Safari camera-photo checks were completed using only the prepared ficti
 In both runs, no incorrect candidate was automatically applied and human approval remained required.
 No real patient, clinic or order data was used.
 
-The test source was a computer display rather than paper. Display photography can introduce moire and is not representative of the intended paper-work-order workflow. A third blind tuning attempt is therefore blocked.
+A third diagnostic check used a printed fictional sheet. It returned 9 raw OCR lines, 1 line with confidence >=80, 1 exact known-label hit before the confidence filter, 0 exact known-label hits after the filter, and 0 final candidates. All four candidate-present flags were false. Safety/fail-closed remained PASS. This isolates the current failure primarily to OCR confidence/recognition quality rather than the downstream exact-label/value parser.
 
 ## Forced reflection / current hypothesis
 
@@ -49,7 +49,7 @@ Diagnostics reset on a new OCR run, cancel, image replacement, explicit discard 
 The existing parser still requires exact known labels plus colon, confidence >= 80, duplicate rejection including empty occurrences, complete valid dates and the existing four-field scope.
 No fuzzy correction, label repair, value inference, threshold relaxation, automatic approval or additional OCR pass was added.
 
-Preprocessing remains browser-local: createImageBitmap decode, bounded smoothing to a maximum 1600-pixel long edge without upscaling, white alpha composite, grayscale conversion and capped contrast normalization (gain <= 1.5). No thresholding or sharpening is used.
+Preprocessing remains browser-local: createImageBitmap decode, bounded smoothing to a maximum 2400-pixel long edge without upscaling, white alpha composite, grayscale conversion and capped contrast normalization (gain <= 1.5). The 1600->2400 change is the single follow-up experiment justified by the printed-paper diagnostic; confidence >=80 remains unchanged. No thresholding or sharpening is used.
 One temporary PNG is passed to one OCR run.
 Bitmap, pixel-array, canvas and processed-Blob references are released through the existing cleanup paths; this is reference release, not a claim of physical secure erasure.
 

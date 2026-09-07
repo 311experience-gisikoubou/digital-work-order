@@ -58,7 +58,7 @@
   }
   function workingSize(width, height) {
     if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) throw new Error('invalid-image-size');
-    const scale = Math.min(1, 1600 / Math.max(width, height));
+    const scale = Math.min(1, 2400 / Math.max(width, height));
     return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
   }
   function normalizePixels(data) {
