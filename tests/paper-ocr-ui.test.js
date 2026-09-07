@@ -20,13 +20,14 @@ function setup() {
     }
     removeAttribute(name) { delete this[name]; }
   }
-  const ids = ['view-lab', 'clinic-name', 'doctor-name', 'patient-name', 'delivery-date'];
+  const ids = ['view-lab', 'view-clinic', 'clinic-name', 'doctor-name', 'patient-name', 'delivery-date'];
   ids.forEach(id => nodes.set(id, new Element()));
   let terminateCount = 0, recognizeResult = async () => ({ data: { blocks: [{ paragraphs: [{ lines: [
     { text: '患者名：架空患者', confidence: 99 }, { text: '納期：2026/10/20', confidence: 99 }
   ] }] }] } });
+  const clinicTab = new Element(); clinicTab.clickCount = 0; clinicTab.addEventListener('click', () => { clinicTab.clickCount += 1; });
   const scope = { Blob, URL: class extends URL { static createObjectURL(file) { created.push(file); return 'blob:synthetic-' + created.length; } static revokeObjectURL(url) { revoked.push(url); } },
-    document: { baseURI: 'http://localhost/app/index.html', getElementById: id => nodes.get(id), createElement: () => new Element() },
+    document: { baseURI: 'http://localhost/app/index.html', getElementById: id => nodes.get(id), createElement: () => new Element(), querySelector: selector => selector === '.tab-btn[data-tab=\"clinic\"]' ? clinicTab : null },
     addEventListener: (name, callback) => { events[name] = callback; },
     setTimeout: callback => { events.timeout = callback; return 1; }, clearTimeout() {},
     Tesseract: { createWorker: async () => ({ recognize: () => recognizeResult(), terminate: async () => { terminateCount++; } }) } };
@@ -38,7 +39,7 @@ function setup() {
     const file = new Blob(['synthetic'], { type: 'image/png' }); file.name = 'synthetic.png';
     get('paper-work-order-import').files = [file]; get('paper-work-order-import').fire('change');
   };
-  return { get, select, events, revoked, created, init: scope.ConsumerRuleConsumer.init, setRecognition: fn => { recognizeResult = fn; }, terminated: () => terminateCount };
+  return { get, select, events, revoked, created, clinicTab, init: scope.ConsumerRuleConsumer.init, setRecognition: fn => { recognizeResult = fn; }, terminated: () => terminateCount };
 }
 test('one Phase 1 intake mounts once with original camera, preview and discard IDs', () => {
   const ui = setup(); const panel = ui.get('paper-work-order-import-panel'); ui.init();
@@ -119,4 +120,33 @@ test('invalid image selection preserves Phase 1 clearing semantics', async () =>
   ui.get('paper-work-order-import').files = [new Blob(['synthetic'], { type: 'text/plain' })];
   ui.get('paper-work-order-import').fire('change');
   assert.equal(ui.get('paper-work-order-preview-wrap').hidden, true); assert.equal(ui.get('paper-patientName').value, '');
+});
+
+test('paper reference reuses the same object URL and follows lifecycle into existing clinic view', () => {
+  const ui = setup();
+  assert.equal(ui.get('paper-work-order-reference-panel').hidden, true);
+  ui.select();
+  assert.equal(ui.get('paper-work-order-reference-panel').hidden, false);
+  assert.equal(ui.get('paper-work-order-reference-image').src, 'blob:synthetic-1');
+  assert.equal(ui.get('paper-work-order-reference-input').disabled, false);
+  ui.get('paper-work-order-reference-input').click();
+  assert.equal(ui.clinicTab.clickCount, 1);
+  assert.equal(ui.get('paper-work-order-reference-details').open, true);
+  ui.select();
+  assert.equal(ui.get('paper-work-order-reference-image').src, 'blob:synthetic-2');
+  assert.deepEqual(ui.revoked, ['blob:synthetic-1']);
+  ui.get('paper-work-order-discard').click();
+  assert.equal(ui.get('paper-work-order-reference-panel').hidden, true);
+  assert.equal(ui.get('paper-work-order-reference-image').src, undefined);
+  ui.select(); ui.events.pagehide();
+  assert.equal(ui.get('paper-work-order-reference-panel').hidden, true);
+  assert.equal(ui.get('paper-work-order-reference-image').src, undefined);
+});
+
+test('paper reference CSS is sticky on landscape and compact/collapsible on narrow layouts', () => {
+  const css = fs.readFileSync('style.css', 'utf8');
+  assert.match(css, /paper-work-order-reference[^{]*\{[^}]*position: sticky/s);
+  assert.match(css, /orientation: landscape/);
+  assert.match(css, /orientation: portrait/);
+  assert.match(fs.readFileSync('consumer-rules.js', 'utf8'), /<details id=\"paper-work-order-reference-details\" open>/);
 });

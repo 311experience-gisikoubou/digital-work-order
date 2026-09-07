@@ -784,3 +784,18 @@ body.edit-active .tooth-num { display:none; }
 .paper-candidate label { display: flex; align-items: center; gap: 8px; min-height: 44px; }
 .paper-candidate input[type="checkbox"] { width: 24px; height: 24px; }
 @media print { .paper-intake { display: none; } }
+
+/* ===== 紙指示書参照UI（Issue #45） ===== */
+.paper-work-order-reference { margin: 16px 20px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 10px; background: #fff; }
+.paper-work-order-reference[hidden] { display: none; }
+.paper-work-order-reference summary { cursor: pointer; font-weight: 700; color: var(--text-primary); min-height: 44px; display: flex; align-items: center; }
+.paper-work-order-reference img { display: block; width: 100%; max-height: 42vh; object-fit: contain; background: #fff; border: 1px solid var(--border-color); border-radius: var(--radius-sm); }
+@media (min-width: 900px) and (orientation: landscape) {
+  .paper-work-order-reference { position: sticky; top: 76px; z-index: 4; float: right; width: min(38vw, 420px); margin-left: 18px; }
+  .paper-work-order-reference img { max-height: calc(100vh - 160px); }
+}
+@media (max-width: 899px), (orientation: portrait) {
+  .paper-work-order-reference { float: none; width: auto; position: static; }
+  .paper-work-order-reference img { max-height: 36vh; }
+}
+@media print { .paper-work-order-reference { display: none !important; } }

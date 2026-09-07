@@ -119,6 +119,24 @@
     paperWorkOrderObjectUrl = '';
   }
 
+  function syncPaperWorkOrderReference() {
+    const panel = document.getElementById('paper-work-order-reference-panel');
+    const image = document.getElementById('paper-work-order-reference-image');
+    const action = document.getElementById('paper-work-order-reference-input');
+    const hasImage = Boolean(paperWorkOrderFile && paperWorkOrderObjectUrl);
+    if (image) { if (hasImage) image.src = paperWorkOrderObjectUrl; else image.removeAttribute('src'); }
+    if (panel) panel.hidden = !hasImage;
+    if (action) action.disabled = !hasImage;
+  }
+
+  function openClinicInputWithPaperReference() {
+    if (!paperWorkOrderFile || !paperWorkOrderObjectUrl) return;
+    const details = document.getElementById('paper-work-order-reference-details');
+    if (details) details.open = true;
+    const clinicTab = document.querySelector && document.querySelector('.tab-btn[data-tab="clinic"]');
+    if (clinicTab) clinicTab.click();
+  }
+
   function clearPaperWorkOrderPreview() {
     paperWorkOrderFile = null;
     resetPaperWorkOrderOCR();
@@ -133,6 +151,7 @@
     if (filename) filename.textContent = '';
     if (status) status.textContent = '画像は端末内でのみ一時表示し、保存・外部送信しません。';
     if (input) input.value = '';
+    syncPaperWorkOrderReference();
   }
 
   function showPaperWorkOrderPreview(file) {
@@ -157,6 +176,16 @@
     if (filename) filename.textContent = file.name || '撮影した画像';
     if (status) status.textContent = '端末内で一時表示中です。読み取りは「端末内で読み取る」から開始できます。';
     if (input) input.value = '';
+    syncPaperWorkOrderReference();
+  }
+
+  function initPaperWorkOrderReference() {
+    const clinicView = document.getElementById('view-clinic');
+    if (!clinicView || document.getElementById('paper-work-order-reference-panel')) return;
+    const panel = document.createElement('section');
+    panel.id = 'paper-work-order-reference-panel'; panel.className = 'paper-work-order-reference'; panel.hidden = true;
+    panel.innerHTML = `<details id="paper-work-order-reference-details" open><summary>紙指示書を参照</summary><img id="paper-work-order-reference-image" alt="入力中に参照する紙指示書"></details>`;
+    clinicView.insertBefore(panel, clinicView.firstChild);
   }
 
   function initPaperWorkOrderImport() {
@@ -177,6 +206,7 @@
       <div id="paper-work-order-preview-wrap" hidden style="margin-top:12px;">
         <div id="paper-work-order-filename" style="font-size:13px;font-weight:700;margin-bottom:8px;word-break:break-all;"></div>
         <img id="paper-work-order-preview" alt="取り込んだ紙指示書のプレビュー" style="display:block;max-width:100%;max-height:70vh;border:1px solid var(--border-color);border-radius:var(--radius-sm);object-fit:contain;background:#fff;">
+        <button type="button" class="btn-primary" id="paper-work-order-reference-input" disabled>画像を見ながら入力</button>
         <button type="button" class="btn-secondary" id="paper-work-order-discard" style="margin-top:10px;">画像を破棄</button>
       </div>
       <p>OCR試行版：架空のテスト画像のみ使用してください。</p>
@@ -198,9 +228,11 @@
     const input = document.getElementById('paper-work-order-import');
     const button = document.getElementById('paper-work-order-import-button');
     const discard = document.getElementById('paper-work-order-discard');
+    const referenceInput = document.getElementById('paper-work-order-reference-input');
     button.addEventListener('click', () => input.click());
     input.addEventListener('change', () => showPaperWorkOrderPreview(input.files && input.files[0]));
     discard.addEventListener('click', clearPaperWorkOrderPreview);
+    referenceInput.addEventListener('click', openClinicInputWithPaperReference);
     initPaperWorkOrderOCR();
   }
 
@@ -284,6 +316,7 @@
 
   function init() {
     initConsumerRules();
+    initPaperWorkOrderReference();
     initPaperWorkOrderImport();
   }
 

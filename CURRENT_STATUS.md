@@ -4,24 +4,24 @@
 仕様書・履歴・議事録を複製せず、現在の作業状態だけを保ちます。
 
 - Status: `ACTIVE`
-- Current phase: `paper work order Phase 2 / Issue #39 final audit complete`
-- Current branch: `feat/paper-ocr-four-field-candidates`
-- Current PR: `#40 (Ready)`
-- Last completed gate: `PR #40 final-pr-audit PASS; 28 automated tests PASS; Edge/iPad Safari PASS`
-- Current blocker: `NONE`
-- Next action: `explicit merge authorization`
-- PC-free work: `merge authorization待ち`
-- PC-required work: `NONE before merge decision`
-- User action required: `YES（PR #40のmerge判断のみ）`
+- Current phase: `paper work order / Issue #45 manual-entry reference UI implementation`
+- Current branch: `feat/paper-image-reference-input`
+- Current PR: `pending (Draft PR after local audit)`
+- Last completed gate: `Issue #45 implementation + 30/30 relevant automated tests PASS; git diff --check PASS`
+- Current blocker: `NONE before iPad Safari layout check`
+- Next action: `final local audit -> commit/push -> Draft PR -> iPad Safari landscape/portrait check`
+- PC-free work: `Draft PR metadata/current-head audit after push`
+- PC-required work: `iPad Safari reference UI real-device check`
+- User action required: `NO until iPad Safari check is prepared`
 - Merge authorized: `NO`
 - Last updated: `2026-09-07`
 
 ## Optional short notes
 
-- Issue #39の対象は一時画像→ローカルOCR→4項目候補→明示承認→フォームコピー/照合。実データ利用・画像自動破棄は未承認/未実装。
-- 現在地点の正本は `CURRENT_STATUS.md`。`docs/session-handoff.md` は過去のhandoff文脈として保持し、現在地点の正本には使わない。
-- 今回の実装・検証の詳細は `docs/issue39-verification.md`。Git操作とPR作成はSupervisorへ委任済み。
-- Foundation同期の証拠は同期PRに残し、statusへ詳細を複製しない。
+- PR #40 / Issue #39はmerge済み。ブラウザ内OCRは補助機能として維持する。
+- PR #42 / Issue #41の精度改善実験はmergeせず終了。手入力を主経路とする。
+- Issue #45は既存Object URLを再利用し、既存医院側フォームへ紙画像参照UIだけを追加する。
+- 保存形式・PDF・歯式・clasp・drawing・collectFormData()は変更しない。
 
 ## Rules
 

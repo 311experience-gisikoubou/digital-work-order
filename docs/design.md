@@ -187,7 +187,7 @@
 
 ## 14. 紙指示書のローカルデータ化（Phase 2設計 / Issue #37）
 
-本節の承認済み境界は `OPERATIONAL`、必要な強制レベルは `TECHNICAL_ENFORCEMENT_REQUIRED`。Issue #39でOCR・候補確認・フォーム反映/照合を実装した（14.5）。実機検証は未完了で、実データ用途の準備完了とは扱わない。画像自動破棄は未実装。
+本節の承認済み境界は `OPERATIONAL`、必要な強制レベルは `TECHNICAL_ENFORCEMENT_REQUIRED`。Issue #39でOCR・候補確認・フォーム反映/照合を実装した（14.5）し、iPad Safariの架空データ実機確認までPASS。後続のIssue #41では精度改善を試したが実機で意味のある候補改善を得られず、PR #42はmergeしなかった。OCRは補助機能とし、紙画像を見ながらの手入力を主経路とする。画像自動破棄は未実装。
 
 ### 14.1 初期の処理・通信境界
 
@@ -265,3 +265,13 @@ Issue #37の設計PRにはOCRライブラリ・モデル・依存関係・アプ
 - OCR失敗・候補確認キャンセル・照合失敗・成功のいずれでも画像を保持する。画像差し替え・明示破棄・pagehide/beforeunloadではObject URLとFile参照を解放し、候補を消去して古いOCR結果を無効にする。画像でない選択や空のchangeイベントはPhase 1と同じくプレビューをクリアする。120秒タイムアウトを設け、失敗しても手入力を妨げない。
 - 承認前の非書き込み、選択項目限定コピー/照合、OCR資産の取得制限はコードと自動テストで `ENFORCED`。Edge 152の架空fixture確認では外部ホスト解決を遮断したままOCRが完走し、OCR前後でlocalStorage / sessionStorage / IndexedDB / Cache Storageに増減がなく、同梱worker/core/日本語モデルだけをローカル取得した。2026-09-07のiPad Safari架空データ実機確認でもOCR起動、候補表示、未承認非反映、明示承認/照合、キャンセル、破棄、再読込時の非復元を確認した。実データ利用はmerge後の承認済み配備だけを対象とし、一時テストURLでは行わない。
 - 検証手順・架空fixture・実機確認結果は `docs/issue39-verification.md`。画像自動破棄、永続化/復元、他の候補項目は追加しない。
+
+### 14.6 Issue #45 紙画像参照つき手入力UI
+
+- OCRはbest-effortの補助とし、紙指示書画像を見ながら既存フォームへ手入力する経路を主とする。
+- 受注管理の既存紙画像取り込みに「画像を見ながら入力」を追加し、既存の医院側入力タブへ移動する。フォームは複製しない。
+- 医院側入力には動的な参照パネルを1つだけ追加し、Phase 1から継続する同一のObject URLを参照する。新しいFileコピー、Object URL、localStorage / IndexedDB / Cache Storage / state.orders保存は追加しない。
+- 画像差し替え・明示破棄・pagehide/beforeunloadは既存ライフサイクルを正本とし、参照パネルのsrc/表示も同時に更新・消去する。
+- iPad横向きでは参照パネルをsticky表示し、縦向き/狭い画面では通常フローに戻す。details/summaryで折りたたみ可能とする。印刷時は参照パネルを出さない。
+- OCRエンジン/パーサ/信頼度、collectFormData()、保存形式、PDF、歯式、clasp、drawing、カレンダー/料金は変更しない。
+- 自動テストでは同一Object URL再利用、既存フォームへのナビゲーション、差し替え/破棄/pagehide時の参照消去、横/縦CSSを確認する。iPad Safariの見た目・操作性は別途実機確認する。
