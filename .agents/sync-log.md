@@ -217,3 +217,15 @@
 - Repository-local files preserved: `AGENTS.local.md`, target-only skills/wrappers/settings, application code, business specifications, dependencies, runtime and data paths.
 - Product/runtime/data change: none; REAL_DEVICE not required.
 - Merge: explicit user authorization required; do not merge as part of synchronization preparation.
+
+## 2026-09-07 — ai-dev-foundation 1.0.0-dev.46
+
+- Source commit: 9e3486d3b9ef37dff33d7c2f0a6beb3620b64e6b
+- Previous trusted source: 1.0.0-dev.45 @ d2c9c88bb88776cc798f252b5177ebdbf13b779
+- Target branch: chore/foundation-dev46-sync
+- Sync: existing job-fit routing updated so newly verified AI/CLI/connector/execution routes automatically enter the candidate set.
+- Method: fail-closed oundation-update.mjs dev.45 → dev.46.
+- Verification: post-update oundation-sync-audit PASS / FOUNDATION_SYNC_MATCH; canonical missing/stale 0/0; git diff --check PASS.
+- Repository-local files, product/runtime/dependency/data paths preserved.
+- REAL_DEVICE: NOT_REQUIRED.
+- Merge: explicit user authorization required; do not merge as part of synchronization preparation.

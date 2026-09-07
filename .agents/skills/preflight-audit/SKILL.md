@@ -22,6 +22,7 @@ description: Use before implementation, fixes, refactoring, UI/backend/design ch
 
 At job start, and whenever the execution AI or route may materially change, select the execution/review route as a technical preflight decision rather than a fixed historical assignment.
 
+- Enumerate currently available AI, CLI, connector, and execution routes. Any newly installed/connected route whose availability and required permissions can be verified enters the normal candidate set automatically; adding a provider/tool does not require a provider-specific common-rule edit. Installation or connection alone never grants sensitive-data access, production authority, paid-use approval, or merge authority.
 - First apply hard constraints: required permissions/tools, execution environment, data/privacy boundary, safety, required quality/capability, context continuity, and independent-review separation.
 - Then compare job fit across the AI/routes that remain viable. Typical strengths may inform the choice, but AI names alone do not permanently own categories such as implementation, testing, Git work, code reading, design review, or audit.
 - When reliable current signals are available, include usage, remaining quota/capacity, expected processing load/time, and expected incremental cost. Do not invent or infer remaining quota from stale or missing evidence.
