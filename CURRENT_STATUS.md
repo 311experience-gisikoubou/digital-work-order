@@ -4,15 +4,15 @@
 仕様書・履歴・議事録を複製せず、現在の作業状態だけを保ちます。
 
 - Status: `ACTIVE`
-- Current phase: `paper work order Phase 2 / Issue #39 final audit`
+- Current phase: `paper work order Phase 2 / Issue #39 final audit complete`
 - Current branch: `feat/paper-ocr-four-field-candidates`
-- Current PR: `#40 (Draft)`
-- Last completed gate: `28 automated tests PASS; Edge browser PASS; iPad Safari synthetic real-device PASS`
-- Current blocker: `NONE for PR review; real data prohibited on temporary test URL and before approved merge/deployment`
-- Next action: `record iPad PASS → final current-head audit → Ready for review if PASS`
-- PC-free work: `PR #40 metadata/diff audit`
+- Current PR: `#40 (Ready)`
+- Last completed gate: `PR #40 final-pr-audit PASS; 28 automated tests PASS; Edge/iPad Safari PASS`
+- Current blocker: `NONE`
+- Next action: `explicit merge authorization`
+- PC-free work: `merge authorization待ち`
 - PC-required work: `NONE before merge decision`
-- User action required: `NO until merge decision`
+- User action required: `YES（PR #40のmerge判断のみ）`
 - Merge authorized: `NO`
 - Last updated: `2026-09-07`
 
