@@ -18,6 +18,21 @@ description: Use before implementation, fixes, refactoring, UI/backend/design ch
 - Multi-step or long-running AI work must keep a non-engineer user oriented on current stage, meaning, next step, and whether user action is needed; do not make the user infer progress from technical logs.
 - Important rules must be classified as `DECLARATION_ONLY`, `OPERATIONAL`, or `TECHNICAL_ENFORCEMENT_REQUIRED`. Do not claim enforcement that does not exist.
 
+## Existing Solution / OSS Reuse Check
+
+Before substantial custom implementation or adoption of a new dependency/service, determine whether the goal can be met more safely and simply by existing approved mechanisms or maintained reusable software.
+
+- Trigger this check for a non-trivial new capability, custom algorithm/tooling, or new dependency/service where reusable components plausibly exist. A tightly scoped bug fix, tiny low-risk helper, or change fully constrained to an existing implementation may be `NOT_APPLICABLE`; do not perform ceremonial searches that add no decision value.
+- Search existing repository/platform capabilities first. Then, when external reusable options plausibly exist, research credible OSS/packages through sources such as GitHub and official package ecosystems using abstract technical requirements only. Never put protected/business/patient data, secrets, private filenames, or proprietary source snippets into search queries.
+- When meaningful candidates exist, compare roughly 3-5 credible options. If fewer credible candidates exist, compare the real set rather than padding the list.
+- Compare at least: requirements fit; license clarity/compatibility; local/offline execution; external communication/telemetry; security/privacy and supply-chain risk; target OS/Windows support where relevant; maintenance/release health; dependency/build/runtime weight; API/stability fit; and upgrade/recovery/removal burden.
+- Prefer an existing approved mechanism or maintained OSS reuse/composition when it satisfies the safety floor and is simpler over its lifecycle than custom code. Implement only the missing portion where practical.
+- Do not adopt software merely because it exists or is popular. Unknown/unclear licensing, unsafe or unknown data egress, unsupported target environments, abandoned maintenance, excessive dependency weight, poor recovery/removal characteristics, or unresolved security risk can disqualify a candidate.
+- Do not add a large dependency to avoid a small, low-risk implementation. Reuse-first is subordinate to the same Simple-is-Best, safety, privacy, lifecycle, and maintainability floor as custom implementation.
+- OSS research is evidence for the technical adoption decision, not adoption authorization. Existing recurring-cost, external-data-route, lifecycle-responsibility, workflow-impact, business-policy, and other human approval boundaries remain unchanged.
+
+Record the result as `REUSE_EXISTING`, `ADOPT_OSS`, `COMPOSE_EXISTING`, `CUSTOM_MINIMAL`, or `NOT_APPLICABLE`, with the decisive reason. This is an `OPERATIONAL` preflight requirement; do not claim that every repository mechanically enforces the external research step unless a separate executable gate proves it.
+
 ## AI Route Selection
 
 At job start, and whenever the execution AI or route may materially change, select the execution/review route as a technical preflight decision rather than a fixed historical assignment.
@@ -31,6 +46,26 @@ At job start, and whenever the execution AI or route may materially change, sele
 - If usage/remaining-capacity evidence is unavailable, do not claim the current allocation is optimal. Use job fit plus known safety/permission/cost facts and record the usage signal as unavailable rather than guessing.
 - Never reduce required safety, quality, independent review, data protection, or human approval to save quota or cost. A new recurring charge, subscription, paid tier, or changed cost commitment remains a genuine human value/ownership gate.
 - Do not ask a non-engineer user to choose between Codex, Claude, or another available AI when the selection can be resolved technically from the evidence above.
+
+### Machine-readable capacity evidence
+
+When `.agents/skills/preflight-audit/ai-capacity-observer.mjs` is present and the local execution environment can safely run Node.js, use it before making a current capacity/quota claim about Codex or Claude:
+
+```text
+node .agents/skills/preflight-audit/ai-capacity-observer.mjs --pretty
+```
+
+- Treat only provider fields marked `AVAILABLE` as measured capacity evidence. `UNAVAILABLE` means exactly unavailable; do not estimate or backfill it from local activity, elapsed time, subscription labels, or another provider's usage.
+- The observer intentionally emits only routing-relevant safe fields. It must not emit account IDs, organization IDs/names, email addresses, credential material, credit identifiers/balances, prompts, protected filenames, or business/patient data.
+- A `PARTIAL` capacity comparison is useful evidence but is not proof that the chosen cross-provider allocation is globally optimal. Continue to use job fit, safety, permissions, context, known cost, and independent-review needs for providers whose remaining capacity is unavailable.
+- Failure to observe one provider does not make another provider mandatory. Record the missing signal and continue only within the existing safety/cost/quality boundaries.
+
+Observer self-test:
+
+```text
+node .agents/skills/preflight-audit/ai-capacity-observer-selftest.mjs .agents/skills/preflight-audit/ai-capacity-observer.mjs
+```
+
 ## Execution / Evidence Location
 
 Before repository checks, identify where the proposed or audited change actually exists.
@@ -405,6 +440,7 @@ Report plainly:
 - `PROCEED` / `STOP` / `UNKNOWN`
 - execution/evidence source(s): local / remote-only / mixed
 - work ownership / duplicate-implementation status
+- existing-solution / OSS-reuse check status and decision (REUSE_EXISTING / ADOPT_OSS / COMPOSE_EXISTING / CUSTOM_MINIMAL / NOT_APPLICABLE)
 - overall project progress when relevant
 - estimated human operation time and manual-step load
 - work impact and safe stopping point
