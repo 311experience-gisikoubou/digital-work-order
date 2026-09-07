@@ -4,15 +4,15 @@
 仕様書・履歴・議事録を複製せず、現在の作業状態だけを保ちます。
 
 - Status: `ACTIVE`
-- Current phase: `paper work order Phase 2 / Issue #41 local verification complete`
+- Current phase: `paper work order Phase 2 / Issue #41 preprocessing implemented + automated verification PASS`
 - Current branch: `feat/paper-ocr-camera-robustness`
 - Current PR: `#42 (Draft)`
-- Last completed gate: `Issue #41: 34 automated tests PASS / 0 FAIL / 0 skipped / 0 cancelled; 3 JS syntax checks PASS; host branch/scope/git diff --check audit PASS`
-- Current blocker: `Actual iPad camera effectiveness unverified; PR #42 Draft`
-- Next action: `prepare synthetic iPad camera verification ? 2 real-device checks ? final current-head audit`
+- Last completed gate: `Host local branch/scope/diff/test/security audit PASS; 42/42 automated tests PASS / 0 FAIL / 0 skipped / 0 cancelled; 4 JS syntax checks PASS; operation preflight PROCEED`
+- Current blocker: `iPad camera retest pending; first attempt effectiveness NG (all four blank), safety PASS`
+- Next action: `After push: prepared iPad camera retest, then final current-head PR audit`
 - PC-free work: `Review docs/issue41-verification.md`
-- PC-required work: `Issue #41 synthetic iPad camera verification (not started)`
-- User action required: `NO for this local task`
+- PC-required work: `Prepared iPad camera retest`
+- User action required: `NO until the prepared iPad camera retest`
 - Merge authorized: `NO`
 - Last updated: `2026-09-07`
 
@@ -20,7 +20,7 @@
 
 - Issue #41 implementation, fixture recipe and local evidence: `docs/issue41-verification.md`.
 - Parser constraints and approval/privacy behavior remain conservative; no real-data or camera success claim.
-- No Git commands or PR operations were performed.
+- PR #42 remains Draft; merge is not authorized.
 
 ## Rules
 

@@ -5,7 +5,45 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
+const zlib = require('node:zlib');
 require('../paper-ocr.js');
+
+// Node has no browser image APIs. This fixture-only adapter decodes the existing
+// RGBA PNGs and encodes BMP using built-ins; it does NOT verify browser resampling.
+function fixturePixels(bytes) {
+  assert.equal(bytes[24], 8); assert.equal(bytes[25], 6); assert.equal(bytes[28], 0);
+  const width = bytes.readUInt32BE(16), height = bytes.readUInt32BE(20), chunks = [];
+  for (let offset = 8; offset < bytes.length;) {
+    const length = bytes.readUInt32BE(offset);
+    if (bytes.toString('ascii', offset + 4, offset + 8) === 'IDAT') chunks.push(bytes.subarray(offset + 8, offset + 8 + length));
+    offset += length + 12;
+  }
+  const raw = zlib.inflateSync(Buffer.concat(chunks)), stride = width * 4;
+  assert.equal(raw.length, (stride + 1) * height);
+  const pixels = new Uint8ClampedArray(stride * height);
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)]; assert.ok(filter <= 4);
+    for (let x = 0; x < stride; x++) {
+      const i = y * stride + x, a = x >= 4 ? pixels[i - 4] : 0;
+      const b = y ? pixels[i - stride] : 0, c = y && x >= 4 ? pixels[i - stride - 4] : 0;
+      const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+      const prediction = [0, a, b, Math.floor((a + b) / 2), pa <= pb && pa <= pc ? a : pb <= pc ? b : c][filter];
+      pixels[i] = (raw[y * (stride + 1) + 1 + x] + prediction) & 255;
+    }
+  }
+  return { width, height, pixels };
+}
+function bitmapBytes(width, height, pixels) {
+  const stride = Math.ceil(width * 3 / 4) * 4, bytes = Buffer.alloc(54 + stride * height);
+  bytes.write('BM'); bytes.writeUInt32LE(bytes.length, 2); bytes.writeUInt32LE(54, 10);
+  bytes.writeUInt32LE(40, 14); bytes.writeInt32LE(width, 18); bytes.writeInt32LE(height, 22);
+  bytes.writeUInt16LE(1, 26); bytes.writeUInt16LE(24, 28);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const from = (y * width + x) * 4, to = 54 + (height - 1 - y) * stride + x * 3;
+    bytes[to] = pixels[from + 2]; bytes[to + 1] = pixels[from + 1]; bytes[to + 2] = pixels[from];
+  }
+  return bytes;
+}
 test('shipped browser worker recognizes synthetic PNG with local-only assets and zero storage', async (t) => {
   const origin = 'http://localhost/app/';
   const fetched = [], imported = [], jobs = new Map();
@@ -68,6 +106,41 @@ test('shipped browser worker recognizes synthetic PNG with local-only assets and
       assert.equal(values.deliveryDate, '2026-10-20');
       assert.ok(['', '架空医師'].includes(values.doctorName));
       assert.ok(['', '架空患者'].includes(values.patientName));
+      t.diagnostic(variant + ' original non-empty fields: ' + Object.keys(values).filter(key => values[key]).join(', '));
+    });
+    await t.test('production preprocessing + shipped OCR: ' + variant, async () => {
+      const bytes = fs.readFileSync(`tests/fixtures/paper-order-camera-${variant}.png`);
+      const fixture = fixturePixels(bytes);
+      let closed = 0, terminated = 0, recognized = 0;
+      const pixels = fixture.pixels;
+      const canvas = { width: 0, height: 0,
+        getContext: () => ({ drawImage(bitmap, x, y, width, height) {
+          assert.equal(width, fixture.width); assert.equal(height, fixture.height);
+        }, getImageData: () => ({ data: pixels }), putImageData() {} }),
+        toBlob: callback => callback(new Blob([bitmapBytes(fixture.width, fixture.height, pixels)], { type: 'image/bmp' })) };
+      const browser = { Blob, URL, AbortController,
+        createImageBitmap: async () => ({ width: fixture.width, height: fixture.height, close() { closed++; } }),
+        document: { createElement: () => canvas },
+        Tesseract: { createWorker: async () => ({
+          recognize: async (blob, options, output) => {
+            recognized++;
+            return { data: await send('recognize', { image: new Uint8Array(await blob.arrayBuffer()), options, output }) };
+          }, terminate: async () => { terminated++; }
+        }) }
+      };
+      for (const key of ['indexedDB', 'localStorage', 'sessionStorage', 'caches', 'fetch', 'XMLHttpRequest']) {
+        Object.defineProperty(browser, key, { get() { throw new Error('Forbidden API: ' + key); } });
+      }
+      vm.runInNewContext(fs.readFileSync('paper-ocr.js', 'utf8'), browser);
+      const values = await browser.PaperOCR.recognize(new Blob([bytes], { type: 'image/png' }), origin, () => {});
+      assert.equal(values.clinicName, '架空テスト歯科');
+      assert.equal(values.deliveryDate, '2026-10-20');
+      assert.equal(values.doctorName, '架空医師');
+      assert.equal(values.patientName, '架空患者');
+      assert.equal(recognized, 1); assert.equal(terminated, 1); assert.equal(closed, 1);
+      assert.equal(canvas.width, 0); assert.equal(canvas.height, 0);
+      assert.ok(pixels.every(value => value === 0));
+      t.diagnostic(variant + ' preprocessed non-empty fields: ' + Object.keys(values).filter(key => values[key]).join(', '));
     });
   }
   assert.equal(fetched.length, 1); assert.equal(fetched[0].options.cache, 'no-store');

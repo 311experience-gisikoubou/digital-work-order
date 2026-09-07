@@ -25,8 +25,13 @@ function setup() {
   let terminateCount = 0, recognizeResult = async () => ({ data: { blocks: [{ paragraphs: [{ lines: [
     { text: '患者名：架空患者', confidence: 99 }, { text: '納期：2026/10/20', confidence: 99 }
   ] }] }] } });
-  const scope = { Blob, URL: class extends URL { static createObjectURL(file) { created.push(file); return 'blob:synthetic-' + created.length; } static revokeObjectURL(url) { revoked.push(url); } },
-    document: { baseURI: 'http://localhost/app/index.html', getElementById: id => nodes.get(id), createElement: () => new Element() },
+  const scope = { Blob, AbortController,
+    createImageBitmap: async () => ({ width: 2, height: 1, close() {} }),
+    URL: class extends URL { static createObjectURL(file) { created.push(file); return 'blob:synthetic-' + created.length; } static revokeObjectURL(url) { revoked.push(url); } },
+    document: { baseURI: 'http://localhost/app/index.html', getElementById: id => nodes.get(id), createElement: name => name === 'canvas' ? {
+      getContext: () => ({ drawImage() {}, getImageData: () => ({ data: new Uint8ClampedArray([0,0,0,255,255,255,255,255]) }), putImageData() {} }),
+      toBlob: callback => callback(new Blob(['fictional processed'], { type: 'image/png' }))
+    } : new Element() },
     addEventListener: (name, callback) => { events[name] = callback; },
     setTimeout: callback => { events.timeout = callback; return 1; }, clearTimeout() {},
     Tesseract: { createWorker: async () => ({ recognize: () => recognizeResult(), terminate: async () => { terminateCount++; } }) } };

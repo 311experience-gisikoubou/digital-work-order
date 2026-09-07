@@ -90,7 +90,11 @@ test('worker blocks external and unknown fetches, non-GET bodies and unexpected 
   await self.fetch('http://localhost/app/vendor/ocr/jpn.traineddata.gz');
   assert.equal(calls.length, 1); assert.equal(calls[0][1].redirect, 'error'); assert.equal(calls[0][1].cache, 'no-store');
 });
-test('recognition filters low-confidence lines and always terminates after recognition failure', async () => {
+test('recognition filters low-confidence lines and always terminates after recognition failure', async (t) => {
+  const browser = fakeBrowser();
+  globalThis.createImageBitmap = browser.createImageBitmap;
+  globalThis.document = browser.document;
+  t.after(() => { delete globalThis.createImageBitmap; delete globalThis.document; delete globalThis.Tesseract; });
   let terminated = 0;
   const worker = { recognize: async () => ({ data: { blocks: [{ paragraphs: [{ lines: [
     { text: '患者名：架空患者', confidence: 80 }, { text: '医院名：不確実', confidence: 79.99 }, { text: '納期：2026/10/20', confidence: 80 }
@@ -130,4 +134,93 @@ test('all fields reject fuzzy labels and ambiguous repeated values', () => {
       assert.deepEqual(parseCandidates(line + '\u2028' + second), empty);
     }
   }
+});
+
+function fakeBrowser() {
+  const pixels = new Uint8ClampedArray([40, 40, 40, 255, 200, 200, 200, 255]);
+  const bitmap = { width: 3200, height: 1600, closed: 0, close() { this.closed++; } };
+  const context = { drawImage(...args) { this.draw = args; }, getImageData: () => ({ data: pixels }), putImageData() {} };
+  const canvas = { getContext: () => context, toBlob: callback => callback(new Blob(['processed'], { type: 'image/png' })) };
+  return { bitmap, canvas, pixels, context, createImageBitmap: async () => bitmap, document: { createElement(name) { assert.equal(name, 'canvas'); return canvas; } } };
+}
+
+test('OCR working dimensions are bounded without upscaling or losing aspect ratio', () => {
+  const size = globalThis.PaperOCR.workingSize;
+  assert.deepEqual(size(4032, 3024), { width: 1600, height: 1200 });
+  assert.deepEqual(size(3024, 4032), { width: 1200, height: 1600 });
+  assert.deepEqual(size(1050, 525), { width: 1050, height: 525 });
+  for (const value of [0, -1, NaN, Infinity, 1.5]) assert.throws(() => size(value, 1));
+});
+
+test('grayscale normalization is deterministic, conservative and composites transparency on white', () => {
+  const normalize = globalThis.PaperOCR.normalizePixels;
+  const pixels = new Uint8ClampedArray([40,40,40,255, 200,200,200,255]);
+  normalize(pixels);
+  assert.deepEqual([...pixels], [15,15,15,255, 255,255,255,255]);
+  const flat = new Uint8ClampedArray([100,100,100,255, 110,110,110,255]);
+  normalize(flat); assert.deepEqual([...flat], [100,100,100,255, 110,110,110,255]);
+  const transparent = new Uint8ClampedArray([0,0,0,0]);
+  normalize(transparent); assert.deepEqual([...transparent], [255,255,255,255]);
+  const color = new Uint8ClampedArray([255,0,0,255]);
+  normalize(color); assert.deepEqual([...color], [76,76,76,255]);
+});
+
+test('preprocessing uses smoothed bounded canvas and releases bitmap, pixels and canvas', async () => {
+  const browser = fakeBrowser();
+  vm.runInNewContext(fs.readFileSync('paper-ocr.js', 'utf8'), browser);
+  const blob = await browser.PaperOCR.preprocess(new Blob());
+  assert.equal(await blob.text(), 'processed');
+  assert.deepEqual(browser.context.draw.slice(1), [0, 0, 1600, 800]);
+  assert.equal(browser.context.imageSmoothingEnabled, true);
+  assert.equal(browser.context.imageSmoothingQuality, 'high');
+  assert.equal(browser.bitmap.closed, 1);
+  assert.equal(browser.canvas.width, 0); assert.equal(browser.canvas.height, 0);
+  assert.ok(browser.pixels.every(value => value === 0));
+});
+
+test('decode, canvas and encoding failures reject without an original-image fallback', async () => {
+  for (const failure of ['decode', 'canvas', 'encode']) {
+    const browser = fakeBrowser();
+    if (failure === 'decode') browser.createImageBitmap = async () => { throw new Error('decode'); };
+    if (failure === 'canvas') browser.canvas.getContext = () => null;
+    if (failure === 'encode') browser.canvas.toBlob = callback => callback(null);
+    vm.runInNewContext(fs.readFileSync('paper-ocr.js', 'utf8'), browser);
+    await assert.rejects(browser.PaperOCR.preprocess(new Blob()));
+    if (failure !== 'decode') { assert.equal(browser.bitmap.closed, 1); assert.equal(browser.canvas.width, 0); }
+    if (failure === 'encode') assert.ok(browser.pixels.every(value => value === 0));
+  }
+});
+
+test('cancellation releases pending encoding artifacts and late decoded bitmaps', async () => {
+  for (const stage of ['decode', 'encode']) {
+    const browser = fakeBrowser(), controller = new AbortController();
+    let finish;
+    if (stage === 'decode') browser.createImageBitmap = () => new Promise(resolve => { finish = resolve; });
+    else browser.canvas.toBlob = callback => { finish = callback; };
+    vm.runInNewContext(fs.readFileSync('paper-ocr.js', 'utf8'), browser);
+    const result = browser.PaperOCR.preprocess(new Blob(), controller.signal);
+    for (let i = 0; i < 10 && !finish; i++) await Promise.resolve();
+    assert.ok(finish);
+    controller.abort(); await assert.rejects(result, /ocr-cancelled/);
+    finish(stage === 'decode' ? browser.bitmap : new Blob());
+    await Promise.resolve();
+    assert.equal(browser.bitmap.closed, 1);
+    if (stage === 'encode') { assert.equal(browser.canvas.width, 0); assert.ok(browser.pixels.every(value => value === 0)); }
+  }
+});
+
+test('worker termination cancels pending preprocessing and prevents any late OCR pass', async () => {
+  const browser = fakeBrowser();
+  let active, finish, terminated = 0, recognized = 0;
+  Object.assign(browser, { Blob, URL, AbortController,
+    createImageBitmap: () => new Promise(resolve => { finish = resolve; }),
+    Tesseract: { createWorker: async () => ({ recognize: async () => { recognized++; }, terminate: async () => { terminated++; } }) }
+  });
+  vm.runInNewContext(fs.readFileSync('paper-ocr.js', 'utf8'), browser);
+  const result = browser.PaperOCR.recognize(new Blob(['fictional'], { type: 'image/png' }), 'http://localhost/app/', worker => { active = worker; });
+  await new Promise(setImmediate);
+  await active.terminate();
+  await assert.rejects(result, /ocr-cancelled/);
+  finish(browser.bitmap); await Promise.resolve();
+  assert.equal(recognized, 0); assert.ok(terminated >= 1); assert.equal(browser.bitmap.closed, 1);
 });

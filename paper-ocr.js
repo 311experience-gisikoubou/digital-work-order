@@ -56,19 +56,80 @@
       langPath: new URL('vendor/ocr', base).href,
       workerBlobURL: false, cacheMethod: 'none', gzip: true, logging: false };
   }
+  function workingSize(width, height) {
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) throw new Error('invalid-image-size');
+    const scale = Math.min(1, 1600 / Math.max(width, height));
+    return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
+  }
+  function normalizePixels(data) {
+    let low = 255, high = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const alpha = data[i + 3] / 255;
+      const gray = Math.round((0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) * alpha + 255 * (1 - alpha));
+      data[i] = data[i + 1] = data[i + 2] = gray; data[i + 3] = 255;
+      low = Math.min(low, gray); high = Math.max(high, gray);
+    }
+    // Limit gain and leave near-flat images alone; no thresholding or sharpening.
+    if (high - low < 32) return;
+    const gain = Math.min(1.5, 255 / (high - low));
+    for (let i = 0; i < data.length; i += 4) {
+      const gray = Math.round(255 - (high - data[i]) * gain);
+      data[i] = data[i + 1] = data[i + 2] = gray;
+    }
+  }
+  function pendingStep(promise, signal) {
+    if (!signal) return promise;
+    return new Promise((resolve, reject) => {
+      const abort = () => { signal.removeEventListener('abort', abort); reject(new Error('ocr-cancelled')); };
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) abort();
+      promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+    });
+  }
+  async function preprocess(file, signal) {
+    let bitmap, canvas, pixels;
+    try {
+      bitmap = await pendingStep(root.createImageBitmap(file).then(decoded => {
+        if (signal && signal.aborted) { decoded.close(); throw new Error('ocr-cancelled'); }
+        return decoded;
+      }), signal);
+      const size = workingSize(bitmap.width, bitmap.height);
+      canvas = root.document.createElement('canvas');
+      canvas.width = size.width; canvas.height = size.height;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('canvas-unavailable');
+      context.imageSmoothingEnabled = true; context.imageSmoothingQuality = 'high';
+      context.drawImage(bitmap, 0, 0, size.width, size.height);
+      bitmap.close(); bitmap = null;
+      pixels = context.getImageData(0, 0, size.width, size.height);
+      normalizePixels(pixels.data);
+      context.putImageData(pixels, 0, 0);
+      return await pendingStep(new Promise((resolve, reject) => canvas.toBlob(blob => {
+        if (blob) resolve(blob); else reject(new Error('image-encoding-failed'));
+      }, 'image/png')), signal);
+    } finally {
+      if (bitmap) bitmap.close();
+      if (pixels) pixels.data.fill(0);
+      if (canvas) { canvas.width = 0; canvas.height = 0; }
+    }
+  }
   async function recognize(file, baseURI, onWorker) {
     if (!(file instanceof Blob) || !file.type.startsWith('image/')) throw new Error('image-required');
+    const controller = new AbortController();
     const worker = await root.Tesseract.createWorker('jpn', 1, {
       ...localOptions(baseURI), logger: () => {}, errorHandler: () => {}
     });
-    onWorker(worker);
+    let image;
     try {
-      const result = await worker.recognize(file, {}, { text: true, blocks: true });
+      onWorker({ terminate: () => { controller.abort(); return worker.terminate(); } });
+      image = await preprocess(file, controller.signal);
+      if (controller.signal.aborted) throw new Error('ocr-cancelled');
+      const result = await worker.recognize(image, {}, { text: true, blocks: true });
       // Low-confidence lines stay unresolved. Scores never approve a field.
       const lines = (result.data.blocks || []).flatMap(block => block.paragraphs || [])
         .flatMap(paragraph => paragraph.lines || []);
       return parseCandidates(lines.filter(line => line.confidence >= 80).map(line => line.text).join('\n'));
-    } finally { await worker.terminate(); }
+    } finally { image = null; await worker.terminate(); }
   }
-  root.PaperOCR = Object.freeze({ fields, labels, parseCandidates, dateValue, copyApproved, localOptions, recognize });
+  root.PaperOCR = Object.freeze({ fields, labels, parseCandidates, dateValue, copyApproved, localOptions, workingSize, normalizePixels, preprocess, recognize });
 })(globalThis);

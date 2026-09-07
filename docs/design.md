@@ -187,7 +187,7 @@
 
 ## 14. 紙指示書のローカルデータ化（Phase 2設計 / Issue #37）
 
-本節の承認済み境界は `OPERATIONAL`、必要な強制レベルは `TECHNICAL_ENFORCEMENT_REQUIRED`。Issue #39でOCR・候補確認・フォーム反映/照合を実装した（14.5）。Issue #39の合成fixtureによるiPad Safari実機検証はPASS。Issue #41の撮影画像に対する有効性検証は未実施で、実データ用途の準備完了とは扱わない。画像自動破棄は未実装。
+本節の承認済み境界は `OPERATIONAL`、必要な強制レベルは `TECHNICAL_ENFORCEMENT_REQUIRED`。Issue #39でOCR・候補確認・フォーム反映/照合を実装した（14.5）。Issue #39の合成fixtureによるiPad Safari実機検証はPASS。Issue #41のiPad Safari撮影確認はユーザー報告で有効性NG（4候補すべて空欄）、安全性/fail-closedはPASS。今回の前処理追加後の実機結果は未確認で、実データ用途の準備完了とは扱わない。画像自動破棄は未実装。
 
 ### 14.1 初期の処理・通信境界
 
@@ -268,7 +268,9 @@ Issue #37の設計PRにはOCRライブラリ・モデル・依存関係・アプ
 
 ### 14.6 Issue #41の検証済み実装事実
 
+- 2026-09-07の初回iPad Safari実機カメラ撮影確認は、既存の架空テスト用紙だけを使用した。OCR候補4項目がすべて空欄で、撮影有効性はNG。誤候補は反映されず、人間の承認必須も維持されたため、安全性/fail-closedはPASS。これは前処理追加前の結果である。
 - 既知ラベルの文字間の空白・タブを許容し、CR / CRLF / LF / Unicode行区切りを認識する。ラベルの文字訂正・値の推測はしない。明示コロン、信頼度80以上、4項目限定を維持する。
 - 空値のラベル行も出現回数へ含め、同じ項目に値あり行と空行が併存しても候補は空欄にする。
-- 画像前処理・OCR設定・承認/照合・画像保持経路は変更していない。既存架空PNGから縮小・明暗勾配・傾斜を加えた2種の画像で、同梱OCRが医院名と納期を回収した。この合成画像の検証だけでは、実際の撮影失敗の解消やSafari精度向上を証明しない。
-- 自動テスト34件PASS（consumer 8、OCR helper/markup 15、UI/lifecycle 8、同梱runtime 3）。Issue #41のiPad Safari撮影確認は未実施。再現方法・検証結果・限界は `docs/issue41-verification.md`。
+- `paper-ocr.js` にブラウザメモリ内の前処理を追加した。createImageBitmapでデコードし、未接続Canvasで長辺最大1600pxへ平滑縮小（拡大なし）、白背景への透明度合成、グレースケール化、最大1.5倍の保守的なコントラスト調整を行う。輝度幅32未満はグレースケール化だけとする。一時PNGを1回のOCRへ渡し、閾値化・シャープ化・推測・複数passは行わない。
+- 作業用bitmapをcloseし、画素配列をゼロ化、Canvas寸法をゼロに戻し、OCR後に処理済みBlob参照を解放する。前処理の生成物は一時メモリ内だけで扱う。キャンセル・画像差替え・タイムアウトで前処理を中断でき、遅れてOCRが開始されることを防ぐ。worker停止は前処理も中断し、遅れて完了したデコード結果もcloseする。既存の120秒失敗処理・元画像保持・承認/照合・明示破棄は維持する。閾値緩和、曖昧なラベル修復、値の推測、OCR pass追加、アップロード、永続化、外部OCR/AI/CDN/サービス、新規依存、アプリ状態更新の経路は追加していない。
+- テストハーネス更新後の全自動テストは42 PASS / 0 FAIL / 0 skipped / 0 cancelled（consumer 8、OCR helper/markup/preprocessing 21、UI/lifecycle 8、同梱runtime 5）。`paper-ocr.js`、`tests/paper-ocr.test.js`、`tests/paper-ocr-runtime.test.js`、`tests/paper-ocr-ui.test.js`の構文確認はすべてPASS。製品の前処理と同梱ローカルOCRで、保持済みの架空劣化合成画像2種から4項目すべてを完全一致で回収した。傾斜画像の元画像では患者名が空欄だった。ただしVMの画像APIはテスト用アダプターであり、ブラウザの実デコード・縮小・PNG生成やモアレ軽減、iPadでの改善は未確認。この合成画像の成功はiPad Safariカメラの有効性を証明せず、実機再確認が必要。詳細と途中失敗を含む記録は `docs/issue41-verification.md`。PR #42はDraft、Merge authorized NO。
