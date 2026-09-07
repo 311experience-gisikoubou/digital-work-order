@@ -4,23 +4,23 @@
 仕様書・履歴・議事録を複製せず、現在の作業状態だけを保ちます。
 
 - Status: `ACTIVE`
-- Current phase: `paper work order Phase 2 / Issue #37 final audit complete`
-- Current branch: `design/paper-ocr-privacy-boundary`
-- Current PR: `#38（Ready）`
-- Last completed gate: `PR #38 final-pr-audit PASS; Ready for review`
+- Current phase: `paper work order Phase 2 / Issue #39 final audit complete`
+- Current branch: `feat/paper-ocr-four-field-candidates`
+- Current PR: `#40 (Ready)`
+- Last completed gate: `PR #40 final-pr-audit PASS; 28 automated tests PASS; Edge/iPad Safari PASS`
 - Current blocker: `NONE`
 - Next action: `explicit merge authorization`
 - PC-free work: `merge authorization待ち`
-- PC-required work: `NONE`
-- User action required: `YES（PR #38のmerge判断のみ）`
+- PC-required work: `NONE before merge decision`
+- User action required: `YES（PR #40のmerge判断のみ）`
 - Merge authorized: `NO`
 - Last updated: `2026-09-07`
 
 ## Optional short notes
 
-- PR #36はmerge済み。現在タスクはIssue #37のPhase 2設計のみ。OCR実装は後続Issue。
+- Issue #39の対象は一時画像→ローカルOCR→4項目候補→明示承認→フォームコピー/照合。実データ利用・画像自動破棄は未承認/未実装。
 - 現在地点の正本は `CURRENT_STATUS.md`。`docs/session-handoff.md` は過去のhandoff文脈として保持し、現在地点の正本には使わない。
-- 紙指示書画像取り込みPhase 1は一時プレビューのみ。OCR・データ化は別Phase。
+- 今回の実装・検証の詳細は `docs/issue39-verification.md`。Git操作とPR作成はSupervisorへ委任済み。
 - Foundation同期の証拠は同期PRに残し、statusへ詳細を複製しない。
 
 ## Rules

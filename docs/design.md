@@ -1,4 +1,4 @@
-# Digital Work Order Design
+﻿# Digital Work Order Design
 
 ## 1. アプリ概要
 
@@ -187,7 +187,7 @@
 
 ## 14. 紙指示書のローカルデータ化（Phase 2設計 / Issue #37）
 
-本節は設計のみ。採用方針の現在状態は `OPERATIONAL`、実装で必要な強制レベルは `TECHNICAL_ENFORCEMENT_REQUIRED`。OCR・候補確認・フォーム反映・自動破棄は未実装であり、`ENFORCED`とは扱わない。
+本節の承認済み境界は `OPERATIONAL`、必要な強制レベルは `TECHNICAL_ENFORCEMENT_REQUIRED`。Issue #39でOCR・候補確認・フォーム反映/照合を実装した（14.5）。実機検証は未完了で、実データ用途の準備完了とは扱わない。画像自動破棄は未実装。
 
 ### 14.1 初期の処理・通信境界
 
@@ -252,4 +252,16 @@ Issue #37の完成条件は、処理境界、一時データの保持・破棄�
 
 次の実装Issueは、この境界に従ったブラウザ内OCRの4項目候補表示・確認/修正・明示承認・既存フォーム反映/照合を1つの最小フローとして扱う。機密性のないテストデータによるiPad Safariの性能・互換性と、通信・非永続化・未承認時の書き込み禁止・失敗時の保持を検証することを出口条件とする。エンジン選定と技術的強制はそのIssueで行い、確認できるまでは実データ用途へ進めない。画像自動破棄はさらに後続の実装Issueで検討する。
 
-今回のPRにはOCRライブラリ・モデル・依存関係・アプリコード・fixture・実データを追加しない。
+Issue #37の設計PRにはOCRライブラリ・モデル・依存関係・アプリコード・fixture・実データを追加しない。
+
+### 14.5 Issue #39の実装事実
+
+- `consumer-rules.js` の既存Phase 1動的パネル `#paper-work-order-import-panel` にOCR操作を追加する。既存のfile input、preview、filename、discard、Object URL管理を唯一の画像ライフサイクルとし、一時的な `paperWorkOrderFile` をOCRへ渡す。`paper-ocr.js` はOCR・抽出・コピー/照合helperのみで、画像取り込みUIやObject URLを管理しない。
+- Tesseract.js 7.0.0 / tesseract.js-core 7.0.0（Apache-2.0）、日本語tessdata_fast、LSTM_ONLY、単一non-SIMDの埋め込みWASMを同梱する。資産・ライセンス・モデルhashは `vendor/ocr/README.md`。
+- worker/core/langを明示的な同梱パスに固定し、`cacheMethod: 'none'`を指定する。専用workerはモデル取得先を固定し、GETのみ・redirect拒否・no-storeで取得する。未知のscriptパスとXHR/WebSocketを拒否する。上流bundleのCDN既定値には本アプリ経路から到達しない。
+- 候補抽出は信頼度80以上の行の明示ラベルとコロンに限定する。同じ項目の複数行・曖昧な日付・判読不能は空欄のまま。年や納期を推測しない。対象外の帳票レイアウト・手書き精度は保証せず、人間が画像と照合・補記する。
+- 項目ごとのチェックと明示的な反映ボタンが承認操作。候補編集はその項目のチェックを解除する。空の承認値は反映しない。選択項目だけをコピーし、コピー先から完全一致を確認する。不一致は失敗とし、変更前値への復元を試みる。
+- 納期は既存hiddenコントロールへコピーし、照合結果に可視表示する。カレンダー表示・料金計算・受注確定は呼び出さず、その旨を結果に表示する。
+- OCR失敗・候補確認キャンセル・照合失敗・成功のいずれでも画像を保持する。画像差し替え・明示破棄・pagehide/beforeunloadではObject URLとFile参照を解放し、候補を消去して古いOCR結果を無効にする。画像でない選択や空のchangeイベントはPhase 1と同じくプレビューをクリアする。120秒タイムアウトを設け、失敗しても手入力を妨げない。
+- 承認前の非書き込み、選択項目限定コピー/照合、OCR資産の取得制限はコードと自動テストで `ENFORCED`。Edge 152の架空fixture確認では外部ホスト解決を遮断したままOCRが完走し、OCR前後でlocalStorage / sessionStorage / IndexedDB / Cache Storageに増減がなく、同梱worker/core/日本語モデルだけをローカル取得した。2026-09-07のiPad Safari架空データ実機確認でもOCR起動、候補表示、未承認非反映、明示承認/照合、キャンセル、破棄、再読込時の非復元を確認した。実データ利用はmerge後の承認済み配備だけを対象とし、一時テストURLでは行わない。
+- 検証手順・架空fixture・実機確認結果は `docs/issue39-verification.md`。画像自動破棄、永続化/復元、他の候補項目は追加しない。

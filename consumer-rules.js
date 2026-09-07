@@ -21,6 +21,8 @@
   const EXPORT_KEYS = ['schemaVersion', 'targetApp', 'generatedAt', 'rules'];
   const RULE_KEYS = ['ruleId', 'version', 'conditionCode', 'actionCode', 'approvedAt'];
   let paperWorkOrderObjectUrl = '';
+  let paperWorkOrderFile = null;
+  let resetPaperWorkOrderOCR = () => {};
 
   function isPlainObject(value) {
     return value !== null && typeof value === 'object' && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
@@ -118,6 +120,8 @@
   }
 
   function clearPaperWorkOrderPreview() {
+    paperWorkOrderFile = null;
+    resetPaperWorkOrderOCR();
     releasePaperWorkOrderObjectUrl();
     const preview = document.getElementById('paper-work-order-preview');
     const previewWrap = document.getElementById('paper-work-order-preview-wrap');
@@ -141,6 +145,8 @@
 
     clearPaperWorkOrderPreview();
     paperWorkOrderObjectUrl = URL.createObjectURL(file);
+    paperWorkOrderFile = file;
+    resetPaperWorkOrderOCR();
     const preview = document.getElementById('paper-work-order-preview');
     const previewWrap = document.getElementById('paper-work-order-preview-wrap');
     const filename = document.getElementById('paper-work-order-filename');
@@ -149,7 +155,7 @@
     if (preview) preview.src = paperWorkOrderObjectUrl;
     if (previewWrap) previewWrap.hidden = false;
     if (filename) filename.textContent = file.name || '撮影した画像';
-    if (status) status.textContent = '端末内で一時表示中です。データ化機能はまだ実行しません。';
+    if (status) status.textContent = '端末内で一時表示中です。読み取りは「端末内で読み取る」から開始できます。';
     if (input) input.value = '';
   }
 
@@ -159,7 +165,7 @@
 
     const panel = document.createElement('section');
     panel.id = 'paper-work-order-import-panel';
-    panel.className = 'consumer-rules-panel';
+    panel.className = 'consumer-rules-panel paper-intake';
     panel.setAttribute('aria-labelledby', 'paper-work-order-import-title');
     panel.innerHTML = `
       <div class="consumer-rules-heading">
@@ -172,7 +178,20 @@
         <div id="paper-work-order-filename" style="font-size:13px;font-weight:700;margin-bottom:8px;word-break:break-all;"></div>
         <img id="paper-work-order-preview" alt="取り込んだ紙指示書のプレビュー" style="display:block;max-width:100%;max-height:70vh;border:1px solid var(--border-color);border-radius:var(--radius-sm);object-fit:contain;background:#fff;">
         <button type="button" class="btn-secondary" id="paper-work-order-discard" style="margin-top:10px;">画像を破棄</button>
-      </div>`;
+      </div>
+      <p>OCR試行版：架空のテスト画像のみ使用してください。</p>
+    <button type="button" class="btn-primary" id="paper-ocr-start" disabled>端末内で読み取る</button>
+    <button type="button" class="btn-secondary" id="paper-cancel">候補確認をキャンセル</button>
+    <p id="paper-ocr-status" role="status" aria-live="polite">画像を取り込んでください。手入力も利用できます。</p>
+    <div id="paper-review" hidden>
+      <p>画像と照合し、反映する項目にチェックを付けてください。選択した項目は既存フォームの値を上書きします。</p>
+      <div class="paper-candidate"><label for="paper-clinicName">歯科医院名の候補</label><input id="paper-clinicName" type="text" maxlength="100" autocomplete="off"><label><input id="paper-approve-clinicName" type="checkbox">歯科医院名を承認</label></div>
+      <div class="paper-candidate"><label for="paper-doctorName">担当歯科医師の候補</label><input id="paper-doctorName" type="text" maxlength="100" autocomplete="off"><label><input id="paper-approve-doctorName" type="checkbox">担当歯科医師を承認</label></div>
+      <div class="paper-candidate"><label for="paper-patientName">患者名の候補</label><input id="paper-patientName" type="text" maxlength="100" autocomplete="off"><label><input id="paper-approve-patientName" type="checkbox">患者名を承認</label></div>
+      <div class="paper-candidate"><label for="paper-deliveryDate">納期の候補</label><input id="paper-deliveryDate" type="date" autocomplete="off"><label><input id="paper-approve-deliveryDate" type="checkbox">納期を承認</label></div>
+      <button type="button" class="btn-primary" id="paper-copy">選択した候補を承認してフォームへ反映</button>
+    </div>
+`;
 
     labView.insertBefore(panel, labView.firstChild);
 
@@ -182,6 +201,74 @@
     button.addEventListener('click', () => input.click());
     input.addEventListener('change', () => showPaperWorkOrderPreview(input.files && input.files[0]));
     discard.addEventListener('click', clearPaperWorkOrderPreview);
+    initPaperWorkOrderOCR();
+  }
+
+  function initPaperWorkOrderOCR() {
+    const get = id => document.getElementById(id);
+    if (!root.PaperOCR) return;
+    const { fields, labels, recognize, copyApproved } = root.PaperOCR;
+    let generation = 0, worker = null, busy = false, timer = null;
+    const status = message => { get('paper-ocr-status').textContent = message; };
+    const resetReview = () => {
+      get('paper-review').hidden = true;
+      for (const key of Object.keys(fields)) { get(`paper-${key}`).value = ''; get(`paper-approve-${key}`).checked = false; }
+    };
+    const stop = () => {
+      generation += 1;
+      clearTimeout(timer);
+      if (worker) { worker.terminate().catch(() => {}); worker = null; }
+      busy = false;
+      get('paper-ocr-start').disabled = !paperWorkOrderFile;
+      resetReview();
+    };
+    resetPaperWorkOrderOCR = () => {
+      stop();
+      status(paperWorkOrderFile ? '画像を確認して読み取りを開始してください。' : '画像を取り込んでください。手入力も利用できます。');
+    };
+    get('paper-cancel').addEventListener('click', () => { stop(); status('候補確認をキャンセルしました。画像は保持しています。'); });
+    get('paper-ocr-start').addEventListener('click', async () => {
+      if (!paperWorkOrderFile || busy) return;
+      stop(); busy = true;
+      const run = generation;
+      get('paper-ocr-start').disabled = true;
+      status('端末内で読み取り中です。手入力は引き続き利用できます。');
+      timer = setTimeout(() => { if (run === generation) { stop(); status('読み取りが時間内に完了しませんでした。画像は保持しています。再試行または手入力してください。'); } }, 120000);
+      try {
+        const candidates = await recognize(paperWorkOrderFile, document.baseURI, active => {
+          if (run !== generation) { active.terminate().catch(() => {}); throw new Error('stale-run'); }
+          worker = active;
+        });
+        if (run !== generation) return;
+        for (const key of Object.keys(fields)) get(`paper-${key}`).value = candidates[key];
+        get('paper-review').hidden = false;
+        status('未承認の候補です。画像と照合・修正し、反映する項目を選んでください。空欄は読み取れなかった項目です。');
+      } catch (_) {
+        if (run === generation) status('読み取りに失敗しました。画像は保持しています。再試行・差し替え・手入力ができます。');
+      } finally {
+        if (run === generation) { clearTimeout(timer); busy = false; worker = null; get('paper-ocr-start').disabled = !paperWorkOrderFile; }
+      }
+    });
+    for (const key of Object.keys(fields)) {
+      get(`paper-${key}`).addEventListener('input', () => {
+        get(`paper-approve-${key}`).checked = false;
+        status('候補を変更しました。画像と照合し、変更した項目を再度承認してください。');
+      });
+    }
+    get('paper-copy').addEventListener('click', () => {
+      if (get('paper-review').hidden || busy) return;
+      const candidates = {}, approved = {};
+      for (const key of Object.keys(fields)) { candidates[key] = get(`paper-${key}`).value; approved[key] = get(`paper-approve-${key}`).checked; }
+      try {
+        const copied = copyApproved(document, candidates, approved);
+        const summary = copied.map(key => `${labels[key]}：${get(fields[key]).value}`).join(' / ');
+        status(`反映・照合済み（受注は未確定）：${summary}。医院側フォームで続けて確認してください。納期のカレンダー表示・料金は再計算していません。画像は保持しています。`);
+        for (const key of Object.keys(fields)) get(`paper-approve-${key}`).checked = false;
+      } catch (_) {
+        status('反映・照合に失敗しました。選択項目と入力内容、コピー先を確認してください。画像は保持しています。');
+      }
+    });
+
   }
 
   function initConsumerRules() {
@@ -202,5 +289,8 @@
 
   root.ConsumerRuleConsumer = Object.freeze({ parseConsumerExportText, validateConsumerExport, formatRule, init });
   if (typeof document !== 'undefined') init();
-  if (typeof root.addEventListener === 'function') root.addEventListener('beforeunload', releasePaperWorkOrderObjectUrl);
+  if (typeof root.addEventListener === 'function') {
+    root.addEventListener('beforeunload', clearPaperWorkOrderPreview);
+    root.addEventListener('pagehide', clearPaperWorkOrderPreview);
+  }
 }(globalThis));
