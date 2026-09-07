@@ -187,7 +187,7 @@
 
 ## 14. 紙指示書のローカルデータ化（Phase 2設計 / Issue #37）
 
-本節の承認済み境界は `OPERATIONAL`、必要な強制レベルは `TECHNICAL_ENFORCEMENT_REQUIRED`。Issue #39でOCR・候補確認・フォーム反映/照合を実装した（14.5）。実機検証は未完了で、実データ用途の準備完了とは扱わない。画像自動破棄は未実装。
+本節の承認済み境界は `OPERATIONAL`、必要な強制レベルは `TECHNICAL_ENFORCEMENT_REQUIRED`。Issue #39でOCR・候補確認・フォーム反映/照合を実装した（14.5）。Issue #39の合成fixtureによるiPad Safari実機検証はPASS。Issue #41の撮影画像に対する有効性検証は未実施で、実データ用途の準備完了とは扱わない。画像自動破棄は未実装。
 
 ### 14.1 初期の処理・通信境界
 
@@ -265,3 +265,10 @@ Issue #37の設計PRにはOCRライブラリ・モデル・依存関係・アプ
 - OCR失敗・候補確認キャンセル・照合失敗・成功のいずれでも画像を保持する。画像差し替え・明示破棄・pagehide/beforeunloadではObject URLとFile参照を解放し、候補を消去して古いOCR結果を無効にする。画像でない選択や空のchangeイベントはPhase 1と同じくプレビューをクリアする。120秒タイムアウトを設け、失敗しても手入力を妨げない。
 - 承認前の非書き込み、選択項目限定コピー/照合、OCR資産の取得制限はコードと自動テストで `ENFORCED`。Edge 152の架空fixture確認では外部ホスト解決を遮断したままOCRが完走し、OCR前後でlocalStorage / sessionStorage / IndexedDB / Cache Storageに増減がなく、同梱worker/core/日本語モデルだけをローカル取得した。2026-09-07のiPad Safari架空データ実機確認でもOCR起動、候補表示、未承認非反映、明示承認/照合、キャンセル、破棄、再読込時の非復元を確認した。実データ利用はmerge後の承認済み配備だけを対象とし、一時テストURLでは行わない。
 - 検証手順・架空fixture・実機確認結果は `docs/issue39-verification.md`。画像自動破棄、永続化/復元、他の候補項目は追加しない。
+
+### 14.6 Issue #41の検証済み実装事実
+
+- 既知ラベルの文字間の空白・タブを許容し、CR / CRLF / LF / Unicode行区切りを認識する。ラベルの文字訂正・値の推測はしない。明示コロン、信頼度80以上、4項目限定を維持する。
+- 空値のラベル行も出現回数へ含め、同じ項目に値あり行と空行が併存しても候補は空欄にする。
+- 画像前処理・OCR設定・承認/照合・画像保持経路は変更していない。既存架空PNGから縮小・明暗勾配・傾斜を加えた2種の画像で、同梱OCRが医院名と納期を回収した。この合成画像の検証だけでは、実際の撮影失敗の解消やSafari精度向上を証明しない。
+- 自動テスト34件PASS（consumer 8、OCR helper/markup 15、UI/lifecycle 8、同梱runtime 3）。Issue #41のiPad Safari撮影確認は未実施。再現方法・検証結果・限界は `docs/issue41-verification.md`。

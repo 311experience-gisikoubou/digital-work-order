@@ -4,24 +4,23 @@
 仕様書・履歴・議事録を複製せず、現在の作業状態だけを保ちます。
 
 - Status: `ACTIVE`
-- Current phase: `paper work order Phase 2 / Issue #39 final audit complete`
-- Current branch: `feat/paper-ocr-four-field-candidates`
-- Current PR: `#40 (Ready)`
-- Last completed gate: `PR #40 final-pr-audit PASS; 28 automated tests PASS; Edge/iPad Safari PASS`
-- Current blocker: `NONE`
-- Next action: `explicit merge authorization`
-- PC-free work: `merge authorization待ち`
-- PC-required work: `NONE before merge decision`
-- User action required: `YES（PR #40のmerge判断のみ）`
+- Current phase: `paper work order Phase 2 / Issue #41 local verification complete`
+- Current branch: `feat/paper-ocr-camera-robustness`
+- Current PR: `NONE (not created)`
+- Last completed gate: `Issue #41: 34 automated tests PASS / 0 FAIL / 0 skipped / 0 cancelled; 3 JS syntax checks PASS; host branch/scope/git diff --check audit PASS`
+- Current blocker: `Actual iPad camera effectiveness unverified; PR not created`
+- Next action: `commit/push ? Draft PR ? prepare synthetic iPad camera verification`
+- PC-free work: `Review docs/issue41-verification.md`
+- PC-required work: `Issue #41 synthetic iPad camera verification (not started)`
+- User action required: `NO for this local task`
 - Merge authorized: `NO`
 - Last updated: `2026-09-07`
 
 ## Optional short notes
 
-- Issue #39の対象は一時画像→ローカルOCR→4項目候補→明示承認→フォームコピー/照合。実データ利用・画像自動破棄は未承認/未実装。
-- 現在地点の正本は `CURRENT_STATUS.md`。`docs/session-handoff.md` は過去のhandoff文脈として保持し、現在地点の正本には使わない。
-- 今回の実装・検証の詳細は `docs/issue39-verification.md`。Git操作とPR作成はSupervisorへ委任済み。
-- Foundation同期の証拠は同期PRに残し、statusへ詳細を複製しない。
+- Issue #41 implementation, fixture recipe and local evidence: `docs/issue41-verification.md`.
+- Parser constraints and approval/privacy behavior remain conservative; no real-data or camera success claim.
+- No Git commands or PR operations were performed.
 
 ## Rules
 

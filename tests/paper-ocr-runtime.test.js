@@ -58,6 +58,18 @@ test('shipped browser worker recognizes synthetic PNG with local-only assets and
   const candidates = globalThis.PaperOCR.parseCandidates(lines.filter(line => line.confidence >= 80).map(line => line.text).join('\n'));
   assert.equal(candidates.deliveryDate, '2026-10-20');
   t.diagnostic('Non-empty candidate fields: ' + Object.keys(candidates).filter(key => candidates[key]).join(', '));
+  for (const variant of ['dim', 'tilted']) {
+    await t.test('camera derivative: ' + variant, async () => {
+      const data = await send('recognize', { image: new Uint8Array(fs.readFileSync(`tests/fixtures/paper-order-camera-${variant}.png`)),
+        options: {}, output: { text: true, blocks: true } });
+      const recognized = data.blocks.flatMap(b => b.paragraphs).flatMap(p => p.lines);
+      const values = globalThis.PaperOCR.parseCandidates(recognized.filter(line => line.confidence >= 80).map(line => line.text).join('\n'));
+      assert.equal(values.clinicName, '架空テスト歯科');
+      assert.equal(values.deliveryDate, '2026-10-20');
+      assert.ok(['', '架空医師'].includes(values.doctorName));
+      assert.ok(['', '架空患者'].includes(values.patientName));
+    });
+  }
   assert.equal(fetched.length, 1); assert.equal(fetched[0].options.cache, 'no-store');
   assert.deepEqual(imported, [origin + 'vendor/ocr/worker.min.js', origin + 'vendor/ocr/tesseract-core-lstm.wasm.js']);
   missingModel = true;

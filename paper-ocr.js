@@ -13,12 +13,14 @@
   }
   function parseCandidates(text) {
     const result = Object.fromEntries(Object.keys(fields).map(key => [key, '']));
-    const lines = String(text || '').normalize('NFKC').split(/\r?\n/);
+    const lines = String(text || '').normalize('NFKC').split(/\r\n|[\r\n\u2028\u2029]/);
     for (const key of Object.keys(fields)) {
       const values = [];
+      // Only horizontal spacing inside known labels; never repair name characters.
+      const labelPattern = aliases[key].map(label => [...label].join('[ \\t]*')).join('|');
       for (const line of lines) {
-        const match = new RegExp(`^\\s*(?:${aliases[key].join('|')})\\s*[:：]\\s*(.+?)\\s*$`).exec(line);
-        // Require an explicit label/separator and only one value on its own line.
+        const match = new RegExp(`^[ \\t]*(?:${labelPattern})[ \\t]*[:：][ \\t]*(.*?)[ \\t]*$`).exec(line);
+        // Count empty labeled occurrences too: a second occurrence is ambiguous.
         if (match) values.push(match[1]);
       }
       if (values.length !== 1 || /[:：\uFFFD]/.test(values[0]) || values[0].length > 100) continue;

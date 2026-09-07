@@ -13,6 +13,22 @@ test('unresolved, ambiguous, multiple-column and unlabeled fields remain blank',
     assert.equal(parseCandidates(text).patientName, '');
   }
 });
+test('known labels tolerate horizontal OCR spacing without repairing values', () => {
+  assert.deepEqual(parseCandidates('歯 科 医 院 名 ：架空テスト歯科\n担 当 歯 科 医 師:架空 医師\n患\t者 名:架空 患者\n納 期:2026/10/20'),
+    { clinicName: '架空テスト歯科', doctorName: '架空 医師', patientName: '架空 患者', deliveryDate: '2026-10-20' });
+});
+test('CR, CRLF and Unicode line separators preserve field boundaries', () => {
+  for (const separator of ['\r', '\r\n', '\n', '\u2028', '\u2029']) {
+    assert.deepEqual(parseCandidates(sample.replaceAll('\n', separator)), parseCandidates(sample));
+  }
+});
+test('spacing tolerance retains missing-label, missing-colon and duplicate rejection', () => {
+  for (const value of ['患者 名 架空患者', '患考名:架空患者', '患\n者名:架空患者',
+    '患者名:架空患者\n患 者 名:', '患者名:架空患者\r患者名:架空患者',
+    '患 者 名:架空患者 納 期:2026/10/20', '患者名:\n架空患者']) {
+    assert.equal(parseCandidates(value).patientName, '');
+  }
+});
 test('dates require a complete explicit valid calendar date without inference', () => {
   for (const value of ['10/20', '2026/2/29', '2026/13/01', '明日', '2026/10/20 午後']) assert.equal(dateValue(value), '');
   assert.equal(dateValue('2028/2/29'), '2028-02-29');
@@ -77,12 +93,13 @@ test('worker blocks external and unknown fetches, non-GET bodies and unexpected 
 test('recognition filters low-confidence lines and always terminates after recognition failure', async () => {
   let terminated = 0;
   const worker = { recognize: async () => ({ data: { blocks: [{ paragraphs: [{ lines: [
-    { text: '患者名：架空患者', confidence: 90 }, { text: '医院名：不確実', confidence: 20 }
+    { text: '患者名：架空患者', confidence: 80 }, { text: '医院名：不確実', confidence: 79.99 }, { text: '納期：2026/10/20', confidence: 80 }
   ] }] }] } }), terminate: async () => { terminated++; } };
   globalThis.Tesseract = { createWorker: async () => worker };
   const file = new Blob(['fictional'], { type: 'image/png' });
   const result = await globalThis.PaperOCR.recognize(file, 'http://localhost/app/', () => {});
   assert.equal(result.patientName, '架空患者'); assert.equal(result.clinicName, '');
+  assert.equal(result.deliveryDate, '2026-10-20');
   worker.recognize = async () => { throw new Error('synthetic failure'); };
   await assert.rejects(globalThis.PaperOCR.recognize(file, 'http://localhost/app/', () => {}));
   assert.equal(terminated, 2);
@@ -101,4 +118,16 @@ test('dynamic markup wires every OCR review control uniquely with accessible sta
   assert.match(lab, /id="paper-review" hidden/);
   assert.match(lab, /id="paper-ocr-status" role="status"/);
   assert.ok(html.indexOf('src="vendor/ocr/tesseract.min.js"') < html.indexOf('src="paper-ocr.js"'));
+});
+
+test('all fields reject fuzzy labels and ambiguous repeated values', () => {
+  const empty = { clinicName: '', doctorName: '', patientName: '', deliveryDate: '' };
+  assert.deepEqual(parseCandidates('歯科医阮名:架空テスト歯科\n担当歯科医帥:架空医師\n患考名:架空患者\n納旗:2026/10/20'), empty);
+  assert.deepEqual(parseCandidates('架空テスト歯科\n架空医師\n架空患者\n2026/10/20'), empty);
+  for (const line of sample.split('\n')) {
+    const label = line.split('：')[0];
+    for (const second of [line, label + '：', label + '：別の架空値']) {
+      assert.deepEqual(parseCandidates(line + '\u2028' + second), empty);
+    }
+  }
 });
