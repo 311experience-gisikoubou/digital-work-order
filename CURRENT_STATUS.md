@@ -4,15 +4,15 @@
 仕様書・履歴・議事録を複製せず、現在の作業状態だけを保ちます。
 
 - Status: `ACTIVE`
-- Current phase: `paper work order Phase 2 / Issue #39 browser verification complete; iPad Safari pending`
+- Current phase: `paper work order Phase 2 / Issue #39 final audit`
 - Current branch: `feat/paper-ocr-four-field-candidates`
 - Current PR: `#40 (Draft)`
-- Last completed gate: `28 automated tests PASS; Edge 152 synthetic browser OCR/network/storage check PASS`
-- Current blocker: `iPad Safari compatibility/performance/layout remains unverified; real-data use remains blocked`
-- Next action: `prepare synthetic iPad Safari environment → 4 real-device checks → final current-head audit`
+- Last completed gate: `28 automated tests PASS; Edge browser PASS; iPad Safari synthetic real-device PASS`
+- Current blocker: `NONE for PR review; real data prohibited on temporary test URL and before approved merge/deployment`
+- Next action: `record iPad PASS → final current-head audit → Ready for review if PASS`
 - PC-free work: `PR #40 metadata/diff audit`
-- PC-required work: `prepared synthetic iPad Safari checks (4)`
-- User action required: `NO until AI prepares the iPad test environment; then 4 short Safari checks`
+- PC-required work: `NONE before merge decision`
+- User action required: `NO until merge decision`
 - Merge authorized: `NO`
 - Last updated: `2026-09-07`
 

@@ -1,4 +1,4 @@
-# Digital Work Order Design
+﻿# Digital Work Order Design
 
 ## 1. アプリ概要
 
@@ -263,5 +263,5 @@ Issue #37の設計PRにはOCRライブラリ・モデル・依存関係・アプ
 - 項目ごとのチェックと明示的な反映ボタンが承認操作。候補編集はその項目のチェックを解除する。空の承認値は反映しない。選択項目だけをコピーし、コピー先から完全一致を確認する。不一致は失敗とし、変更前値への復元を試みる。
 - 納期は既存hiddenコントロールへコピーし、照合結果に可視表示する。カレンダー表示・料金計算・受注確定は呼び出さず、その旨を結果に表示する。
 - OCR失敗・候補確認キャンセル・照合失敗・成功のいずれでも画像を保持する。画像差し替え・明示破棄・pagehide/beforeunloadではObject URLとFile参照を解放し、候補を消去して古いOCR結果を無効にする。画像でない選択や空のchangeイベントはPhase 1と同じくプレビューをクリアする。120秒タイムアウトを設け、失敗しても手入力を妨げない。
-- 承認前の非書き込み、選択項目限定コピー/照合、OCR資産の取得制限はコードと自動テストで `ENFORCED`。Edge 152の架空fixture確認では外部ホスト解決を遮断したままOCRが完走し、OCR前後でlocalStorage / sessionStorage / IndexedDB / Cache Storageに増減がなく、同梱worker/core/日本語モデルだけをローカル取得した。iPad Safari実機確認は未完了のため、実データ運用準備完了とは扱わない。
-- 検証手順・架空fixture・残る実機確認は `docs/issue39-verification.md`。画像自動破棄、永続化/復元、他の候補項目は追加しない。
+- 承認前の非書き込み、選択項目限定コピー/照合、OCR資産の取得制限はコードと自動テストで `ENFORCED`。Edge 152の架空fixture確認では外部ホスト解決を遮断したままOCRが完走し、OCR前後でlocalStorage / sessionStorage / IndexedDB / Cache Storageに増減がなく、同梱worker/core/日本語モデルだけをローカル取得した。2026-09-07のiPad Safari架空データ実機確認でもOCR起動、候補表示、未承認非反映、明示承認/照合、キャンセル、破棄、再読込時の非復元を確認した。実データ利用はmerge後の承認済み配備だけを対象とし、一時テストURLでは行わない。
+- 検証手順・架空fixture・実機確認結果は `docs/issue39-verification.md`。画像自動破棄、永続化/復元、他の候補項目は追加しない。

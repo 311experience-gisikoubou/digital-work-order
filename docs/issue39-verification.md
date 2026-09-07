@@ -38,32 +38,15 @@ the existing form unchanged until explicit approval; the resolved fictional
 clinic name and delivery date then copied with exact readback while the preview
 remained visible. This proves the browser-local path in Edge, not Safari.
 
-## Prepared iPad Safari checks — not started
+## iPad Safari real-device verification — PASS
 
-Estimated human time: 5 minutes. Fixed total: 4 checks; completed: 0; remaining:
-4. Use only `tests/fixtures/paper-order-synthetic.png` in an approved synthetic
-test deployment. The deployment/device has not been verified in this run;
-do not start until the AI/supervisor verifies that environment and makes the
-fixture available for selection. No sample-data typing is required.
+Date: 2026-09-07. Synthetic/non-sensitive data only. Safari version and exact OCR elapsed time were not recorded; OCR completed before the 120-second timeout.
 
-1. In 「受注管理」, press 「紙指示書を取り込む」 and select the prepared PNG.
-   Confirm the preview is readable and the four-field review fits the iPad
-   screen after pressing 「端末内で読み取る」. Record device/Safari version and
-   elapsed OCR time; it must finish before the 120-second timeout.
-2. Compare candidates to the visible image. Confirm OCR completion does not
-   fill the existing clinic form. Select 「歯科医院名を承認」 and 「納期を承認」,
-   then 「選択した候補を承認してフォームへ反映」. Confirm the readback message
-   matches those values and the image remains visible. The order is not saved
-   or submitted. Calendar calculation/display is not refreshed by OCR copy.
-   The VM fixture currently resolves clinicName and deliveryDate; doctorName
-   and patientName remain blank. Do not approve blank or incorrect candidates.
-   If Safari resolves different fields, record that result and keep this check
-   unconfirmed rather than guessing values or improvising sample data.
-3. Read the same fixture again, then 「候補確認をキャンセル」. Confirm review
-   closes and the preview remains. Repeat image selection and confirm the new
-   preview replaces the old one. Check that buttons are comfortable to tap.
-4. Switch between clinic and lab views, then 「画像を破棄」. Confirm the image
-   and candidate fields clear. Reload and confirm temporary OCR data does not
-   return. Existing clinic manual entry remains usable.
+- PASS: the temporary test URL opened on iPad Safari; the existing Phase 1 intake opened the camera, showed the captured preview/filename, and enabled local OCR.
+- PASS: local OCR completed and displayed the four-field candidate review without visible layout breakage. In this photographed fixture all four OCR candidates were blank; this is acceptable fail-closed behavior and no value was guessed.
+- PASS: switching to clinic input confirmed no destination field was changed before approval.
+- PASS: a fictional manual candidate (テスト患者) was entered, explicitly approved, copied with the success/readback message, and the source image remained visible.
+- PASS: a second OCR run could be cancelled while retaining the image; explicit discard cleared the image/candidates; reload did not restore temporary OCR data.
+- Regression evidence for image replacement remains the prior Phase 1 iPad PASS plus the current automated stale-result/replacement test; this session did not repeat the unchanged replacement gesture separately.
 
-Purpose: Edge browser execution confirms the local worker/WASM path and non-persistence boundary, but Safari worker/WASM/image-decoding compatibility, timing, touch and visible layout still require iPad confirmation. Technical network/storage diagnosis remains AI-owned. Real-data readiness remains blocked until the prepared iPad verification is complete.
+Conclusion: the Issue #39 iPad Safari interaction/compatibility gate is PASS. Edge browser verification separately proves the local-only OCR asset path and no added browser persistence. Do not use the temporary Cloudflare test URL with real data; it was stopped after verification. Real-data use belongs only to the approved application deployment after merge.
