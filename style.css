@@ -773,3 +773,14 @@ body.edit-active .tooth-num { display:none; }
 .consumer-rules-count { margin: 8px 0 0; color: var(--text-secondary); font-size: 13px; }
 .consumer-rules-list { margin: 8px 0 0; padding-left: 20px; color: var(--text-primary); font-size: 13px; }
 .consumer-rules-list li + li { margin-top: 4px; }
+/* Paper intake is isolated from the clinic form and print layout. */
+.paper-intake { overflow-wrap: anywhere; }
+.paper-intake h2 { font-size: 18px; margin-bottom: 12px; }
+.paper-intake p { margin: 12px 0; }
+.paper-intake button { min-height: 44px; margin: 4px 4px 4px 0; }
+.paper-intake button:disabled { opacity: .5; cursor: default; }
+.paper-candidate { display: grid; gap: 8px; margin: 16px 0; }
+.paper-candidate > input { width: 100%; min-height: 44px; box-sizing: border-box; }
+.paper-candidate label { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.paper-candidate input[type="checkbox"] { width: 24px; height: 24px; }
+@media print { .paper-intake { display: none; } }
