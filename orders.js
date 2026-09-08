@@ -136,6 +136,19 @@ function renderOrders() {
       detailBtn.addEventListener('click', function() { showDetail(order.id); });
       actions.appendChild(detailBtn);
 
+      const bridgeBtn = document.createElement('button');
+      bridgeBtn.className = 'act-btn detail';
+      bridgeBtn.textContent = '\u7d0d\u54c1\u9023\u643a';
+      bridgeBtn.title = '\u7d0d\u54c1\u30a2\u30d7\u30ea\u53d6\u308a\u8fbc\u307f\u7528JSON\u3092\u4fdd\u5b58';
+      bridgeBtn.addEventListener('click', function() {
+        try {
+          downloadDeliveryIntakeJson(order);
+          showToast('\u7d0d\u54c1\u9023\u643aJSON\u3092\u4f5c\u6210\u3057\u307e\u3057\u305f');
+        } catch (error) {
+          showToast('\u7d0d\u54c1\u9023\u643aJSON\u3092\u5b89\u5168\u306b\u4f5c\u6210\u3067\u304d\u306a\u3044\u305f\u3081\u3001\u51fa\u529b\u3092\u4e2d\u6b62\u3057\u307e\u3057\u305f', 'error');
+        }
+      });
+      actions.appendChild(bridgeBtn);
       const pdfBtn = document.createElement('button');
       pdfBtn.className = 'act-btn pdf';
       pdfBtn.textContent = 'PDF';
