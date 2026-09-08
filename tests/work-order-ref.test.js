@@ -1,20 +1,34 @@
 const assert = require('node:assert/strict');
+const { webcrypto } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const root = path.join(__dirname, '..');
-const { generateWorkOrderRef } = require(path.join(root, 'work-order-ref.js'));
+const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+const stableStart = appSource.indexOf('//  連携用 stable workOrderRef');
+const submitStart = appSource.indexOf('//  送信処理', stableStart);
+assert.ok(stableStart >= 0 && submitStart > stableStart);
+
+const stableBlock = appSource.slice(
+  appSource.lastIndexOf('// ============================================================', stableStart),
+  appSource.lastIndexOf('// ============================================================', submitStart)
+);
+const context = {};
+vm.createContext(context);
+vm.runInContext(stableBlock, context);
+const { generateWorkOrderRef } = context;
 
 const REF_PATTERN = /^dwo:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 test('creates a canonical dwo UUID v4 reference', () => {
-  assert.match(generateWorkOrderRef(), REF_PATTERN);
+  assert.match(generateWorkOrderRef(webcrypto), REF_PATTERN);
 });
 
 test('sequential synthetic references are unique', () => {
   const refs = new Set();
-  for (let i = 0; i < 256; i += 1) refs.add(generateWorkOrderRef());
+  for (let i = 0; i < 256; i += 1) refs.add(generateWorkOrderRef(webcrypto));
   assert.equal(refs.size, 256);
 });
 
@@ -25,7 +39,6 @@ test('getRandomValues fallback sets UUID v4 version and variant bits', () => {
       return bytes;
     }
   };
-
   const ref = generateWorkOrderRef(fakeCrypto);
   assert.match(ref, REF_PATTERN);
   assert.equal(ref.split(':')[1][14], '4');
@@ -33,10 +46,7 @@ test('getRandomValues fallback sets UUID v4 version and variant bits', () => {
 });
 
 test('fails closed when secure randomness is unavailable', () => {
-  assert.throws(
-    () => generateWorkOrderRef({}),
-    /SECURE_WORK_ORDER_REF_UNAVAILABLE/
-  );
+  assert.throws(() => generateWorkOrderRef({}), /SECURE_WORK_ORDER_REF_UNAVAILABLE/);
 });
 
 test('fails closed when randomUUID returns a malformed value', () => {
@@ -47,30 +57,28 @@ test('fails closed when randomUUID returns a malformed value', () => {
 });
 
 test('generator does not use timestamp, Math.random, or business values', () => {
-  const source = fs.readFileSync(path.join(root, 'work-order-ref.js'), 'utf8');
   for (const forbidden of ['Date.now', 'Math.random', 'clinic', 'patient', 'doctor']) {
-    assert.equal(source.includes(forbidden), false, forbidden);
+    assert.equal(stableBlock.includes(forbidden), false, forbidden);
   }
 });
 
-test('submit path assigns workOrderRef while local UI id remains separate', () => {
-  const source = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
-  assert.match(source, /collectFormData\(\{ assignWorkOrderRef: true \}\)/);
-  assert.match(source, /workOrderRef:\s*generateWorkOrderRef\(\)/);
-  assert.match(source, /id:\s*'local_'\s*\+\s*Date\.now\(\)/);
+test('submit assigns workOrderRef after validation and before local save', () => {
+  const validationIndex = appSource.indexOf('const errors = validate(data);');
+  const assignIndex = appSource.indexOf('data.workOrderRef = generateWorkOrderRef();');
+  const saveIndex = appSource.indexOf('state.orders.unshift(data);');
+  assert.ok(validationIndex >= 0 && validationIndex < assignIndex && assignIndex < saveIndex);
+  assert.match(appSource, /id:\s*'local_'\s*\+\s*Date\.now\(\)/);
 });
 
-test('PDF preview path does not request a stable workOrderRef', () => {
-  const source = fs.readFileSync(path.join(root, 'pdf.js'), 'utf8');
-  assert.match(source, /collectFormData\(\)/);
-  assert.equal(source.includes('assignWorkOrderRef'), false);
+test('collectFormData remains unchanged for PDF preview collection', () => {
+  assert.match(appSource, /function collectFormData\(\) \{/);
+  assert.equal(appSource.includes('assignWorkOrderRef'), false);
+  const pdfSource = fs.readFileSync(path.join(root, 'pdf.js'), 'utf8');
+  assert.match(pdfSource, /collectFormData\(\)/);
+  assert.equal(pdfSource.includes('generateWorkOrderRef'), false);
 });
 
-test('work-order-ref script loads before app.js', () => {
+test('index script order is not changed for stable reference generation', () => {
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-  const refIndex = html.indexOf('<script src="work-order-ref.js"></script>');
-  const appIndex = html.indexOf('<script src="app.js"></script>');
-  assert.ok(refIndex >= 0);
-  assert.ok(appIndex >= 0);
-  assert.ok(refIndex < appIndex);
+  assert.equal(html.includes('work-order-ref.js'), false);
 });
