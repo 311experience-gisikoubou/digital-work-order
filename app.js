@@ -347,6 +347,34 @@ function collectFormData() {
 
 
 // ============================================================
+//  連携用 stable workOrderRef
+// ============================================================
+function formatWorkOrderUuidV4(bytes) {
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0'));
+  return `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-${hex.slice(8, 10).join('')}-${hex.slice(10, 16).join('')}`;
+}
+
+function generateWorkOrderRef(cryptoApi = globalThis.crypto) {
+  const uuidV4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!cryptoApi) throw new Error('SECURE_WORK_ORDER_REF_UNAVAILABLE');
+
+  if (typeof cryptoApi.randomUUID === 'function') {
+    const uuid = cryptoApi.randomUUID();
+    if (!uuidV4.test(uuid)) throw new Error('SECURE_WORK_ORDER_REF_INVALID');
+    return `dwo:${uuid.toLowerCase()}`;
+  }
+
+  if (typeof cryptoApi.getRandomValues !== 'function') {
+    throw new Error('SECURE_WORK_ORDER_REF_UNAVAILABLE');
+  }
+
+  const bytes = new Uint8Array(16);
+  cryptoApi.getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  return `dwo:${formatWorkOrderUuidV4(bytes)}`;
+}
+// ============================================================
 //  送信処理
 // ============================================================
 document.getElementById('submit-btn').addEventListener('click', async () => {
@@ -355,6 +383,14 @@ document.getElementById('submit-btn').addEventListener('click', async () => {
 
   if (errors.length > 0) {
     showToast(`入力必須項目: ${errors.join('、')}`, 'error');
+    return;
+  }
+
+  try {
+    data.workOrderRef = generateWorkOrderRef();
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.startsWith('SECURE_WORK_ORDER_REF_')) throw error;
+    showToast('安全な指示書IDを生成できないため、送信を中止しました', 'error');
     return;
   }
 
