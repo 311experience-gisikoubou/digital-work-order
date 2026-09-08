@@ -28,6 +28,24 @@ Gather or report when unavailable:
 - `test-gate` result, when available.
 - Impact areas that require real-device confirmation.
 
+## Preview Preparation Gate
+
+Before giving a real-device URL to the human, prepare a PR/commit-specific clean worktree and a dedicated preview port. Reusing the current working repository or an unrelated existing preview server is not allowed.
+
+Prefer the last known successful device-access route for the same environment. For iPad Safari in this repository, use the existing Cloudflare Quick Tunnel route when LAN direct access has already failed, unless LAN access itself is the subject of the test.
+
+Run `tools/real-device-preview-gate.mjs` before showing any URL. The gate must prove all of the following:
+
+- worktree `HEAD` exactly matches the target commit SHA;
+- local preview root returns HTTP 200;
+- public preview root returns HTTP 200;
+- a target-change marker exists in both the local and public served file.
+
+The gate is fail-closed: do not give the human a URL unless it prints `REAL_DEVICE_PREVIEW_GATE=PASS` and `USER_READY_URL=...`.
+
+The preview identity includes PR number, short SHA, and purpose; the gate resolves the current PR HEAD directly from origin before allowing the URL.
+
+After the real-device check, stop the dedicated preview server and tunnel. Do not leave obsolete preview ports or tunnels running.
 ## Scope Selection
 
 Choose checks from the actual diff and impact area, not from fixed file names alone.

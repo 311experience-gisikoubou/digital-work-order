@@ -40,6 +40,15 @@ This repository contains the digital dental work order application.
 - This is a repository-local skill, not yet synchronized from
   `ai-dev-foundation` — the same treatment as `manual-ui-smoke-test`.
 
+## Real-Device Preview Identity Gate
+
+Before giving a human any iPad/Safari verification URL, the AI must use a target-commit clean worktree and a dedicated preview port, then run `tools/real-device-preview-gate.mjs`.
+
+A URL may be shown only when the gate proves: exact target HEAD SHA, local HTTP 200, public HTTP 200, and a target-change marker present in both local and public served content. The gate is fail-closed; `REAL_DEVICE_PREVIEW_GATE=PASS` and `USER_READY_URL=...` are required.
+
+The preview identity includes PR number, short SHA, and purpose; the gate resolves the current PR HEAD directly from origin before allowing the URL.
+
+For this repository, if LAN direct access has already failed in the same iPad environment and Cloudflare Quick Tunnel has succeeded, Quick Tunnel is the default route unless LAN behavior itself is what is being tested. After the human check, stop the dedicated server and tunnel so stale previews cannot be mistaken for the next target.
 ## Changes That Usually Need Real-Device UI Checks
 
 - Handwriting
