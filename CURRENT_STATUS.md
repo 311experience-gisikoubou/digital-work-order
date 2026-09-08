@@ -4,15 +4,15 @@
 仕様書・履歴・議事録を複製せず、現在の作業状態だけを保ちます。
 
 - Status: `ACTIVE`
-- Current phase: `paper work order / Issue #45 manual-entry reference UI implementation`
-- Current branch: `feat/paper-image-reference-input`
-- Current PR: `#47 (Ready)`
-- Last completed gate: `Issue #45 iPad Safari landscape + portrait real-device checks PASS; 32/32 relevant automated tests PASS; git diff --check PASS`
+- Current phase: `real-device preview safety / PR #51 final audit`
+- Current branch: `chore/real-device-preview-gate`
+- Current PR: `#51 (Ready after main sync)`
+- Last completed gate: `PR #47 merged; PR #51 synced with latest main; dedicated gate tests 2/2 PASS; full Node suite 43/43 PASS; git diff --check PASS`
 - Current blocker: `NONE`
-- Next action: `explicit merge authorization`
-- PC-free work: `merge authorization待ち`
+- Next action: `final GitHub audit for PR #51, then explicit merge authorization`
+- PC-free work: `PR #51 final GitHub audit / merge decision`
 - PC-required work: `NONE`
-- User action required: `NO`
+- User action required: `YES（PR #51のmerge判断のみ）`
 - Merge authorized: `NO`
 - Last updated: `2026-09-08`
 
