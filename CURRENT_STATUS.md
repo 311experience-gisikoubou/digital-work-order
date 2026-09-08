@@ -6,11 +6,11 @@
 - Status: `ACTIVE`
 - Current phase: `paper work order / Issue #45 manual-entry reference UI implementation`
 - Current branch: `feat/paper-image-reference-input`
-- Current PR: `#47 (Draft)`
-- Last completed gate: `iPad Safari landscape PASS; portrait layout NG found; orientation-aware CSS fix implemented + 32/32 relevant automated tests PASS; git diff --check PASS`
-- Current blocker: `portrait iPad Safari recheck required after CSS fix`
-- Next action: `recheck iPad Safari portrait layout with fictional image; landscape already PASS`
-- PC-free work: `final PR audit / GitHub PR readiness`
+- Current PR: `#47 (Ready)`
+- Last completed gate: `Issue #45 iPad Safari landscape + portrait real-device checks PASS; 32/32 relevant automated tests PASS; git diff --check PASS`
+- Current blocker: `NONE`
+- Next action: `explicit merge authorization`
+- PC-free work: `merge authorization待ち`
 - PC-required work: `NONE`
 - User action required: `NO`
 - Merge authorized: `NO`
