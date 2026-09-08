@@ -797,7 +797,7 @@ body.edit-active .tooth-num { display:none; }
 .paper-work-order-reference img { display:block; width:100%; height:auto; max-height:calc(100vh - 180px); object-fit:contain; background:#fff; border:1px solid var(--border-color); border-radius:var(--radius-sm); }
 #view-clinic.active.paper-reference-active { display:grid; grid-template-columns:minmax(280px, 38%) minmax(0, 1fr); gap:16px; align-items:start; max-width:1400px; }
 #view-clinic.paper-reference-active .paper-work-order-reference { position:sticky; top:80px; max-height:calc(100vh - 96px); overflow:auto; }
-@media (max-width: 900px) {
+@media (max-width: 900px), (orientation: portrait) {
   #view-clinic.active.paper-reference-active { display:block; max-width:900px; }
   #view-clinic.paper-reference-active .paper-work-order-reference { position:static; max-height:none; margin-bottom:12px; }
   .paper-work-order-reference img { max-height:34vh; }

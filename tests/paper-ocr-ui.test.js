@@ -175,6 +175,6 @@ test('clinic markup keeps one existing form and responsive reference layout', ()
   assert.equal((html.match(/class="clinic-form-content"/g) || []).length, 1);
   assert.equal((html.match(/id="paper-work-order-reference-image"/g) || []).length, 1);
   assert.match(css, /#view-clinic.active.paper-reference-active[^}]*grid-template-columns/);
-  assert.ok(css.includes('@media (max-width: 900px) {'));
+  assert.ok(css.includes('@media (max-width: 900px), (orientation: portrait) {'));
   assert.ok(css.includes('#view-clinic.active.paper-reference-active { display:block; max-width:900px; }'));
 });

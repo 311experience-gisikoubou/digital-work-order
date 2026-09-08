@@ -7,9 +7,9 @@
 - Current phase: `paper work order / Issue #45 manual-entry reference UI implementation`
 - Current branch: `feat/paper-image-reference-input`
 - Current PR: `#47 (Draft)`
-- Last completed gate: `Issue #45 unified implementation + 32/32 relevant automated tests PASS; git diff --check PASS; origin/main dev.47 integrated`
-- Current blocker: `NONE before iPad Safari layout check`
-- Next action: `iPad Safari landscape/portrait real-device check with fictional image`
+- Last completed gate: `iPad Safari landscape PASS; portrait layout NG found; orientation-aware CSS fix implemented + 32/32 relevant automated tests PASS; git diff --check PASS`
+- Current blocker: `portrait iPad Safari recheck required after CSS fix`
+- Next action: `recheck iPad Safari portrait layout with fictional image; landscape already PASS`
 - PC-free work: `NONE before real-device result`
 - PC-required work: `iPad Safari reference UI real-device check`
 - User action required: `YES（準備済みの架空画像によるiPad Safari確認のみ）`
