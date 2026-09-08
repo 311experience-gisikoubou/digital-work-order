@@ -4,15 +4,15 @@
 仕様書・履歴・議事録を複製せず、現在の作業状態だけを保ちます。
 
 - Status: `ACTIVE`
-- Current phase: `real-device preview safety / PR #51 final audit`
-- Current branch: `chore/real-device-preview-gate`
-- Current PR: `#51 (Ready after main sync)`
-- Last completed gate: `PR #47 merged; PR #51 synced with latest main; dedicated gate tests 2/2 PASS; full Node suite 43/43 PASS; git diff --check PASS`
+- Current phase: `merge authorization safety / Issue #53 implementation and final audit`
+- Current branch: `chore/merge-authorization-gate`
+- Current PR: `NONE (Issue #53 branch; PR creation pending)`
+- Last completed gate: `PR #52 is already on main; Issue #53 merge-execution gate selftest PASS; existing authorization gate PASS; full Node suite 54/54 PASS; merged-PR live fail-closed check PASS; git diff --check PASS`
 - Current blocker: `NONE`
-- Next action: `final GitHub audit for PR #51, then explicit merge authorization`
-- PC-free work: `PR #51 final GitHub audit / merge decision`
+- Next action: `diff audit, commit/push Issue #53 branch, create PR, final GitHub audit`
+- PC-free work: `Issue #53 PR creation / final GitHub audit`
 - PC-required work: `NONE`
-- User action required: `YES（PR #51のmerge判断のみ）`
+- User action required: `NO（PR準備完了までは不要）`
 - Merge authorized: `NO`
 - Last updated: `2026-09-08`
 
@@ -22,6 +22,7 @@
 - PR #42 / Issue #41の精度改善実験はmergeせず終了。手入力を主経路とする。
 - Issue #45は既存Object URLを再利用し、既存医院側フォームへ紙画像参照UIだけを追加する。
 - 保存形式・PDF・歯式・clasp・drawing・collectFormData()は変更しない。
+- PR #52 / Issue #50はmainに入った。並行コンテキストによる想定外state driftを検出したため、Issue #53でmerge実行ゲートを補強中。自動revertは行わない。
 
 ## Rules
 
