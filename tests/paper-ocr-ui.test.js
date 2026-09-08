@@ -6,10 +6,14 @@ const keys = ['clinicName', 'doctorName', 'patientName', 'deliveryDate'];
 function setup() {
   const nodes = new Map(), events = {}, revoked = [], created = [];
   class Element {
-    constructor() { this.value = ''; this.checked = false; this.hidden = false; this.files = []; this.listeners = {}; this.textContent = ''; }
+    constructor() {
+      this.value = ''; this.checked = false; this.hidden = false; this.files = []; this.listeners = {}; this.textContent = ''; this.dataset = {}; this.clickCount = 0;
+      const classes = new Set();
+      this.classList = { add: (...names) => names.forEach(name => classes.add(name)), remove: (...names) => names.forEach(name => classes.delete(name)), contains: name => classes.has(name), toggle: (name, force) => { const next = force === undefined ? !classes.has(name) : Boolean(force); if (next) classes.add(name); else classes.delete(name); return next; } };
+    }
     addEventListener(name, callback) { this.listeners[name] = callback; }
     fire(name) { return this.listeners[name]?.(); }
-    click() { return this.fire('click'); }
+    click() { this.clickCount++; return this.fire('click'); }
     setAttribute(name, value) { this[name] = value; }
     insertBefore(node) { assert.equal(nodes.has(node.id), false); nodes.set(node.id, node); }
     set innerHTML(html) {
@@ -20,13 +24,16 @@ function setup() {
     }
     removeAttribute(name) { delete this[name]; }
   }
-  const ids = ['view-lab', 'clinic-name', 'doctor-name', 'patient-name', 'delivery-date'];
+  const ids = ['view-lab', 'view-clinic', 'paper-work-order-reference', 'paper-work-order-reference-image', 'paper-reference-body', 'paper-reference-toggle', 'clinic-name', 'doctor-name', 'patient-name', 'delivery-date'];
   ids.forEach(id => nodes.set(id, new Element()));
+  nodes.get('paper-work-order-reference').hidden = true;
+  const clinicTab = new Element();
+  clinicTab.addEventListener('click', () => { nodes.get('view-clinic').classList.add('active'); nodes.get('view-lab').classList.remove('active'); });
   let terminateCount = 0, recognizeResult = async () => ({ data: { blocks: [{ paragraphs: [{ lines: [
     { text: '患者名：架空患者', confidence: 99 }, { text: '納期：2026/10/20', confidence: 99 }
   ] }] }] } });
   const scope = { Blob, URL: class extends URL { static createObjectURL(file) { created.push(file); return 'blob:synthetic-' + created.length; } static revokeObjectURL(url) { revoked.push(url); } },
-    document: { baseURI: 'http://localhost/app/index.html', getElementById: id => nodes.get(id), createElement: () => new Element() },
+    document: { baseURI: 'http://localhost/app/index.html', getElementById: id => nodes.get(id), createElement: () => new Element(), querySelector: selector => selector === '.tab-btn[data-tab="clinic"]' ? clinicTab : null },
     addEventListener: (name, callback) => { events[name] = callback; },
     setTimeout: callback => { events.timeout = callback; return 1; }, clearTimeout() {},
     Tesseract: { createWorker: async () => ({ recognize: () => recognizeResult(), terminate: async () => { terminateCount++; } }) } };
@@ -38,7 +45,7 @@ function setup() {
     const file = new Blob(['synthetic'], { type: 'image/png' }); file.name = 'synthetic.png';
     get('paper-work-order-import').files = [file]; get('paper-work-order-import').fire('change');
   };
-  return { get, select, events, revoked, created, init: scope.ConsumerRuleConsumer.init, setRecognition: fn => { recognizeResult = fn; }, terminated: () => terminateCount };
+  return { get, select, events, revoked, created, clinicTab, init: scope.ConsumerRuleConsumer.init, setRecognition: fn => { recognizeResult = fn; }, terminated: () => terminateCount };
 }
 test('one Phase 1 intake mounts once with original camera, preview and discard IDs', () => {
   const ui = setup(); const panel = ui.get('paper-work-order-import-panel'); ui.init();
@@ -119,4 +126,55 @@ test('invalid image selection preserves Phase 1 clearing semantics', async () =>
   ui.get('paper-work-order-import').files = [new Blob(['synthetic'], { type: 'text/plain' })];
   ui.get('paper-work-order-import').fire('change');
   assert.equal(ui.get('paper-work-order-preview-wrap').hidden, true); assert.equal(ui.get('paper-patientName').value, '');
+});
+
+
+test('paper reference reuses the intake Object URL and navigates through the existing clinic tab', () => {
+  const ui = setup();
+  assert.equal(ui.get('paper-work-order-reference').hidden, true);
+  ui.select();
+  assert.equal(ui.created.length, 1);
+  assert.equal(ui.get('paper-work-order-preview').src, 'blob:synthetic-1');
+  assert.equal(ui.get('paper-work-order-reference-image').src, 'blob:synthetic-1');
+  assert.equal(ui.get('paper-work-order-reference').hidden, false);
+  assert.equal(ui.get('view-clinic').classList.contains('paper-reference-active'), true);
+  ui.get('paper-work-order-open-clinic').click();
+  assert.equal(ui.clinicTab.clickCount, 1);
+  assert.equal(ui.get('view-clinic').classList.contains('active'), true);
+  assert.equal(ui.get('paper-reference-body').hidden, false);
+});
+
+test('paper reference follows replacement and clears on discard and pagehide', () => {
+  const ui = setup(); ui.select(); ui.select();
+  assert.deepEqual(ui.revoked, ['blob:synthetic-1']);
+  assert.equal(ui.get('paper-work-order-reference-image').src, 'blob:synthetic-2');
+  ui.get('paper-work-order-discard').click();
+  assert.equal(ui.get('paper-work-order-reference').hidden, true);
+  assert.equal(ui.get('paper-work-order-reference-image').src, undefined);
+  assert.equal(ui.get('view-clinic').classList.contains('paper-reference-active'), false);
+  ui.select(); ui.events.pagehide();
+  assert.equal(ui.get('paper-work-order-reference').hidden, true);
+  assert.equal(ui.get('paper-work-order-reference-image').src, undefined);
+});
+
+test('paper reference can be collapsed without changing the stored image source', () => {
+  const ui = setup(); ui.select();
+  ui.get('paper-reference-toggle').click();
+  assert.equal(ui.get('paper-reference-body').hidden, true);
+  assert.equal(ui.get('paper-work-order-reference-image').src, 'blob:synthetic-1');
+  assert.equal(ui.get('paper-reference-toggle').textContent, '画像を表示');
+  ui.get('paper-reference-toggle').click();
+  assert.equal(ui.get('paper-reference-body').hidden, false);
+  assert.equal(ui.get('paper-reference-toggle').textContent, '画像を隠す');
+});
+
+test('clinic markup keeps one existing form and responsive reference layout', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('style.css', 'utf8');
+  assert.equal((html.match(/id="clinic-name"/g) || []).length, 1);
+  assert.equal((html.match(/class="clinic-form-content"/g) || []).length, 1);
+  assert.equal((html.match(/id="paper-work-order-reference-image"/g) || []).length, 1);
+  assert.match(css, /#view-clinic.active.paper-reference-active[^}]*grid-template-columns/);
+  assert.ok(css.includes('@media (max-width: 900px), (orientation: portrait) {'));
+  assert.ok(css.includes('#view-clinic.active.paper-reference-active { display:block; max-width:900px; }'));
 });

@@ -119,6 +119,25 @@
     paperWorkOrderObjectUrl = '';
   }
 
+  function syncPaperWorkOrderReference() {
+    const panel = document.getElementById('paper-work-order-reference');
+    const image = document.getElementById('paper-work-order-reference-image');
+    const clinicView = document.getElementById('view-clinic');
+    const hasImage = Boolean(paperWorkOrderObjectUrl);
+    if (image) { if (hasImage) image.src = paperWorkOrderObjectUrl; else image.removeAttribute('src'); }
+    if (panel) panel.hidden = !hasImage;
+    if (clinicView && clinicView.classList) clinicView.classList.toggle('paper-reference-active', hasImage);
+  }
+
+  function expandPaperWorkOrderReference() {
+    const panel = document.getElementById('paper-work-order-reference');
+    const body = document.getElementById('paper-reference-body');
+    const toggle = document.getElementById('paper-reference-toggle');
+    if (panel && panel.classList) panel.classList.remove('is-collapsed');
+    if (body) body.hidden = false;
+    if (toggle) { toggle.textContent = '画像を隠す'; toggle.setAttribute('aria-expanded', 'true'); }
+  }
+
   function clearPaperWorkOrderPreview() {
     paperWorkOrderFile = null;
     resetPaperWorkOrderOCR();
@@ -133,6 +152,7 @@
     if (filename) filename.textContent = '';
     if (status) status.textContent = '画像は端末内でのみ一時表示し、保存・外部送信しません。';
     if (input) input.value = '';
+    syncPaperWorkOrderReference();
   }
 
   function showPaperWorkOrderPreview(file) {
@@ -157,6 +177,7 @@
     if (filename) filename.textContent = file.name || '撮影した画像';
     if (status) status.textContent = '端末内で一時表示中です。読み取りは「端末内で読み取る」から開始できます。';
     if (input) input.value = '';
+    syncPaperWorkOrderReference();
   }
 
   function initPaperWorkOrderImport() {
@@ -177,6 +198,7 @@
       <div id="paper-work-order-preview-wrap" hidden style="margin-top:12px;">
         <div id="paper-work-order-filename" style="font-size:13px;font-weight:700;margin-bottom:8px;word-break:break-all;"></div>
         <img id="paper-work-order-preview" alt="取り込んだ紙指示書のプレビュー" style="display:block;max-width:100%;max-height:70vh;border:1px solid var(--border-color);border-radius:var(--radius-sm);object-fit:contain;background:#fff;">
+        <button type="button" class="btn-primary" id="paper-work-order-open-clinic" style="margin-top:10px;">画像を見ながら入力</button>
         <button type="button" class="btn-secondary" id="paper-work-order-discard" style="margin-top:10px;">画像を破棄</button>
       </div>
       <p>OCR試行版：架空のテスト画像のみ使用してください。</p>
@@ -198,9 +220,26 @@
     const input = document.getElementById('paper-work-order-import');
     const button = document.getElementById('paper-work-order-import-button');
     const discard = document.getElementById('paper-work-order-discard');
+    const openClinic = document.getElementById('paper-work-order-open-clinic');
     button.addEventListener('click', () => input.click());
     input.addEventListener('change', () => showPaperWorkOrderPreview(input.files && input.files[0]));
     discard.addEventListener('click', clearPaperWorkOrderPreview);
+    openClinic.addEventListener('click', () => {
+      if (!paperWorkOrderObjectUrl) return;
+      syncPaperWorkOrderReference();
+      expandPaperWorkOrderReference();
+      const clinicTab = document.querySelector && document.querySelector('.tab-btn[data-tab="clinic"]');
+      if (clinicTab && typeof clinicTab.click === 'function') clinicTab.click();
+    });
+    const referenceToggle = document.getElementById('paper-reference-toggle');
+    const referenceBody = document.getElementById('paper-reference-body');
+    const referencePanel = document.getElementById('paper-work-order-reference');
+    if (referenceToggle && referenceBody && referencePanel) referenceToggle.addEventListener('click', () => {
+      const collapsed = referencePanel.classList.toggle('is-collapsed');
+      referenceBody.hidden = collapsed;
+      referenceToggle.textContent = collapsed ? '画像を表示' : '画像を隠す';
+      referenceToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    });
     initPaperWorkOrderOCR();
   }
 
