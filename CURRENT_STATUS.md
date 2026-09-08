@@ -4,15 +4,15 @@
 仕様書・履歴・議事録を複製せず、現在の作業状態だけを保ちます。
 
 - Status: `ACTIVE`
-- Current phase: `real-device preview safety / PR #51 final audit`
-- Current branch: `chore/real-device-preview-gate`
-- Current PR: `#51 (Ready after main sync)`
-- Last completed gate: `PR #47 merged; PR #51 synced with latest main; dedicated gate tests 2/2 PASS; full Node suite 43/43 PASS; git diff --check PASS`
+- Current phase: `Stage 2-B / delivery intake JSON export / PR #52 final audit`
+- Current branch: `feat/delivery-intake-json-export`
+- Current PR: `#52 (Ready after PR #51 main sync)`
+- Last completed gate: `PR #51 merged; PR #52 synced with latest main; full Node suite 53/53 PASS; git diff --check PASS; tested product files unchanged after main sync`
 - Current blocker: `NONE`
-- Next action: `final GitHub audit for PR #51, then explicit merge authorization`
-- PC-free work: `PR #51 final GitHub audit / merge decision`
+- Next action: `final GitHub audit for PR #52, then explicit merge authorization`
+- PC-free work: `PR #52 final GitHub audit / merge decision`
 - PC-required work: `NONE`
-- User action required: `YES（PR #51のmerge判断のみ）`
+- User action required: `YES（PR #52のmerge判断のみ）`
 - Merge authorized: `NO`
 - Last updated: `2026-09-08`
 
