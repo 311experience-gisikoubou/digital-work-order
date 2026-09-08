@@ -10,9 +10,9 @@
 - Last completed gate: `iPad Safari landscape PASS; portrait layout NG found; orientation-aware CSS fix implemented + 32/32 relevant automated tests PASS; git diff --check PASS`
 - Current blocker: `portrait iPad Safari recheck required after CSS fix`
 - Next action: `recheck iPad Safari portrait layout with fictional image; landscape already PASS`
-- PC-free work: `NONE before real-device result`
-- PC-required work: `iPad Safari reference UI real-device check`
-- User action required: `YES（準備済みの架空画像によるiPad Safari確認のみ）`
+- PC-free work: `final PR audit / GitHub PR readiness`
+- PC-required work: `NONE`
+- User action required: `NO`
 - Merge authorized: `NO`
 - Last updated: `2026-09-08`
 
