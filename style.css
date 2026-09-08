@@ -784,3 +784,22 @@ body.edit-active .tooth-num { display:none; }
 .paper-candidate label { display: flex; align-items: center; gap: 8px; min-height: 44px; }
 .paper-candidate input[type="checkbox"] { width: 24px; height: 24px; }
 @media print { .paper-intake { display: none; } }
+
+
+/* ===== 紙指示書を見ながら既存フォームへ入力 ===== */
+.clinic-form-content { min-width: 0; }
+.paper-work-order-reference { padding: 14px; border: 1px solid var(--border-color); border-radius: var(--radius-lg); background: #f8fbfd; }
+.paper-work-order-reference[hidden], .paper-reference-body[hidden] { display: none !important; }
+.paper-reference-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
+.paper-reference-heading strong { font-size:15px; color:var(--text-primary); }
+.paper-reference-heading button { min-height:40px; }
+.paper-reference-body { overflow:auto; }
+.paper-work-order-reference img { display:block; width:100%; height:auto; max-height:calc(100vh - 180px); object-fit:contain; background:#fff; border:1px solid var(--border-color); border-radius:var(--radius-sm); }
+#view-clinic.active.paper-reference-active { display:grid; grid-template-columns:minmax(280px, 38%) minmax(0, 1fr); gap:16px; align-items:start; max-width:1400px; }
+#view-clinic.paper-reference-active .paper-work-order-reference { position:sticky; top:80px; max-height:calc(100vh - 96px); overflow:auto; }
+@media (max-width: 900px), (orientation: portrait) {
+  #view-clinic.active.paper-reference-active { display:block; max-width:900px; }
+  #view-clinic.paper-reference-active .paper-work-order-reference { position:static; max-height:none; margin-bottom:12px; }
+  .paper-work-order-reference img { max-height:34vh; }
+}
+@media print { .paper-work-order-reference { display:none !important; } }
