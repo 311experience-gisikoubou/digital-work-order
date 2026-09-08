@@ -31,7 +31,9 @@ function joinUrl(base, relativePath) {
 
 export async function runGate(args) {
   const worktree = requireArg(args, 'worktree');
-  const expectedSha = requireArg(args, 'sha').toLowerCase();
+  const prNumber = requireArg(args, 'pr');
+  const purpose = requireArg(args, 'purpose');
+  if (!/^\d+$/.test(prNumber)) throw new Error('Invalid --pr');
   const localBase = requireArg(args, 'local');
   const publicBase = requireArg(args, 'public');
   const markerPath = requireArg(args, 'marker-path');
@@ -40,6 +42,14 @@ export async function runGate(args) {
   const actualSha = execFileSync('git', ['-C', worktree, 'rev-parse', 'HEAD'], {
     encoding: 'utf8',
   }).trim().toLowerCase();
+  const prRef = `refs/pull/${prNumber}/head`;
+  const remoteLine = execFileSync('git', ['-C', worktree, 'ls-remote', 'origin', prRef], {
+    encoding: 'utf8',
+  }).trim();
+  const prHeadSha = remoteLine.split(/\s+/)[0]?.toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(prHeadSha ?? '')) {
+    throw new Error(`Unable to resolve PR #${prNumber} HEAD from origin`);
+  }
 
   const localRoot = await getText(localBase);
   const publicRoot = await getText(publicBase);
@@ -47,7 +57,7 @@ export async function runGate(args) {
   const publicMarker = await getText(joinUrl(publicBase, markerPath));
 
   const checks = {
-    headSha: actualSha === expectedSha,
+    prHeadSha: actualSha === prHeadSha,
     localHttp200: localRoot.status === 200,
     publicHttp200: publicRoot.status === 200,
     localMarker: localMarker.status === 200 && localMarker.text.includes(marker),
@@ -58,7 +68,10 @@ export async function runGate(args) {
   return {
     pass,
     checks,
-    expectedSha,
+    prNumber,
+    purpose,
+    previewId: `PR#${prNumber}@${actualSha.slice(0, 7)}:${purpose}`,
+    prHeadSha,
     actualSha,
     worktree,
     localBase,

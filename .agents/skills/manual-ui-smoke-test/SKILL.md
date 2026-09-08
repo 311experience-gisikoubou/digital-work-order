@@ -43,6 +43,8 @@ Run `tools/real-device-preview-gate.mjs` before showing any URL. The gate must p
 
 The gate is fail-closed: do not give the human a URL unless it prints `REAL_DEVICE_PREVIEW_GATE=PASS` and `USER_READY_URL=...`.
 
+The preview identity includes PR number, short SHA, and purpose; the gate resolves the current PR HEAD directly from origin before allowing the URL.
+
 After the real-device check, stop the dedicated preview server and tunnel. Do not leave obsolete preview ports or tunnels running.
 ## Scope Selection
 

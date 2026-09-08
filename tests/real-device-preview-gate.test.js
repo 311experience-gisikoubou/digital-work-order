@@ -19,6 +19,8 @@ function makeRepo() {
     'commit', '-m', 'fixture',
   ], { stdio: 'ignore' });
   const sha = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', dir]);
+  execFileSync('git', ['-C', dir, 'update-ref', 'refs/pull/47/head', sha]);
   return { dir, sha };
 }
 function startServer() {
@@ -55,7 +57,8 @@ test('prints user-ready URL only when every check passes', async () => {
   try {
     const result = await runCli([
       '--worktree', repo.dir,
-      '--sha', repo.sha,
+      '--pr', '47',
+      '--purpose', 'fixture-preview',
       '--local', local.url,
       '--public', publicServer.url,
       '--marker-path', 'marker.js',
@@ -75,9 +78,13 @@ test('fails closed and hides public URL when any check fails', async () => {
   const local = await startServer();
   const publicServer = await startServer();
   try {
+    fs.writeFileSync(path.join(repo.dir, 'later.txt'), 'new local head');
+    execFileSync('git', ['-C', repo.dir, 'add', '.']);
+    execFileSync('git', ['-C', repo.dir, '-c', 'user.name=DWO Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'later'], { stdio: 'ignore' });
     const result = await runCli([
       '--worktree', repo.dir,
-      '--sha', '0000000000000000000000000000000000000000',
+      '--pr', '47',
+      '--purpose', 'fixture-preview',
       '--local', local.url,
       '--public', publicServer.url,
       '--marker-path', 'marker.js',
