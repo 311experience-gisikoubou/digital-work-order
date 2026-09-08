@@ -131,6 +131,41 @@ Gate self-test:
 node .agents/skills/final-pr-audit/merge-authorization-gate-selftest.mjs .agents/skills/final-pr-audit/merge-authorization-gate.mjs
 ```
 
+## Merge Execution Receipt Gate
+
+`PREPARED_FOR_MERGE` and merge authorization are not sufficient by themselves to execute the merge. Immediately before the actual merge, create and verify a short-lived GitHub-backed authorization receipt tied to the exact PR and exact current HEAD.
+
+Do not treat `進めて`, `次`, `よろしく`, `続けて`, or equivalent continuation language as merge authorization. A receipt may be posted only when merge authorization is currently valid: either the human explicitly authorized merge, or an earlier explicit authorization is still valid and `merge-authorization-gate.mjs` returned `PERSIST` after the latest HEAD audit.
+
+Post one top-level PR comment using exactly this format:
+
+```text
+MERGE_AUTHORIZATION_V1
+PR: <pr-number>
+HEAD: <40-char-current-head-sha>
+AUTHORIZED: YES
+SOURCE: EXPLICIT_HUMAN
+```
+
+Use `SOURCE: PERSISTED_AFTER_AUDIT` only when the existing authorization legitimately persisted through a later audited correction. The receipt is execution evidence, not a substitute for human authorization.
+
+Then run:
+
+```text
+node .agents/skills/final-pr-audit/merge-execution-gate.mjs --repo <owner/repo> --pr <number> --base main --author <authorized-github-login>
+```
+
+The execution gate independently re-reads the public GitHub PR and top-level comments. It fails closed unless the PR is open, not Draft, targets the expected base branch, and has a receipt from the expected GitHub account that matches the exact PR and exact current HEAD and is no more than 30 minutes old.
+
+Proceed to the merge API only when the gate prints `MERGE_EXECUTION_GATE=PASS`. Use the exact `EXPECTED_HEAD_SHA` returned by the gate as the merge operation's expected-head precondition. Never call the merge API without that exact-head precondition. If the PR closes, merges, becomes Draft, changes base, or changes HEAD between audit/receipt/gate/merge, stop and re-evaluate; do not silently mint a replacement receipt unless authorization is still valid under the persistence gate.
+
+After merge, verify the PR is `MERGED` and `main` points at the reported merge commit. A receipt cannot authorize a different PR or HEAD, and a merged/closed PR fails the gate.
+
+Execution-gate self-test:
+
+```text
+node .agents/skills/final-pr-audit/merge-execution-gate-selftest.mjs
+```
 ### `PREPARED_FOR_MERGE` criteria
 
 Report `PREPARED_FOR_MERGE=yes` only when all applicable conditions are proven:
