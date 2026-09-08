@@ -7,14 +7,14 @@
 - Current phase: `paper work order / Issue #45 manual-entry reference UI implementation`
 - Current branch: `feat/paper-image-reference-input`
 - Current PR: `#47 (Draft)`
-- Last completed gate: `Issue #45 implementation + 30/30 relevant automated tests PASS; git diff --check PASS; Draft PR #47 opened`
+- Last completed gate: `Issue #45 unified implementation + 32/32 relevant automated tests PASS; git diff --check PASS; origin/main dev.47 integrated`
 - Current blocker: `NONE before iPad Safari layout check`
-- Next action: `final local audit -> commit/push -> Draft PR -> iPad Safari landscape/portrait check`
-- PC-free work: `Draft PR metadata/current-head audit after push`
+- Next action: `iPad Safari landscape/portrait real-device check with fictional image`
+- PC-free work: `NONE before real-device result`
 - PC-required work: `iPad Safari reference UI real-device check`
-- User action required: `NO until iPad Safari check is prepared`
+- User action required: `YES（準備済みの架空画像によるiPad Safari確認のみ）`
 - Merge authorized: `NO`
-- Last updated: `2026-09-07`
+- Last updated: `2026-09-08`
 
 ## Optional short notes
 

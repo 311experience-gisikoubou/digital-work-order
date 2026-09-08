@@ -43,6 +43,11 @@
      医院側入力ビュー
      ============================= -->
 <div class="view active" id="view-clinic">
+  <aside id="paper-work-order-reference" class="paper-work-order-reference" aria-labelledby="paper-work-order-reference-title" hidden>
+    <div class="paper-reference-heading"><strong id="paper-work-order-reference-title">紙指示書</strong><button type="button" class="btn-secondary" id="paper-reference-toggle" aria-expanded="true">画像を隠す</button></div>
+    <div id="paper-reference-body" class="paper-reference-body"><img id="paper-work-order-reference-image" alt="入力参照用の紙指示書"></div>
+  </aside>
+  <div class="clinic-form-content">
 
   <!-- 1. 患者・医院情報 -->
   <div class="card">
@@ -828,6 +833,7 @@
   <div class="submit-area">
     <button class="submit-btn" id="submit-btn">指示書を送信する　→</button>
   </div>
+  </div><!-- /clinic-form-content -->
 
 </div><!-- /view-clinic -->
 
