@@ -208,7 +208,8 @@ async function syncNextAppointmentParts() {
 // ============================================================
 //  フォームデータ収集
 // ============================================================
-function collectFormData() {
+function collectFormData(options) {
+  const assignWorkOrderRef = options?.assignWorkOrderRef === true;
   const ins = state.insuranceType;
   const insKey = ins === 'insurance' ? 'ins' : 'jishi';
 
@@ -339,6 +340,7 @@ function collectFormData() {
     memoStrokes:  memoSnapshot,
 
     // メタデータ
+    ...(assignWorkOrderRef ? { workOrderRef: generateWorkOrderRef() } : {}),
     status:       'pending',   // 未受付
     createdAt:    new Date().toISOString(),
     id:           'local_' + Date.now()
@@ -350,7 +352,16 @@ function collectFormData() {
 //  送信処理
 // ============================================================
 document.getElementById('submit-btn').addEventListener('click', async () => {
-  const data = collectFormData();
+  let data;
+  try {
+    data = collectFormData({ assignWorkOrderRef: true });
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('SECURE_WORK_ORDER_REF_')) {
+      showToast('安全な指示書IDを生成できないため、送信を中止しました', 'error');
+      return;
+    }
+    throw error;
+  }
   const errors = validate(data);
 
   if (errors.length > 0) {
