@@ -1,21 +1,31 @@
 #!/usr/bin/env node
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
+import { readFile } from 'node:fs/promises';
 
 const RECEIPT_HEADER = 'MERGE_AUTHORIZATION_V1';
 const MAX_RECEIPT_AGE_MS = 30 * 60 * 1000;
 const MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
+const MAX_EVIDENCE_AGE_MS = 5 * 60 * 1000;
+const MAX_EVIDENCE_FUTURE_SKEW_MS = 2 * 60 * 1000;
+const MAX_EVIDENCE_BYTES = 64 * 1024;
+const FETCH_TIMEOUT_MS = 10 * 1000;
+const CLI_ARGUMENTS = new Set(['repo', 'pr', 'base', 'author', 'evidence-file']);
 const RECEIPT_SOURCES = new Set(['EXPLICIT_HUMAN', 'PERSISTED_AFTER_AUDIT']);
+const NO_EVIDENCE = Symbol('NO_EVIDENCE');
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i += 2) {
     const key = argv[i];
     const value = argv[i + 1];
-    if (!key?.startsWith('--') || value === undefined) {
+    if (!key?.startsWith('--') || value === undefined || value === '') {
       throw new Error(`Invalid arguments near: ${key ?? '<end>'}`);
     }
-    out[key.slice(2)] = value;
+    const name = key.slice(2);
+    if (!CLI_ARGUMENTS.has(name)) throw new Error(`Unknown argument: --${name}`);
+    if (Object.hasOwn(out, name)) throw new Error(`Duplicate argument: --${name}`);
+    out[name] = value;
   }
   return out;
 }
@@ -51,18 +61,68 @@ export function parseAuthorizationReceipt(body) {
     source: values.SOURCE,
   };
 }
-async function fetchJson(url, fetchImpl) {
-  const response = await fetchImpl(url, {
-    cache: 'no-store',
-    redirect: 'follow',
-    headers: {
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'digital-work-order-merge-execution-gate',
-    },
-  });
-  if (!response.ok) throw new Error(`GitHub API HTTP ${response.status}`);
-  return response.json();
+function evidenceFailure(code, prNumber, baseBranch) {
+  return {
+    pass: false,
+    checks: { evidence: false, prNumber: false, prOpen: false, notDraft: false, baseBranch: false, headSha: false, authorizationReceipt: false },
+    finding: code,
+    prNumber,
+    baseBranch,
+    actualHeadSha: '(unverified)',
+    expectedHeadSha: null,
+    authorizationCommentId: null,
+    authorizationSource: null,
+  };
+}
+
+export function parseEvidenceJson(raw) {
+  const text = String(raw ?? '');
+  const jsonText = text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
+  let parsed;
+  try { parsed = JSON.parse(jsonText); } catch { throw new Error('Invalid evidence JSON'); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid evidence JSON');
+  return parsed;
+}
+
+export function validateMergeEvidence(evidence, { repo, prNumber, nowMs }) {
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
+  if (evidence.schemaVersion !== 1) return { ok: false, code: 'EVIDENCE_SCHEMA_UNSUPPORTED' };
+  if (evidence.repository !== repo) return { ok: false, code: 'EVIDENCE_REPOSITORY_MISMATCH' };
+  const fetchedMs = Date.parse(evidence.fetchedAt ?? '');
+  if (!Number.isFinite(fetchedMs)) return { ok: false, code: 'EVIDENCE_FETCH_TIME_INVALID' };
+  const age = nowMs - fetchedMs;
+  if (age < -MAX_EVIDENCE_FUTURE_SKEW_MS) return { ok: false, code: 'EVIDENCE_FROM_FUTURE' };
+  if (age > MAX_EVIDENCE_AGE_MS) return { ok: false, code: 'EVIDENCE_STALE' };
+  if (!evidence.pr || typeof evidence.pr !== 'object' || Array.isArray(evidence.pr)) return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
+  if (Number(evidence.pr.number) !== prNumber) return { ok: false, code: 'EVIDENCE_PR_MISMATCH' };
+  if (!Array.isArray(evidence.authorizationComments) || evidence.authorizationComments.length > 1000) return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
+  for (const comment of evidence.authorizationComments) {
+    if (!comment || typeof comment !== 'object' || typeof comment.body !== 'string' || comment.body.length > 2048) return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
+    if (typeof comment.created_at !== 'string' || !comment.user || typeof comment.user.login !== 'string') return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
+  }
+  return { ok: true, pr: evidence.pr, comments: evidence.authorizationComments };
+}
+
+export async function fetchJson(url, fetchImpl, timeoutMs = FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error('Invalid fetch timeout');
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(url, {
+      cache: 'no-store',
+      redirect: 'follow',
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'ai-dev-foundation-merge-execution-gate',
+      },
+    });
+    if (!response.ok) throw new Error(`GitHub API HTTP ${response.status}`);
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function fetchAllComments(apiBase, prNumber, fetchImpl) {
@@ -103,17 +163,38 @@ function classifyReceipt(comments, { author, prNumber, headSha, nowMs }) {
   return { code: 'AUTHORIZATION_RECEIPT_VALID', item: fresh[0] };
 }
 
-export async function runMergeExecutionGate({ repo, prNumber, baseBranch, author, nowMs = Date.now(), fetchImpl = fetch }) {
+export async function runMergeExecutionGate({ repo, prNumber, baseBranch, author, nowMs = null, nowFn = Date.now, fetchImpl = fetch, evidence = NO_EVIDENCE }) {
   const { owner, repo: repoName } = parseRepo(repo);
   if (!Number.isInteger(prNumber) || prNumber <= 0) throw new Error('Invalid PR number');
   if (!/^[A-Za-z0-9_.-]+$/.test(author)) throw new Error('Invalid author');
   if (!/^[A-Za-z0-9._/-]+$/.test(baseBranch)) throw new Error('Invalid base branch');
-  const apiBase = `https://api.github.com/repos/${owner}/${repoName}`;
-  const pr = await fetchJson(`${apiBase}/pulls/${prNumber}`, fetchImpl);
-  const comments = await fetchAllComments(apiBase, prNumber, fetchImpl);
+  if (nowMs !== null && !Number.isFinite(nowMs)) throw new Error('Invalid nowMs');
+  if (typeof nowFn !== 'function') throw new Error('Invalid nowFn');
+
+  let pr;
+  let comments;
+  let effectiveNowMs;
+  if (evidence !== NO_EVIDENCE) {
+    effectiveNowMs = nowMs ?? nowFn();
+    const validated = validateMergeEvidence(evidence, { repo, prNumber, nowMs: effectiveNowMs });
+    if (!validated.ok) return evidenceFailure(validated.code, prNumber, baseBranch);
+    pr = validated.pr;
+    comments = validated.comments;
+  } else {
+    const apiBase = `https://api.github.com/repos/${owner}/${repoName}`;
+    pr = await fetchJson(`${apiBase}/pulls/${prNumber}`, fetchImpl);
+    comments = await fetchAllComments(apiBase, prNumber, fetchImpl);
+    effectiveNowMs = nowMs ?? nowFn();
+  }
+
   const headSha = String(pr?.head?.sha ?? '').toLowerCase();
+  return classifyAndBuild({ pr, comments, author, prNumber, baseBranch, headSha, nowMs: effectiveNowMs });
+}
+
+function classifyAndBuild({ pr, comments, author, prNumber, baseBranch, headSha, nowMs }) {
   const receipt = classifyReceipt(comments, { author, prNumber, headSha, nowMs });
   const checks = {
+    evidence: true,
     prNumber: Number(pr?.number) === prNumber,
     prOpen: pr?.state === 'open' && !pr?.merged_at,
     notDraft: pr?.draft === false,
@@ -123,11 +204,7 @@ export async function runMergeExecutionGate({ repo, prNumber, baseBranch, author
   };
   const pass = Object.values(checks).every(Boolean);
   return {
-    pass,
-    checks,
-    finding: receipt.code,
-    prNumber,
-    baseBranch,
+    pass, checks, finding: receipt.code, prNumber, baseBranch,
     actualHeadSha: headSha || '(missing)',
     expectedHeadSha: pass ? headSha : null,
     authorizationCommentId: pass ? receipt.item.comment.id : null,
@@ -138,18 +215,21 @@ export async function runMergeExecutionGate({ repo, prNumber, baseBranch, author
 async function main() {
   try {
     const args = parseArgs(process.argv.slice(2));
+    let evidence = NO_EVIDENCE;
+    if (Object.hasOwn(args, 'evidence-file')) {
+      const raw = await readFile(args['evidence-file'], 'utf8');
+      if (Buffer.byteLength(raw, 'utf8') > MAX_EVIDENCE_BYTES) throw new Error('Evidence file too large');
+      evidence = parseEvidenceJson(raw);
+    }
     const result = await runMergeExecutionGate({
       repo: requireArg(args, 'repo'),
       prNumber: Number(requireArg(args, 'pr')),
       baseBranch: requireArg(args, 'base'),
       author: requireArg(args, 'author'),
+      evidence,
     });
     console.log(JSON.stringify(result, null, 2));
-    if (!result.pass) {
-      console.error('MERGE_EXECUTION_GATE=FAIL');
-      process.exitCode = 2;
-      return;
-    }
+    if (!result.pass) { console.error('MERGE_EXECUTION_GATE=FAIL'); process.exitCode = 2; return; }
     console.log('MERGE_EXECUTION_GATE=PASS');
     console.log(`EXPECTED_HEAD_SHA=${result.expectedHeadSha}`);
     console.log(`AUTHORIZATION_COMMENT_ID=${result.authorizationCommentId}`);

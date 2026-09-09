@@ -66,6 +66,7 @@
 - PR、主要タスク、Blocker、merge状態、またはPC要否の分類が変わった時に更新する。
 - `CURRENT_STATUS.md`だけを根拠に「実装済み」「強制済み」「テスト済み」と断定しない。実装・gate・PR等の証拠と矛盾する場合は証拠を優先し、statusを修正する。
 - `Merge authorized: YES`は、有効な人間の明示merge承認が存在する場合だけ使用する。
+- Actual merge execution must use the exact-PR / exact-HEAD authorization receipt gate defined by `final-pr-audit`; a status flag or continuation instruction alone never authorizes merge execution.
 
 ## 共通ルール変更ゲート
 
@@ -90,6 +91,7 @@
 - 目的・要件が固まり、非自明な機能を独自実装する前、または新しい依存・サービスを導入する前に、既存の承認済み仕組みと再利用可能なOSS・package候補を調査する。GitHubや公式package ecosystem等に有力候補がある場合は原則3〜5件を比較し、用途適合性、ライセンスの明確さ/互換性、ローカル・オフライン実行可否、外部通信/telemetry、security/privacy、対象OS、保守状況、依存・build/runtime負荷、更新・撤去負担を確認する。安全かつ単純に目的を満たせる既存解があれば再利用・組み合わせを優先し、不足部分だけを最小実装する。候補数は数合わせせず、OSSが存在すること自体を採用理由にしない。
 - 同種の伝書鳩・手作業・承認往復が繰り返される場合、個別対応だけで終えず、類似ケースを含む構造的な自動化候補として扱う。ただし自動化によって安全性を下げない。
 - 長時間・複数段階の作業では、同じ製品tree・製品の未commit差分・blocker・failure・route等が一定checkpoint期間変わらない停滞を状態付きで検出し、原因分析→Forced Reflection→別routeへの強制昇格を行う。管理ファイルだけのHEAD変更は製品進捗として扱わない。未完了でhuman gateが無い場合、ユーザーの状態確認質問に報告だけして停止せず、安全な次工程を継続する。詳細と機械gateは`preflight-audit`の`stagnation-watch.mjs`を正本とする。
+- 引き継ぎ・新チャット開始・session移管では、Project Root repositoryの固定`PROJECT_CONTEXT.json`（`repositoryRole=ROOT`、`thisRepository`は正確なGitHub `origin`と一致必須）だけをhandoffの機械正本として扱い、`.agents/skills/handoff/project-context-guard.mjs`を必ず通す。Related Repo自身のmanifestをProject Rootの権威として使わない。active contextの`projectContextId`と`contextFingerprint`を保持し、Current Task repositoryがProject Rootと異なる場合は自動的に`RELATED_REPO`へ格下げする。guard生成artifactを完全なProject Context envelopeとしてそのまま使い、自由追記・書換え・追加見出しを許可しない。完成artifactは機械生成envelopeとの完全一致を再検証し、別Project Contextや任意追記をfail closedでSTOPする。詳細な現在地はenvelope検証後にcanonical repository evidenceから読み直す。Project Context identityの変更は通常の技術修正ではなく人間のproject ownership/goal変更として別途明示承認を要する。冒頭順序は必ず Project Root → Current State → Related Work → Next Action とする。
 - 実装・変更・外部サービス利用・ネットワーク変更・データ経路変更の前には`preflight-audit`を実行する。preflightで外部AI/クラウド/API/GitHub、AIやtoolの実データアクセス権、repository visibility、LAN公開範囲、logs/backups/TEMP等の残存可能性まで確認する。
 - preflightでは、実際の作業対象に必要な`AGENTS.md`・`AGENTS.local.md`・存在する`CURRENT_STATUS.md`・業務仕様の正本を確認してから変更へ進む。読み取れない正本が安全性やscopeに影響する場合は推測で補わない。
 - preflightでは実装前に作業所有権も確認する。少なくとも「この作業は現在のrepository / 共通基盤のscopeか」「専用application projectや別workstreamが正本として既に進行していないか」「同じIssue / PR / 実装を二重に作らないか」を、取得可能な`CURRENT_STATUS.md`・Issue・PR・branch・仕様等の証拠で確認する。

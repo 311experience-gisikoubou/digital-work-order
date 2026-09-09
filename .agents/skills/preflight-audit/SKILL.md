@@ -66,6 +66,111 @@ Observer self-test:
 node .agents/skills/preflight-audit/ai-capacity-observer-selftest.mjs .agents/skills/preflight-audit/ai-capacity-observer.mjs
 ```
 
+### Machine-readable bounded task handoff
+
+Once a route decision is otherwise ready, `.agents/skills/preflight-audit/ai-task-router.mjs` turns the existing AI Route Selection criteria into a deterministic, provider-neutral bounded handoff. It selects routes only; it never invokes a provider or grants authority.
+
+```text
+node .agents/skills/preflight-audit/ai-task-router.mjs --input <task-and-routes.json> --pretty
+```
+
+Input is JSON with `schemaVersion: 1`, one `task`, and `routes[]`. The task supplies `id`, `kind`, `objective`, required capabilities/permissions, one `executionEnvironment`, `dataClass`, `costPolicy`, `independentReviewRequired`, `forbiddenAuthorities`, allowed/forbidden scope, done conditions, required tests, and return format. Each route supplies `id`, `provider`, availability/environment/capabilities/permissions/data classes, `incrementalCost`, `safetyStatus`, capacity evidence, and optional `jobFitScore`.
+
+- Hard filters run before ranking: route availability must be `AVAILABLE`, safety must be `SAFE_CONFIRMED`, execution environment/capabilities/permissions/data class must fit, unknown incremental cost is rejected, and `EXTRA` is rejected under `no-new-cost`. A route carrying any gated or task-forbidden authority permission is excluded.
+- Human-gated task kinds/required permissions, protected/real data, merge, production, destructive operations, recurring-cost adoption, external-data-route changes, lifecycle-responsibility changes, and business-policy decisions return `STOP / HUMAN_GATE_REQUIRED`. The router cannot authorize them.
+- Ranking is deterministic: job fit first; included/free cost is preferred over extra when extra cost is allowed; measured remaining capacity participates only when every viable route has measured capacity; if evidence is mixed, capacity is excluded from ranking rather than guessed or treated as 0; final tie-break is route id.
+- If independent review is required, reviewer eligibility is evaluated separately from executor eligibility: the route must explicitly advertise the `review` capability and still pass the same availability/safety/environment/data/cost/authority boundaries, and must always have at least one explicit `*-read` permission to inspect the target; executor write permissions are additionally reduced to their corresponding read requirement where one exists. The reviewer must be a different route and a different provider is preferred. If no qualified reviewer exists, result is `NEEDS_REVIEW_ROUTE`, never a false pass.
+- Safety-relevant task kinds, permissions, forbidden authorities, data classes, availability/cost/safety/capacity states use closed vocabularies; unknown values and duplicate route IDs fail the whole request closed. Output is allow-listed to route ids/providers and routing evidence. Arbitrary input fields, credentials, account identifiers, protected data, and unrelated prompts/filenames are not echoed.
+- The handoff contains only the bounded objective/scope/done conditions/tests/return format, selected executor id/provider, and `authorityLimit: HUMAN_ONLY_FOR_GATED_ACTIONS`.
+
+Router self-test:
+
+```text
+node .agents/skills/preflight-audit/ai-task-router-selftest.mjs .agents/skills/preflight-audit/ai-task-router.mjs
+```
+
+### Machine-readable provider inventory
+
+Before building a current `prompt-cli` route set, use `.agents/skills/preflight-audit/ai-provider-inventory.mjs` to turn measured local provider facts into router-compatible route records.
+
+```text
+node .agents/skills/preflight-audit/ai-provider-inventory.mjs --pretty
+```
+
+- The inventory is observation-only: it does not send prompts to a model, execute a real task, or consume provider quota just to prove routing readiness.
+- Codex ChatGPT authentication and measured capacity may be recorded, but the current route remains `UNAVAILABLE`: its local-tool/data boundary and exact incremental-cost boundary for a future prompt adapter are not both proven.
+- Claude `claude.ai` authentication and an allow-listed subscription label may be recorded, but the route remains `UNAVAILABLE` because the CLI exposes no supported noninteractive signal proving that metered extra usage is disabled for the future invocation path.
+- Gemini and Antigravity remain `UNAVAILABLE` until their prompt adapter, cost path, and safety boundary are independently verified. CLI/version presence alone never promotes them.
+- If an OpenAI or Anthropic API-key environment is present, only a boolean presence signal is emitted; key values are never read into output and cost remains `UNKNOWN`.
+- Codex remaining capacity uses only measured rate-limit windows and fails closed if any reported measured window is malformed or outside 0 to 100. Claude capacity remains `UNAVAILABLE` when no supported signal exists; it is never guessed.
+- Generated routes are `prompt-cli`, source-read only, and limited to `source-only`, `synthetic`, and `public` data classes. The inventory never claims repository write, shell/test execution, merge, or production authority.
+- Output values are allow-listed/normalized. Version output is reduced to numeric `major.minor.patch`; arbitrary suffixes, executable paths, tokens, email/org identifiers, prompt history, protected filenames, and unapproved reason strings are not emitted.
+- The emitted `routes` array conforms to `ai-task-router.mjs`; with the current evidence it is valid for the router to return `NO_EXECUTOR_AVAILABLE`. A later adapter must earn promotion with separate safety and cost evidence.
+
+Inventory self-test:
+
+```text
+node .agents/skills/preflight-audit/ai-provider-inventory-selftest.mjs .agents/skills/preflight-audit/ai-provider-inventory.mjs .agents/skills/preflight-audit/ai-task-router.mjs
+```
+
+### Machine-readable adapter qualification
+
+After provider inventory and before any real provider invocation, use `.agents/skills/preflight-audit/provider-adapter-qualification.mjs` to decide whether an adapter has earned promotion to an `AVAILABLE` router route.
+
+```text
+node .agents/skills/preflight-audit/provider-adapter-qualification.mjs --input <adapter-evidence.json> --pretty
+```
+
+- Qualification is provider-neutral and observation-only. It never invokes a model or widens permissions.
+- V1 qualifies only `prompt-cli` adapters restricted to explicit safe payloads, no local tools, `source-read`, and `source-only` / `synthetic` / `public` data.
+- Authentication, tool boundary, data boundary, incremental-cost boundary, and fallback behavior use closed evidence vocabularies. Unknown values fail schema closed.
+- No-new-cost requires included-only or free-only enforcement. `UNKNOWN` and `EXTRA_COST_POSSIBLE` never promote a route.
+- Fallback must stop before cost or permission expansion. Protected/real data, merge, production, destructive authority, and permission widening remain outside this gate.
+- Capacity may stay `UNAVAILABLE`; it is preserved and never guessed.
+- Qualified adapters emit router-compatible `AVAILABLE / SAFE_CONFIRMED` routes. Unqualified adapters emit reason codes but no route.
+- Prior-art scan considered OPA/Cedar/JSON-style engines; this bounded deterministic predicate does not justify a new runtime, package, policy language, or service dependency.
+
+Qualification self-test:
+
+```text
+node .agents/skills/preflight-audit/provider-adapter-qualification-selftest.mjs .agents/skills/preflight-audit/provider-adapter-qualification.mjs .agents/skills/preflight-audit/ai-task-router.mjs
+```
+
+### Machine-readable adapter readiness
+
+Before qualification or provider invocation, use `.agents/skills/preflight-audit/provider-adapter-readiness.mjs` to convert current local CLI/auth/capacity/safety facts into dev.50 qualification evidence.
+
+```text
+node .agents/skills/preflight-audit/provider-adapter-readiness.mjs --pretty
+```
+
+- Readiness is observation-only: provider version/auth/help, redacted Codex doctor state, rate-limit/credit state, and local CLI presence only. It never sends a model prompt or changes billing/account settings.
+- Exact credit balances, account IDs, emails, org IDs, tokens, paths from raw diagnostic payloads, and arbitrary provider fields are never emitted. Codex credits are reduced to `NONE / ZERO / POSITIVE / UNLIMITED / UNKNOWN`.
+- Codex ChatGPT-only auth, included capacity, credit state, isolation-flag support, and denied-read state are recorded separately; no-local-tool, auto-top-up, and runner guarantees remain blockers until independently proven.
+- Claude `claude.ai` Pro auth can be promoted only through the fail-closed `claude-subscription-runner.mjs`: Anthropic/Claude/AWS/Google/GCLOUD/Vertex/Azure provider or cloud environment variables are rejected case-insensitively before provider invocation; all tools are disabled; MCP is strict-empty; skills/Chrome/session persistence are disabled; input is explicit safe payload over stdin; and noninteractive execution cannot grant a billing/permission expansion.
+- Gemini / Antigravity remain blocked until their safe adapters are implemented and qualified.
+- The emitted `qualificationInput` is passed directly through dev.50. On the current `ai-dev` evidence, Claude may qualify as `claude-safe-prompt`; Codex, Gemini, and Antigravity remain unqualified. Any missing runner/auth/cost/tool/data evidence returns the route to `UNKNOWN`/unqualified.
+
+Readiness self-test:
+
+```text
+node .agents/skills/preflight-audit/provider-adapter-readiness-selftest.mjs .agents/skills/preflight-audit/provider-adapter-readiness.mjs
+```
+
+Claude subscription-only runner:
+
+```text
+<safe-task-json-stream> | node .agents/skills/preflight-audit/claude-subscription-runner.mjs --pretty
+```
+
+The task JSON schema is closed to `schemaVersion`, `taskId`, `capability`, `dataClass`, and `prompt`. Only `source-only`, `synthetic`, and `public` payloads are accepted; file paths and provider/config overrides are not part of the schema. Before qualification the runner copies the resolved Claude executable into a fresh isolated temporary directory, verifies that copied executable against the SHA-256 of the exact Claude Code binary that passed the reviewed synthetic safe-route smoke, and uses only that isolated attested copy for capability, auth, and model execution. The original CLI path is never executed after attestation, and only a native Claude descriptor with an empty prefix is accepted, so neither an updater replacing the original path nor injected descriptor-prefix arguments can change the executable/argument boundary in use. Any untrusted copy fails closed to UNQUALIFIED until a new smoke/review attestation updates the trusted hash. The runner returns only allow-listed execution evidence plus the model result and never returns raw stderr/provider diagnostics.
+
+Runner self-test:
+
+```text
+node .agents/skills/preflight-audit/claude-subscription-runner-selftest.mjs .agents/skills/preflight-audit/claude-subscription-runner.mjs
+```
+
 ## Execution / Evidence Location
 
 Before repository checks, identify where the proposed or audited change actually exists.
@@ -120,11 +225,36 @@ Machine-gate self-test:
 node .agents/skills/preflight-audit/security-preflight-selftest.mjs .agents/skills/preflight-audit/security-preflight.mjs
 ```
 
+## Fast Path / Full Gate Classification
+
+Before invoking the heavy change/audit stack, classify the intended change with `fast-path-classifier.mjs` once the intended touched-file set and impact facts are known:
+
+```text
+<change-evidence-json> | node .agents/skills/preflight-audit/fast-path-classifier.mjs --pretty
+```
+
+- `FAST_PATH` is allowed only for complete evidence, `routine` / `configuration` / `implementation`, `source-only` / `synthetic` / `public`, local development, every impact flag explicitly `false`, and no sensitive touched path.
+- Missing, malformed, unknown, or incomplete evidence fails closed to `FULL_GATE`; invalid evidence or unsupported CLI arguments exit non-zero. The only optional CLI flag is `--pretty`.
+- Sensitive paths only escalate. Recognized security/auth/credential, database/migration, deployment/workflow, dependency manifest/lockfile, and any Foundation `.agents/skills/` governance path can never create a Fast Path; complete impact evidence remains the primary safety boundary.
+- There is deliberately no diff-line threshold. Change size is measured separately and is not used as a proxy for safety.
+- `FAST_PATH` retains `security-preflight`, targeted tests, `git diff --check`, and explicit merge authorization if a merge is requested.
+- `FAST_PATH` automatically skips only `operation-preflight` that would exist solely because AI work has multiple steps. It may also skip a full selftest suite only when that suite would otherwise run solely because of the generic heavy-flow policy; repository/project-specific full-suite requirements remain mandatory. Historical Git audit, OSS prior-art scan, lifecycle review, independent review, repeated-failure handling, and other checks retain their own existing triggers and are not waived by the classifier.
+- The WIP review-queue guard remains separate and still runs before new implementation work.
+- If actual touched files or impact facts expand beyond the classified evidence, re-run the classifier. Do not re-run it at every phase when scope is unchanged.
+
+Classifier self-test:
+
+```text
+node .agents/skills/preflight-audit/fast-path-classifier-selftest.mjs .agents/skills/preflight-audit/fast-path-classifier.mjs
+```
+
 ## Interactive / AI Work Operation Gate
 
 Before asking a human to perform real-device, network, production, installation, service-adoption, or other interactive setup, run `operation-preflight.mjs`.
 
-Also run `operation-preflight.mjs` for AI-owned work classified as `multi-step` or `long-running`, including implementation, testing, audit, and recovery work. At task start, at a material phase change, when the user's required action changes, and before retrying a failed same-class approach, send any required user-visible progress update first and then run the gate for that checkpoint. If no human operation is required, use `--estimated-user-minutes 0` and `--estimated-user-steps 0`; do not invent human work merely to satisfy the gate.
+For AI-owned `multi-step` or `long-running` work, run `operation-preflight.mjs` when the Fast Path classifier returns `FULL_GATE`, when a human interactive operation is actually required, or when repeated-failure / lifecycle / value-ownership conditions independently trigger the gate. A valid `FAST_PATH` classification explicitly exempts unchanged-scope AI-only work from `operation-preflight`; progress communication still applies, but no machine gate call is required solely because the AI work has multiple steps.
+
+For local Full Gate work with **no human operation**, use `--operation-kind ai-only`. In that mode the gate derives `scope=local-dev`, user minutes/steps `0`, `work-impact=none`, and `scheduled-window=no`; human profile/role/technical-judgment-owner/instruction-mode are non-applicable and must not be supplied. Any conflicting human-operation field or non-local scope fails closed with `AI_ONLY_HUMAN_OPERATION_CONFLICT`. All safety-relevant planning, lifecycle/value decisions, repeated-failure handling, and progress requirements remain unchanged.
 
 Required planning inputs:
 
@@ -300,7 +430,7 @@ node .agents/skills/preflight-audit/operation-preflight.mjs --scope interactive 
 ### Example: multi-step AI work with no human operation
 
 ```text
-node .agents/skills/preflight-audit/operation-preflight.mjs --scope interactive --estimated-user-minutes 0 --estimated-user-steps 0 --alternatives-reviewed yes --simplest-safe yes --work-impact none --safe-stop yes --scheduled-window no --human-profile non-engineer --human-role observer --technical-judgment-owner ai-workflow --instruction-mode stepwise-ui --change-class implementation --lifecycle-impact no --repeated-manual-pattern no --same-class-failure-count 0 --post-failure-action not-applicable --ai-work-structure multi-step --progress-update-event task-start --progress-update-sent yes --progress-current-stage-present yes --progress-meaning-present yes --progress-next-step-present yes --progress-user-action-status-present yes
+node .agents/skills/preflight-audit/operation-preflight.mjs --operation-kind ai-only --alternatives-reviewed yes --simplest-safe yes --safe-stop yes --change-class implementation --lifecycle-impact no --repeated-manual-pattern no --same-class-failure-count 0 --post-failure-action not-applicable --ai-work-structure multi-step --progress-update-event task-start --progress-update-sent yes --progress-current-stage-present yes --progress-meaning-present yes --progress-next-step-present yes --progress-user-action-status-present yes
 ```
 
 ### Example: fully managed software/service adoption
@@ -369,6 +499,29 @@ History-audit self-test:
 
 ```text
 node .agents/skills/preflight-audit/security-history-audit-selftest.mjs .agents/skills/preflight-audit/security-history-audit.mjs
+```
+
+## Machine-readable WIP review queue
+
+Before starting new implementation work, use `.agents/skills/preflight-audit/wip-review-queue-observer.mjs` as a Priority 2 guard against unbounded work-in-progress. It only observes how many pull requests already await human review; it carries no merge authority, holds no GitHub login/token, and enforces no diff-size threshold.
+
+The observer never calls GitHub itself. Use an already-authorized GitHub route (private-repository connector, or the public API for a public repository) to fetch current pull request state, and write it as a temporary sanitized evidence JSON file with `schemaVersion: 1`, `repository`, current `fetchedAt` in exact UTC millisecond form (`YYYY-MM-DDTHH:mm:ss.sssZ`), `retrievalComplete: true`, and a `pullRequests[]` array where each entry gives `number`, `state` (`open`/`closed`), `draft`, `additions`, `deletions`, `changedFiles`, `baseRef`, and `headSha`. Set `retrievalComplete: true` only after the authorized fetch route has confirmed the requested PR result set is complete; missing or false evidence fails closed. Then run:
+
+```text
+node .agents/skills/preflight-audit/wip-review-queue-observer.mjs --repo <owner/repo> --evidence-file <temporary-json>
+```
+
+- Only open, non-draft pull requests count as pending human review.
+- The observer fails closed on incomplete retrieval, stale (>5 minutes old), any future-dated timestamp, malformed, oversized (>64 KiB), or repository-mismatched evidence.
+- Failures emit only allow-listed error codes; raw evidence-file paths and arbitrary CLI argument text are not echoed.
+- Output lists each pending PR's `number`, `additions`, `deletions`, `changedFiles`, `diffLines` (additions + deletions), `baseRef`, and `headSha`, plus the total pending count and total pending diff lines.
+- The provisional WIP limit is 2 pending reviews: `pendingReviewCount < 2` reports `CONTINUE`; `pendingReviewCount >= 2` reports `STOP_NEW_WORK`. This is an observation signal, not a merge gate and not a STOP state file.
+- Delete the temporary evidence file after recording the observation.
+
+Observer self-test:
+
+```text
+node .agents/skills/preflight-audit/wip-review-queue-observer-selftest.mjs .agents/skills/preflight-audit/wip-review-queue-observer.mjs
 ```
 
 ## Required Semantic Checks

@@ -149,13 +149,23 @@ SOURCE: EXPLICIT_HUMAN
 
 Use `SOURCE: PERSISTED_AFTER_AUDIT` only when the existing authorization legitimately persisted through a later audited correction. The receipt is execution evidence, not a substitute for human authorization.
 
-Then run:
+Then verify current GitHub state through one of these machine-readable routes:
+
+- Public repository / unauthenticated API-readable route:
 
 ```text
 node .agents/skills/final-pr-audit/merge-execution-gate.mjs --repo <owner/repo> --pr <number> --base main --author <authorized-github-login>
 ```
 
-The execution gate independently re-reads the public GitHub PR and top-level comments. It fails closed unless the PR is open, not Draft, targets the expected base branch, and has a receipt from the expected GitHub account that matches the exact PR and exact current HEAD and is no more than 30 minutes old.
+- Private repository: use an already-authorized GitHub connector/API route to fetch the current PR metadata plus only top-level comments whose body starts with `MERGE_AUTHORIZATION_V1`. Write a temporary sanitized evidence JSON file with `schemaVersion: 1`, `repository`, current `fetchedAt`, the PR fields needed by the gate, and those receipt-candidate comments; then run:
+
+```text
+node .agents/skills/final-pr-audit/merge-execution-gate.mjs --repo <owner/repo> --pr <number> --base main --author <authorized-github-login> --evidence-file <temporary-json>
+```
+
+Do not ask a human to relay this evidence and do not place tokens, passwords, authorization headers, or other credentials in the evidence file. Delete the temporary evidence after the merge decision. Evidence older than five minutes fails closed.
+
+The execution gate validates the current PR state plus a receipt from the expected GitHub account that matches the exact PR and exact current HEAD and is no more than 30 minutes old. Private-repository evidence additionally must identify the expected repository and be fresh.
 
 Proceed to the merge API only when the gate prints `MERGE_EXECUTION_GATE=PASS`. Use the exact `EXPECTED_HEAD_SHA` returned by the gate as the merge operation's expected-head precondition. Never call the merge API without that exact-head precondition. If the PR closes, merges, becomes Draft, changes base, or changes HEAD between audit/receipt/gate/merge, stop and re-evaluate; do not silently mint a replacement receipt unless authorization is still valid under the persistence gate.
 
