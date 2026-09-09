@@ -24,13 +24,14 @@ function impacts(overrides = {}) {
 }
 function fixture(overrides = {}) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     evidenceComplete: true,
     changeClass: 'routine',
     dataMode: 'source-only',
     executionScope: 'local-dev',
     impacts: impacts(),
     changedFiles: ['src/ui/label.ts'],
+    wipReview: { decision: 'CONTINUE', evidenceFetchedAt: new Date(Date.now() - 1000).toISOString() },
     ...overrides,
   };
 }
@@ -116,6 +117,12 @@ invalid = expectDecision(fixture({ changedFiles: ['../outside.ts'] }), 'FULL_GAT
 assert(invalid.evidenceValid === false, 'parent traversal must invalidate evidence');
 invalid = expectDecision(fixture({ changedFiles: [] }), 'FULL_GATE', 'CHANGED_FILES_INVALID');
 assert(invalid.evidenceValid === false, 'empty changed files must invalidate evidence');
+const noWip = fixture(); delete noWip.wipReview;
+invalid = expectDecision(noWip, 'FULL_GATE', 'WIP_REVIEW_REQUIRED');
+assert(invalid.workStartAllowed === false, 'missing WIP review must block work start');
+invalid = expectDecision(fixture({ wipReview: { decision: 'STOP_NEW_WORK', evidenceFetchedAt: new Date(Date.now() - 1000).toISOString() } }), 'FULL_GATE', 'WIP_REVIEW_BLOCKED');
+invalid = expectDecision(fixture({ wipReview: { decision: 'CONTINUE', evidenceFetchedAt: new Date(Date.now() - classifier.WIP_REVIEW_MAX_AGE_MS - 1000).toISOString() } }), 'FULL_GATE', 'WIP_REVIEW_STALE');
+invalid = expectDecision(fixture({ wipReview: { decision: 'CONTINUE', evidenceFetchedAt: new Date(Date.now() + 10000).toISOString() } }), 'FULL_GATE', 'WIP_REVIEW_FROM_FUTURE');
 
 const manyNormalFiles = Array.from({ length: 250 }, (_, i) => `src/ui/file-${i}.ts`);
 expectDecision(fixture({ changedFiles: manyNormalFiles }), 'FAST_PATH');
@@ -123,7 +130,7 @@ invalid = expectDecision(fixture({ changedFiles: ['./src/a.ts'] }), 'FULL_GATE',
 assert(invalid.evidenceValid === false, 'non-canonical dot path must invalidate evidence');
 
 const parsedBom = classifier.parseInput(`\uFEFF${JSON.stringify(fixture())}`);
-assert(parsedBom.value?.schemaVersion === 1, 'BOM JSON should parse');
+assert(parsedBom.value?.schemaVersion === 2, 'BOM JSON should parse');
 assert(classifier.parseInput('{bad').error === 'INPUT_JSON_INVALID', 'malformed JSON must fail closed');
 assert(classifier.parseInput('x'.repeat(classifier.MAX_INPUT_BYTES + 1)).error === 'INPUT_TOO_LARGE', 'oversized input must fail closed');
 function runCli(payload) {

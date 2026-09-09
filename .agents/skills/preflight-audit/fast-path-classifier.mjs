@@ -2,13 +2,17 @@
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
+export const WIP_REVIEW_MAX_AGE_MS = 5 * 60 * 1000;
 export const MAX_INPUT_BYTES = 64 * 1024;
 
 const TOP_LEVEL_KEYS = new Set([
   'schemaVersion', 'evidenceComplete', 'changeClass', 'dataMode',
-  'executionScope', 'impacts', 'changedFiles',
+  'executionScope', 'impacts', 'changedFiles', 'wipReview',
 ]);
+const WIP_REVIEW_KEYS = new Set(['decision', 'evidenceFetchedAt']);
+const WIP_DECISIONS = new Set(['CONTINUE', 'STOP_NEW_WORK']);
+const WIP_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const IMPACT_KEYS = [
   'production', 'network', 'realDevice', 'installOrAdoption',
   'dependency', 'securitySensitive', 'authOrCredential', 'mergeAuthority',
@@ -60,6 +64,7 @@ function invalidReport(code) {
   return {
     schemaVersion: SCHEMA_VERSION,
     evidenceValid: false,
+    workStartAllowed: false,
     decision: 'FULL_GATE',
     reasons: [code],
     requiredChecks: FULL_REQUIRED_CHECKS,
@@ -67,10 +72,23 @@ function invalidReport(code) {
   };
 }
 
-export function validateEvidence(evidence) {
+function canonicalWipTimestamp(value) {
+  const ms = typeof value === 'string' && WIP_TIMESTAMP_RE.test(value) ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(ms) && new Date(ms).toISOString() === value;
+}
+
+export function validateEvidence(evidence, { nowMs = Date.now() } = {}) {
   if (!isObject(evidence)) return 'EVIDENCE_SHAPE_INVALID';
   if (!exactKeys(evidence, TOP_LEVEL_KEYS)) return 'EVIDENCE_UNKNOWN_FIELD';
   if (evidence.schemaVersion !== SCHEMA_VERSION) return 'EVIDENCE_SCHEMA_UNSUPPORTED';
+  if (!isObject(evidence.wipReview)) return 'WIP_REVIEW_REQUIRED';
+  if (!exactKeys(evidence.wipReview, WIP_REVIEW_KEYS) || Object.keys(evidence.wipReview).length !== WIP_REVIEW_KEYS.size) return 'WIP_REVIEW_INVALID';
+  if (!WIP_DECISIONS.has(evidence.wipReview.decision)) return 'WIP_REVIEW_DECISION_INVALID';
+  if (!canonicalWipTimestamp(evidence.wipReview.evidenceFetchedAt)) return 'WIP_REVIEW_TIMESTAMP_INVALID';
+  const wipFetchedMs = Date.parse(evidence.wipReview.evidenceFetchedAt);
+  if (wipFetchedMs > nowMs) return 'WIP_REVIEW_FROM_FUTURE';
+  if (nowMs - wipFetchedMs > WIP_REVIEW_MAX_AGE_MS) return 'WIP_REVIEW_STALE';
+  if (evidence.wipReview.decision !== 'CONTINUE') return 'WIP_REVIEW_BLOCKED';
   if (typeof evidence.evidenceComplete !== 'boolean') return 'EVIDENCE_COMPLETE_FLAG_INVALID';
   if (!ALLOWED_CHANGE_CLASSES.has(evidence.changeClass)) return 'CHANGE_CLASS_INVALID';
   if (!ALLOWED_DATA_MODES.has(evidence.dataMode)) return 'DATA_MODE_INVALID';
@@ -94,8 +112,8 @@ function sensitivePathReasons(changedFiles) {
   }
   return [...reasons];
 }
-export function classifyChange(evidence) {
-  const validationError = validateEvidence(evidence);
+export function classifyChange(evidence, options = {}) {
+  const validationError = validateEvidence(evidence, options);
   if (validationError) return invalidReport(validationError);
 
   const reasons = [];
@@ -122,6 +140,7 @@ export function classifyChange(evidence) {
     return {
       schemaVersion: SCHEMA_VERSION,
       evidenceValid: true,
+      workStartAllowed: true,
       decision: 'FULL_GATE',
       reasons: [...new Set(reasons)],
       requiredChecks: FULL_REQUIRED_CHECKS,
@@ -131,6 +150,7 @@ export function classifyChange(evidence) {
   return {
     schemaVersion: SCHEMA_VERSION,
     evidenceValid: true,
+    workStartAllowed: true,
     decision: 'FAST_PATH',
     reasons: ['ALL_FAST_PATH_CONDITIONS_MET'],
     requiredChecks: FAST_REQUIRED_CHECKS,

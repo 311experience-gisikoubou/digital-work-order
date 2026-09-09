@@ -270,3 +270,13 @@
 - merge hardening: final observed base SHA must equal AUDITED_BASE_SHA; post-merge BASE_SHA_DRIFT detection added
 - product/runtime/data changes: none; repository-local extras preserved; REAL_DEVICE not required
 - merge: Draft remains locked until fresh explicit human authorization is bound to the exact rollout PR/head
+
+## 2026-09-09 - ai-dev-foundation 1.0.0-dev.65
+- source commit: b7f5d1a1db01bfb7b6b9a1cb0223fb07d7153004
+- trusted previous foundation: 1.0.0-dev.64 (87b7f243dd4b0f1de7454f2a735fc5917957b7ee)
+- target branch: chore/foundation-dev65-rollout
+- method: fail-closed foundation-update.mjs dev.64 -> dev.65
+- fresh WIP review evidence: CONTINUE; pending review count 0 before work start
+- classification: FULL_GATE; selftest selection: FULL_SUITE
+- product/runtime/data changes: none; repository-local extras preserved; REAL_DEVICE not required
+- merge: Draft remains locked until fresh explicit human authorization is bound to the exact rollout PR/head
