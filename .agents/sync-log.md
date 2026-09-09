@@ -259,3 +259,14 @@
 - free-tier merge hardening: Draft Lock Mode + non-transferable merge authorization + unauthorized-merge freeze
 - product/runtime/data changes: none; repository-local extras preserved; REAL_DEVICE not required
 - merge: Draft remains locked until a fresh explicit human authorization is bound to this exact rollout PR/head
+
+## 2026-09-09 - ai-dev-foundation 1.0.0-dev.64
+- source commit: 87b7f243dd4b0f1de7454f2a735fc5917957b7ee
+- trusted previous foundation: 1.0.0-dev.63 (bd7338e847a82130028bf20baa6393f4a2cf74c5)
+- target branch: chore/foundation-dev64-rollout
+- method: fail-closed foundation-update.mjs dev.63 -> dev.64
+- post-update foundation-sync-audit: PASS; canonical missing/stale 0/0; Claude wrapper missing/stale 0/0
+- Foundation selftests: 21/21 PASS; git diff --check PASS
+- merge hardening: final observed base SHA must equal AUDITED_BASE_SHA; post-merge BASE_SHA_DRIFT detection added
+- product/runtime/data changes: none; repository-local extras preserved; REAL_DEVICE not required
+- merge: Draft remains locked until fresh explicit human authorization is bound to the exact rollout PR/head
