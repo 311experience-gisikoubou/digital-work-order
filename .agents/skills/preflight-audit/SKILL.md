@@ -234,12 +234,13 @@ Before invoking the heavy change/audit stack, classify the intended change with 
 ```
 
 - `FAST_PATH` is allowed only for complete evidence, `routine` / `configuration` / `implementation`, `source-only` / `synthetic` / `public`, local development, every impact flag explicitly `false`, and no sensitive touched path.
+- Change-evidence schema v2 also requires `wipReview: { decision, evidenceFetchedAt }` copied from the current WIP review-queue observer result. `decision` must be `CONTINUE` and `evidenceFetchedAt` must be canonical UTC milliseconds and no more than 5 minutes old. Missing, stale, future-dated, malformed, or `STOP_NEW_WORK` WIP evidence is a hard work-start stop, not a reason to continue through Full Gate.
 - Missing, malformed, unknown, or incomplete evidence fails closed to `FULL_GATE`; invalid evidence or unsupported CLI arguments exit non-zero. The only optional CLI flag is `--pretty`.
 - Sensitive paths only escalate. Recognized security/auth/credential, database/migration, deployment/workflow, dependency manifest/lockfile, and any Foundation `.agents/skills/` governance path can never create a Fast Path; complete impact evidence remains the primary safety boundary.
 - There is deliberately no diff-line threshold. Change size is measured separately and is not used as a proxy for safety.
 - `FAST_PATH` retains `security-preflight`, targeted tests, `git diff --check`, and explicit merge authorization if a merge is requested.
 - `FAST_PATH` automatically skips only `operation-preflight` that would exist solely because AI work has multiple steps. It may also skip a full selftest suite only when that suite would otherwise run solely because of the generic heavy-flow policy; repository/project-specific full-suite requirements remain mandatory. Historical Git audit, OSS prior-art scan, lifecycle review, independent review, repeated-failure handling, and other checks retain their own existing triggers and are not waived by the classifier.
-- The WIP review-queue guard remains separate and still runs before new implementation work.
+- The WIP review-queue observer remains the source of the WIP decision, but its fresh result is now required by the change classifier itself before new implementation work. This removes the session-memory bypass without adding persistent STOP state.
 - If actual touched files or impact facts expand beyond the classified evidence, re-run the classifier. Do not re-run it at every phase when scope is unchanged.
 
 Classifier self-test:
@@ -539,6 +540,7 @@ node .agents/skills/preflight-audit/wip-review-queue-observer.mjs --repo <owner/
 - Failures emit only allow-listed error codes; raw evidence-file paths and arbitrary CLI argument text are not echoed.
 - Output lists each pending PR's `number`, `additions`, `deletions`, `changedFiles`, `diffLines` (additions + deletions), `baseRef`, and `headSha`, plus the total pending count and total pending diff lines.
 - The provisional WIP limit is 2 pending reviews: `pendingReviewCount < 2` reports `CONTINUE`; `pendingReviewCount >= 2` reports `STOP_NEW_WORK`. This is an observation signal, not a merge gate and not a STOP state file.
+- Before classifying any new implementation change, copy only the observer output `decision` and `evidenceFetchedAt` into change-evidence schema v2 as `wipReview`. The classifier rechecks presence, timestamp format, 5-minute freshness, future timestamps, and `CONTINUE`. Therefore a skipped observer, stale carry-over from an earlier session, or a current WIP stop fails closed before either Fast Path or Full Gate begins.
 - Delete the temporary evidence file after recording the observation.
 
 Observer self-test:

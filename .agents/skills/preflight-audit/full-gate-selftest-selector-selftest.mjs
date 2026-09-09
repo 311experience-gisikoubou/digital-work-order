@@ -15,7 +15,7 @@ function impacts(overrides = {}) {
   return Object.fromEntries(impactKeys.map(key => [key, overrides[key] ?? false]));
 }
 function fixture(changedFiles, overrides = {}) {
-  return { schemaVersion:1, evidenceComplete:true, changeClass:'implementation', dataMode:'source-only', executionScope:'local-dev', impacts:impacts(), changedFiles, ...overrides };
+  return { schemaVersion:2, evidenceComplete:true, changeClass:'implementation', dataMode:'source-only', executionScope:'local-dev', impacts:impacts(), changedFiles, wipReview:{ decision:'CONTINUE', evidenceFetchedAt:new Date(Date.now()-1000).toISOString() }, ...overrides };
 }
 function assert(condition, message) {
   if (!condition) throw new Error(`FAIL: ${message}`);
@@ -95,7 +95,10 @@ const incomplete = select(
   { evidenceComplete:false },
 );
 assert(incomplete.selection === 'FULL_SUITE' && incomplete.evidenceValid === true, 'incomplete evidence must safely use full suite');
-const invalid = selector.selectSelftests({ schemaVersion:1 });
+const blockedWip = select(['.agents/skills/preflight-audit/operation-preflight.mjs'], { wipReview:{ decision:'STOP_NEW_WORK', evidenceFetchedAt:new Date(Date.now()-1000).toISOString() } });
+assert(blockedWip.selection === 'FULL_SUITE' && blockedWip.evidenceValid === false, 'blocked WIP must stop before selftest selection');
+assert(blockedWip.reasons.includes('WIP_REVIEW_BLOCKED'), 'blocked WIP reason missing');
+const invalid = selector.selectSelftests({ schemaVersion:2 });
 assert(invalid.selection === 'FULL_SUITE' && invalid.evidenceValid === false, 'invalid evidence must fail closed');
 
 const cli = spawnSync(
