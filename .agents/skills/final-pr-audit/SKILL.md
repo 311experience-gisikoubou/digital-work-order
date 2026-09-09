@@ -135,7 +135,7 @@ node .agents/skills/final-pr-audit/merge-authorization-gate-selftest.mjs .agents
 
 ## Merge Execution Receipt Gate
 
-`PREPARED_FOR_MERGE` and merge authorization are not sufficient by themselves to execute the merge. Immediately before the actual merge, create and verify a short-lived GitHub-backed authorization receipt tied to the exact PR and exact current HEAD.
+`PREPARED_FOR_MERGE` and merge authorization are not sufficient by themselves to execute the merge. Immediately before the actual merge, verify a short-lived GitHub-backed authorization receipt tied to the exact PR and exact current HEAD **and** bind execution to the exact base commit SHA covered by the latest PASS audit.
 
 Do not treat `進めて`, `次`, `よろしく`, `続けて`, or equivalent continuation language as merge authorization. A receipt may be posted only when merge authorization is currently valid: either the human explicitly authorized merge, or an earlier explicit authorization is still valid and `merge-authorization-gate.mjs` returned `PERSIST` after the latest HEAD audit.
 
@@ -151,16 +151,16 @@ AUTHORIZED: YES
 SOURCE: EXPLICIT_HUMAN
 ```
 
-Use `SOURCE: PERSISTED_AFTER_AUDIT` only when the existing authorization legitimately persisted through a later audited correction. The receipt is execution evidence, not a substitute for human authorization.
+Use `SOURCE: PERSISTED_AFTER_AUDIT` only when the existing authorization legitimately persisted through a later audited correction. The receipt is execution evidence, not a substitute for human authorization. `MERGE_AUTHORIZATION_V1` remains PR/HEAD-bound; the audited base SHA is a separate machine-verified execution precondition and must not become another human approval field.
 
 ### Draft Lock unlock sequence
 
 When Draft Lock Mode is active, keep the PR Draft while creating the exact-HEAD receipt. Then, and only then:
 
-1. re-fetch the PR and prove it is still open, Draft, on the intended base, and at the exact audited HEAD;
+1. re-fetch the PR and prove it is still open, Draft, on the intended base branch, at the exact audited HEAD, and on the exact audited base SHA;
 2. post the exact-PR/exact-HEAD authorization receipt while the Draft lock is still engaged;
 3. mark the PR Ready;
-4. immediately re-fetch the PR and comments, run the Merge Execution Receipt Gate, and merge only with the emitted `EXPECTED_HEAD_SHA`;
+4. immediately re-fetch the PR and comments, run the Merge Execution Receipt Gate with the exact `AUDITED_BASE_SHA`, and merge only when it emits both the same `EXPECTED_BASE_SHA` and the exact `EXPECTED_HEAD_SHA`;
 5. if any check, route, or merge attempt fails after Ready but before a successful merge, return the still-open PR to Draft before further correction/retry work, then re-audit. Do not leave an unlocked Ready PR waiting in the background.
 
 A raw/direct merge API/tool call outside this sequence is prohibited. Direct writes, ref updates, or content commits to `main` are not a substitute for the authorized merge path.
@@ -170,20 +170,22 @@ Then verify current GitHub state through one of these machine-readable routes:
 - Public repository / unauthenticated API-readable route:
 
 ```text
-node .agents/skills/final-pr-audit/merge-execution-gate.mjs --repo <owner/repo> --pr <number> --base main --author <authorized-github-login>
+node .agents/skills/final-pr-audit/merge-execution-gate.mjs --repo <owner/repo> --pr <number> --base main --base-sha <audited-base-sha> --author <authorized-github-login>
 ```
 
-- Private repository: use an already-authorized GitHub connector/API route to fetch the current PR metadata plus only top-level comments whose body starts with `MERGE_AUTHORIZATION_V1`. Write a temporary sanitized evidence JSON file with `schemaVersion: 1`, `repository`, current `fetchedAt`, the PR fields needed by the gate, and those receipt-candidate comments; then run:
+- Private repository: use an already-authorized GitHub connector/API route to fetch only top-level comments whose body starts with `MERGE_AUTHORIZATION_V1` **first**, then fetch the current PR metadata **last** so the evidence's base/head/open/Draft state is the freshest snapshot. Write a temporary sanitized evidence JSON file with `schemaVersion: 2`, `repository`, current `fetchedAt`, the PR fields needed by the gate **including `base.ref`, `base.sha`, and `head.sha`**, and those receipt-candidate comments; then run:
 
 ```text
-node .agents/skills/final-pr-audit/merge-execution-gate.mjs --repo <owner/repo> --pr <number> --base main --author <authorized-github-login> --evidence-file <temporary-json>
+node .agents/skills/final-pr-audit/merge-execution-gate.mjs --repo <owner/repo> --pr <number> --base main --base-sha <audited-base-sha> --author <authorized-github-login> --evidence-file <temporary-json>
 ```
 
-Do not ask a human to relay this evidence and do not place tokens, passwords, authorization headers, or other credentials in the evidence file. Delete the temporary evidence after the merge decision. Evidence older than five minutes fails closed.
+Do not ask a human to relay this evidence and do not place tokens, passwords, authorization headers, or other credentials in the evidence file. Delete the temporary evidence after the merge decision. Evidence older than five minutes fails closed. Schema version 1 evidence is intentionally incompatible with this base-bound gate; update the evidence producer and gate together with the Foundation version rather than silently accepting an older shape.
 
-The execution gate validates the current PR state plus a receipt from the expected GitHub account that matches the exact PR and exact current HEAD and is no more than 30 minutes old. Private-repository evidence additionally must identify the expected repository and be fresh.
+The execution gate validates the current PR state, the exact current base SHA against the latest audited base SHA, plus a receipt from the expected GitHub account that matches the exact PR and exact current HEAD and is no more than 30 minutes old. Private-repository evidence additionally must identify the expected repository, use schema version 2, and be fresh. On a failed result, `expectedBaseSha` is only the requested audit constraint; it is never merge permission. Only `pass: true` plus the explicit `MERGE_EXECUTION_GATE=PASS` output authorizes the technical merge step after human authorization already exists.
 
-Proceed to the merge API only when the gate prints `MERGE_EXECUTION_GATE=PASS`. Use the exact `EXPECTED_HEAD_SHA` returned by the gate as the merge operation's expected-head precondition. Never call the merge API without that exact-head precondition. If the PR closes, merges, becomes Draft, changes base, or changes HEAD between audit/receipt/gate/merge, stop and re-evaluate; do not silently mint a replacement receipt unless authorization is still valid under the persistence gate.
+Proceed to the merge API only when the gate prints `MERGE_EXECUTION_GATE=PASS` and its `EXPECTED_BASE_SHA` equals the latest `AUDITED_BASE_SHA`. Use the exact `EXPECTED_HEAD_SHA` returned by the gate as the merge operation's expected-head precondition. Never call the merge API without that exact-head precondition. If the PR closes, merges, becomes Draft, changes base branch, changes base SHA, or changes HEAD between audit/receipt/gate/merge, stop and re-evaluate. A base-SHA change invalidates the prior test/audit result even when HEAD is unchanged: return the open PR to Draft, refresh/rebase or otherwise evaluate against current base, rerun the required tests and final audit, then use `merge-authorization-gate` to decide whether the existing human authorization may persist. Do not silently mint a replacement receipt unless authorization remains valid under that persistence gate.
+
+On the normal free-tier GitHub merge route, the merge API provides an expected-HEAD precondition but no atomic expected-base-SHA precondition. Therefore this gate is a **final observed-state check**, not a claim of an atomic base lock. The live route fetches receipt comments first and PR state last so base/head/open/Draft checks use the freshest snapshot; after PASS, perform no unrelated network or review work before the expected-HEAD merge call. A base advance in the residual gate-to-merge race window must be detected immediately by `post-merge-verification` as `BASE_SHA_DRIFT`. Do not describe this free-tier path as atomically preventing every possible base race; verified stronger server-side protection may provide a stronger barrier.
 
 After merge, verify the PR is `MERGED` and `main` points at the reported merge commit. A receipt cannot authorize a different PR or HEAD, and a merged/closed PR fails the gate.
 
@@ -202,6 +204,7 @@ Report `PREPARED_FOR_MERGE=yes` only when all applicable conditions are proven:
 - PR state matches the active protection mode: **Draft when Draft Lock Mode is required**, or the repository's verified stronger server-side protection policy otherwise;
 - fresh GitHub metadata confirms the PR is open and has no known review/required-CI blocker; mergeability may remain blocked solely because the intentional Draft lock is still engaged;
 - the current HEAD is the HEAD covered by the latest PASS audit;
+- `AUDITED_BASE_SHA` records the exact base commit covered by that PASS audit, and the current PR base SHA still equals it;
 - if merge was already authorized before a HEAD change, `merge-authorization-gate` returns `PERSIST`; otherwise valid explicit merge authorization is still required before merge;
 - no unresolved human value/ownership decision remains;
 - no technical housekeeping step is being delegated to the non-engineer human.

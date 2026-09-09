@@ -26,6 +26,7 @@ Use after a PR has already been merged on the remote host and the user asks to v
 - Final working tree status
 - Branch deletion safety judgment
 - Authorization provenance: verify that a valid `MERGE_AUTHORIZATION_V1` receipt for the exact merged PR and exact pre-merge HEAD existed **before** `merged_at`; later approval is never retroactive authorization
+- Audited-base provenance: verify the merge executed against the exact base commit SHA covered by the latest pre-merge PASS audit (`AUDITED_BASE_SHA`)
 
 ## Merge Method Verification
 
@@ -34,6 +35,16 @@ Use after a PR has already been merged on the remote host and the user asks to v
 - Evaluate tree equality (content) and history shape (commit graph, parent count) as two separate checks. A merge method different from what was expected is not, by itself, a content problem if tree equality still holds.
 - If the actual merge method differs from what was expected or requested, stop and report the discrepancy for the user to decide, rather than proceeding silently or rewriting history to force a match.
 - Never rebase, reset, force-push, or otherwise rewrite the resulting history in order to make an unexpected merge method match what was expected.
+
+## Audited Base SHA Drift Containment
+
+If the actual merge base differs from `AUDITED_BASE_SHA`, classify the event as `BASE_SHA_DRIFT` even when the authorization receipt and merged content appear otherwise correct.
+
+- For squash merge or a normal merge commit, the merge result's first parent must equal `AUDITED_BASE_SHA`.
+- For rebase merge, prove the parent of the first replayed commit equals `AUDITED_BASE_SHA`. Mere ancestry or a matching merge-base is insufficient because the base could have advanced while keeping the audited SHA as an ancestor. If the replay start cannot be proven exactly, report `UNKNOWN`/STOP rather than assuming equality.
+- Do not report post-merge verification PASS merely because the final tree looks correct; the pre-merge test/audit provenance was bound to a different base.
+- Record/update an incident Issue with non-sensitive metadata and verify the actual merged diff before deciding whether corrective work is required.
+- Do not treat the earlier audit as retroactively covering the new base. Subsequent merge work remains stopped until the drift is resolved through the normal audited workflow.
 
 ## Unauthorized Merge Containment
 
@@ -61,7 +72,7 @@ If the merged PR has no valid exact-PR/exact-HEAD authorization receipt created 
 - Current branch or upstream is unexpected.
 - `origin/main` cannot be verified.
 - Work branch or expected head cannot be verified.
-- The post-merge commit's parent SHA(s) do not match the expected pre-merge main SHA and, when applicable, the expected head SHA.
+- The post-merge commit's parent/base lineage does not match `AUDITED_BASE_SHA` (`BASE_SHA_DRIFT`) or, when applicable, the expected head SHA.
 - The post-merge commit's tree does not match the pre-merge work branch or expected head.
 - The actual merge method differs from what was expected, until the user confirms whether to proceed.
 - `git pull --ff-only origin main` cannot fast-forward.
@@ -95,7 +106,7 @@ Report:
 - Skills used
 - Starting Git state
 - Post-merge commit SHA
-- Post-merge commit parent SHA(s) and the merge method they indicate
+- Post-merge commit parent SHA(s), `AUDITED_BASE_SHA`, any `BASE_SHA_DRIFT` finding, and the merge method they indicate
 - Tree equality result
 - Local `main` and `origin/main` synchronization result
 - Expected file existence

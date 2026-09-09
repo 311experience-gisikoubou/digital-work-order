@@ -4,6 +4,8 @@ import { fetchJson, parseArgs, parseEvidenceJson, runMergeExecutionGate } from '
 
 const HEAD_A = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const HEAD_B = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+const BASE_A = '1111111111111111111111111111111111111111';
+const BASE_B = '2222222222222222222222222222222222222222';
 const NOW = Date.parse('2026-09-08T10:30:00Z');
 const AUTHOR = 'foundation-test-author';
 
@@ -23,7 +25,7 @@ function makePr(overrides = {}) {
     state: 'open',
     merged_at: null,
     draft: false,
-    base: { ref: 'main' },
+    base: { ref: 'main', sha: BASE_A },
     head: { sha: HEAD_A },
     ...overrides,
   };
@@ -45,18 +47,19 @@ function fakeFetch(pr, comments) {
   };
 }
 
-async function run(pr, comments) {
+async function run(pr, comments, expectedBaseSha = BASE_A) {
   return runMergeExecutionGate({
     repo: 'example/repository',
     prNumber: 52,
     baseBranch: 'main',
+    expectedBaseSha,
     author: AUTHOR,
     nowMs: NOW,
     fetchImpl: fakeFetch(pr, comments),
   });
 }
 
-function makeEvidence({ repository = 'example/repository', fetchedAt = '2026-09-08T10:29:00Z', pr = makePr(), authorizationComments = [comment(receipt())], schemaVersion = 1 } = {}) {
+function makeEvidence({ repository = 'example/repository', fetchedAt = '2026-09-08T10:29:00Z', pr = makePr(), authorizationComments = [comment(receipt())], schemaVersion = 2 } = {}) {
   return { schemaVersion, repository, fetchedAt, pr, authorizationComments };
 }
 
@@ -65,6 +68,7 @@ async function runEvidence(evidence) {
     repo: 'example/repository',
     prNumber: 52,
     baseBranch: 'main',
+    expectedBaseSha: BASE_A,
     author: AUTHOR,
     nowMs: NOW,
     evidence,
@@ -87,8 +91,22 @@ async function expectFail(pr, comments, code) {
 const valid = await run(makePr(), [comment(receipt())]);
 assert.equal(valid.pass, true);
 assert.equal(valid.expectedHeadSha, HEAD_A);
+assert.equal(valid.expectedBaseSha, BASE_A);
+assert.equal(valid.actualBaseSha, BASE_A);
 assert.equal(valid.authorizationCommentId, 100);
 assert.equal(valid.authorizationSource, 'EXPLICIT_HUMAN');
+
+const BASE_WITH_LETTERS = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd';
+const uppercaseExpectedBase = await run(makePr({ base: { ref: 'main', sha: BASE_WITH_LETTERS } }), [comment(receipt())], BASE_WITH_LETTERS.toUpperCase());
+assert.equal(uppercaseExpectedBase.pass, true, 'expected base SHA is normalized case-insensitively');
+await assert.rejects(
+  runMergeExecutionGate({ repo: 'example/repository', prNumber: 52, baseBranch: 'main', author: AUTHOR, nowMs: NOW, fetchImpl: fakeFetch(makePr(), [comment(receipt())]) }),
+  /Invalid expected base SHA/,
+);
+await assert.rejects(
+  runMergeExecutionGate({ repo: 'example/repository', prNumber: 52, baseBranch: 'main', expectedBaseSha: 'not-a-sha', author: AUTHOR, nowMs: NOW, fetchImpl: fakeFetch(makePr(), [comment(receipt())]) }),
+  /Invalid expected base SHA/,
+);
 
 const persisted = await run(makePr(), [comment(receipt({ source: 'PERSISTED_AFTER_AUDIT' }))]);
 assert.equal(persisted.pass, true);
@@ -112,9 +130,45 @@ const draft = await run(makePr({ draft: true }), [comment(receipt())]);
 assert.equal(draft.pass, false);
 assert.equal(draft.checks.notDraft, false);
 
-const wrongBase = await run(makePr({ base: { ref: 'release' } }), [comment(receipt())]);
+const wrongBase = await run(makePr({ base: { ref: 'release', sha: BASE_A } }), [comment(receipt())]);
 assert.equal(wrongBase.pass, false);
 assert.equal(wrongBase.checks.baseBranch, false);
+assert.equal(wrongBase.finding, 'BASE_BRANCH_MISMATCH');
+
+const advancedBase = await run(makePr({ base: { ref: 'main', sha: BASE_B } }), [comment(receipt())]);
+assert.equal(advancedBase.pass, false);
+assert.equal(advancedBase.checks.baseSha, false);
+assert.equal(advancedBase.finding, 'BASE_SHA_MISMATCH');
+assert.equal(advancedBase.actualBaseSha, BASE_B);
+assert.equal(advancedBase.expectedBaseSha, BASE_A);
+assert.equal(advancedBase.expectedHeadSha, null);
+
+const refreshedBase = await run(makePr({ base: { ref: 'main', sha: BASE_B } }), [comment(receipt({ source: 'PERSISTED_AFTER_AUDIT' }))], BASE_B);
+assert.equal(refreshedBase.pass, true, 'fresh audit may bind the same authorized HEAD to the refreshed base');
+assert.equal(refreshedBase.expectedBaseSha, BASE_B);
+assert.equal(refreshedBase.authorizationSource, 'PERSISTED_AFTER_AUDIT');
+
+let livePr = makePr();
+const fetchOrder = [];
+const driftDuringCommentFetch = async url => {
+  if (url.includes('/issues/52/comments')) {
+    fetchOrder.push('comments');
+    livePr = makePr({ base: { ref: 'main', sha: BASE_B } });
+    return { ok: true, status: 200, json: async () => [comment(receipt())] };
+  }
+  if (url.includes('/pulls/52')) {
+    fetchOrder.push('pr');
+    return { ok: true, status: 200, json: async () => livePr };
+  }
+  return { ok: false, status: 404, json: async () => ({}) };
+};
+const lateBaseDrift = await runMergeExecutionGate({
+  repo: 'example/repository', prNumber: 52, baseBranch: 'main', expectedBaseSha: BASE_A, author: AUTHOR,
+  nowMs: NOW, fetchImpl: driftDuringCommentFetch,
+});
+assert.equal(lateBaseDrift.pass, false, 'base drift during receipt retrieval must be seen by the final PR snapshot');
+assert.equal(lateBaseDrift.finding, 'BASE_SHA_MISMATCH');
+assert.deepEqual(fetchOrder, ['comments', 'pr'], 'live route fetches PR state after receipt comments');
 
 const beforeDrift = await run(makePr(), [comment(receipt())]);
 assert.equal(beforeDrift.pass, true);
@@ -123,8 +177,8 @@ assert.equal(afterDrift.pass, false);
 assert.equal(afterDrift.finding, 'AUTHORIZATION_HEAD_MISMATCH');
 
 assert.deepEqual(
-  parseArgs(['--repo', 'example/repository', '--pr', '52', '--base', 'main', '--author', AUTHOR]),
-  { repo: 'example/repository', pr: '52', base: 'main', author: AUTHOR },
+  parseArgs(['--repo', 'example/repository', '--pr', '52', '--base', 'main', '--base-sha', BASE_A, '--author', AUTHOR]),
+  { repo: 'example/repository', pr: '52', base: 'main', 'base-sha': BASE_A, author: AUTHOR },
   'strict CLI argument parsing',
 );
 assert.throws(() => parseArgs(['--repo', 'a/b', '--repo', 'c/d']), /Duplicate argument/);
@@ -144,7 +198,7 @@ const delayedFetch = async (url, options) => {
   return result;
 };
 const delayedExpiry = await runMergeExecutionGate({
-  repo: 'example/repository', prNumber: 52, baseBranch: 'main', author: AUTHOR,
+  repo: 'example/repository', prNumber: 52, baseBranch: 'main', expectedBaseSha: BASE_A, author: AUTHOR,
   nowFn: () => delayedClock, fetchImpl: delayedFetch,
 });
 assert.equal(delayedExpiry.pass, false, 'receipt expires after fetch delay');
@@ -169,7 +223,7 @@ const signalFetch = async (url, options) => {
   return signalFetchBase(url, options);
 };
 const signalResult = await runMergeExecutionGate({
-  repo: 'example/repository', prNumber: 52, baseBranch: 'main', author: AUTHOR,
+  repo: 'example/repository', prNumber: 52, baseBranch: 'main', expectedBaseSha: BASE_A, author: AUTHOR,
   nowMs: NOW, fetchImpl: signalFetch,
 });
 assert.equal(signalResult.pass, true);
@@ -177,7 +231,7 @@ assert.equal(sawAbortSignal, true, 'GitHub fetch receives abort signal');
 
 let nullEvidenceFetchCalled = false;
 const nullEvidence = await runMergeExecutionGate({
-  repo: 'example/repository', prNumber: 52, baseBranch: 'main', author: AUTHOR,
+  repo: 'example/repository', prNumber: 52, baseBranch: 'main', expectedBaseSha: BASE_A, author: AUTHOR,
   nowMs: NOW, evidence: null,
   fetchImpl: async () => { nullEvidenceFetchCalled = true; throw new Error('must not fetch'); },
 });
@@ -190,10 +244,12 @@ assert.equal(validEvidence.pass, true);
 assert.equal(validEvidence.expectedHeadSha, HEAD_A);
 
 await expectEvidenceFail(makeEvidence({ repository: 'example/other' }), 'EVIDENCE_REPOSITORY_MISMATCH');
-await expectEvidenceFail(makeEvidence({ schemaVersion: 2 }), 'EVIDENCE_SCHEMA_UNSUPPORTED');
+await expectEvidenceFail(makeEvidence({ schemaVersion: 1 }), 'EVIDENCE_SCHEMA_UNSUPPORTED');
 await expectEvidenceFail(makeEvidence({ fetchedAt: '2026-09-08T10:00:00Z' }), 'EVIDENCE_STALE');
 await expectEvidenceFail(makeEvidence({ fetchedAt: '2026-09-08T10:40:00Z' }), 'EVIDENCE_FROM_FUTURE');
 await expectEvidenceFail(makeEvidence({ pr: makePr({ number: 51 }) }), 'EVIDENCE_PR_MISMATCH');
+await expectEvidenceFail(makeEvidence({ pr: makePr({ base: { ref: 'main' } }) }), 'EVIDENCE_SHAPE_INVALID');
+await expectEvidenceFail(makeEvidence({ pr: makePr({ head: {} }) }), 'EVIDENCE_SHAPE_INVALID');
 await expectEvidenceFail(makeEvidence({ authorizationComments: [{ body: receipt(), created_at: '2026-09-08T10:25:00Z', user: {} }] }), 'EVIDENCE_SHAPE_INVALID');
 
 const malformed = `${receipt()}\nEXTRA: no`;

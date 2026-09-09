@@ -10,7 +10,7 @@ const MAX_EVIDENCE_AGE_MS = 5 * 60 * 1000;
 const MAX_EVIDENCE_FUTURE_SKEW_MS = 2 * 60 * 1000;
 const MAX_EVIDENCE_BYTES = 64 * 1024;
 const FETCH_TIMEOUT_MS = 10 * 1000;
-const CLI_ARGUMENTS = new Set(['repo', 'pr', 'base', 'author', 'evidence-file']);
+const CLI_ARGUMENTS = new Set(['repo', 'pr', 'base', 'base-sha', 'author', 'evidence-file']);
 const RECEIPT_SOURCES = new Set(['EXPLICIT_HUMAN', 'PERSISTED_AFTER_AUDIT']);
 const NO_EVIDENCE = Symbol('NO_EVIDENCE');
 
@@ -61,13 +61,15 @@ export function parseAuthorizationReceipt(body) {
     source: values.SOURCE,
   };
 }
-function evidenceFailure(code, prNumber, baseBranch) {
+function evidenceFailure(code, prNumber, baseBranch, expectedBaseSha) {
   return {
     pass: false,
-    checks: { evidence: false, prNumber: false, prOpen: false, notDraft: false, baseBranch: false, headSha: false, authorizationReceipt: false },
+    checks: { evidence: false, prNumber: false, prOpen: false, notDraft: false, baseBranch: false, baseSha: false, headSha: false, authorizationReceipt: false },
     finding: code,
     prNumber,
     baseBranch,
+    actualBaseSha: '(unverified)',
+    expectedBaseSha,
     actualHeadSha: '(unverified)',
     expectedHeadSha: null,
     authorizationCommentId: null,
@@ -86,7 +88,7 @@ export function parseEvidenceJson(raw) {
 
 export function validateMergeEvidence(evidence, { repo, prNumber, nowMs }) {
   if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
-  if (evidence.schemaVersion !== 1) return { ok: false, code: 'EVIDENCE_SCHEMA_UNSUPPORTED' };
+  if (evidence.schemaVersion !== 2) return { ok: false, code: 'EVIDENCE_SCHEMA_UNSUPPORTED' };
   if (evidence.repository !== repo) return { ok: false, code: 'EVIDENCE_REPOSITORY_MISMATCH' };
   const fetchedMs = Date.parse(evidence.fetchedAt ?? '');
   if (!Number.isFinite(fetchedMs)) return { ok: false, code: 'EVIDENCE_FETCH_TIME_INVALID' };
@@ -95,6 +97,9 @@ export function validateMergeEvidence(evidence, { repo, prNumber, nowMs }) {
   if (age > MAX_EVIDENCE_AGE_MS) return { ok: false, code: 'EVIDENCE_STALE' };
   if (!evidence.pr || typeof evidence.pr !== 'object' || Array.isArray(evidence.pr)) return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
   if (Number(evidence.pr.number) !== prNumber) return { ok: false, code: 'EVIDENCE_PR_MISMATCH' };
+  if (!evidence.pr.base || typeof evidence.pr.base !== 'object' || Array.isArray(evidence.pr.base)) return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
+  if (typeof evidence.pr.base.ref !== 'string' || !/^[0-9a-f]{40}$/i.test(String(evidence.pr.base.sha ?? ''))) return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
+  if (!evidence.pr.head || typeof evidence.pr.head !== 'object' || Array.isArray(evidence.pr.head) || !/^[0-9a-f]{40}$/i.test(String(evidence.pr.head.sha ?? ''))) return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
   if (!Array.isArray(evidence.authorizationComments) || evidence.authorizationComments.length > 1000) return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
   for (const comment of evidence.authorizationComments) {
     if (!comment || typeof comment !== 'object' || typeof comment.body !== 'string' || comment.body.length > 2048) return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
@@ -163,11 +168,13 @@ function classifyReceipt(comments, { author, prNumber, headSha, nowMs }) {
   return { code: 'AUTHORIZATION_RECEIPT_VALID', item: fresh[0] };
 }
 
-export async function runMergeExecutionGate({ repo, prNumber, baseBranch, author, nowMs = null, nowFn = Date.now, fetchImpl = fetch, evidence = NO_EVIDENCE }) {
+export async function runMergeExecutionGate({ repo, prNumber, baseBranch, expectedBaseSha, author, nowMs = null, nowFn = Date.now, fetchImpl = fetch, evidence = NO_EVIDENCE }) {
   const { owner, repo: repoName } = parseRepo(repo);
   if (!Number.isInteger(prNumber) || prNumber <= 0) throw new Error('Invalid PR number');
   if (!/^[A-Za-z0-9_.-]+$/.test(author)) throw new Error('Invalid author');
   if (!/^[A-Za-z0-9._/-]+$/.test(baseBranch)) throw new Error('Invalid base branch');
+  const normalizedExpectedBaseSha = String(expectedBaseSha ?? '').toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(normalizedExpectedBaseSha)) throw new Error('Invalid expected base SHA');
   if (nowMs !== null && !Number.isFinite(nowMs)) throw new Error('Invalid nowMs');
   if (typeof nowFn !== 'function') throw new Error('Invalid nowFn');
 
@@ -177,21 +184,23 @@ export async function runMergeExecutionGate({ repo, prNumber, baseBranch, author
   if (evidence !== NO_EVIDENCE) {
     effectiveNowMs = nowMs ?? nowFn();
     const validated = validateMergeEvidence(evidence, { repo, prNumber, nowMs: effectiveNowMs });
-    if (!validated.ok) return evidenceFailure(validated.code, prNumber, baseBranch);
+    if (!validated.ok) return evidenceFailure(validated.code, prNumber, baseBranch, normalizedExpectedBaseSha);
     pr = validated.pr;
     comments = validated.comments;
   } else {
     const apiBase = `https://api.github.com/repos/${owner}/${repoName}`;
-    pr = await fetchJson(`${apiBase}/pulls/${prNumber}`, fetchImpl);
     comments = await fetchAllComments(apiBase, prNumber, fetchImpl);
+    // Fetch PR state last so base/head/draft/open checks use the freshest snapshot immediately before merge execution.
+    pr = await fetchJson(`${apiBase}/pulls/${prNumber}`, fetchImpl);
     effectiveNowMs = nowMs ?? nowFn();
   }
 
   const headSha = String(pr?.head?.sha ?? '').toLowerCase();
-  return classifyAndBuild({ pr, comments, author, prNumber, baseBranch, headSha, nowMs: effectiveNowMs });
+  const actualBaseSha = String(pr?.base?.sha ?? '').toLowerCase();
+  return classifyAndBuild({ pr, comments, author, prNumber, baseBranch, expectedBaseSha: normalizedExpectedBaseSha, actualBaseSha, headSha, nowMs: effectiveNowMs });
 }
 
-function classifyAndBuild({ pr, comments, author, prNumber, baseBranch, headSha, nowMs }) {
+function classifyAndBuild({ pr, comments, author, prNumber, baseBranch, expectedBaseSha, actualBaseSha, headSha, nowMs }) {
   const receipt = classifyReceipt(comments, { author, prNumber, headSha, nowMs });
   const checks = {
     evidence: true,
@@ -199,12 +208,22 @@ function classifyAndBuild({ pr, comments, author, prNumber, baseBranch, headSha,
     prOpen: pr?.state === 'open' && !pr?.merged_at,
     notDraft: pr?.draft === false,
     baseBranch: pr?.base?.ref === baseBranch,
+    baseSha: /^[0-9a-f]{40}$/.test(actualBaseSha) && actualBaseSha === expectedBaseSha,
     headSha: /^[0-9a-f]{40}$/.test(headSha),
     authorizationReceipt: receipt.code === 'AUTHORIZATION_RECEIPT_VALID',
   };
   const pass = Object.values(checks).every(Boolean);
+  let finding = receipt.code;
+  if (!checks.prNumber) finding = 'PR_NUMBER_MISMATCH';
+  else if (!checks.prOpen) finding = 'PR_NOT_OPEN';
+  else if (!checks.notDraft) finding = 'PR_DRAFT';
+  else if (!checks.baseBranch) finding = 'BASE_BRANCH_MISMATCH';
+  else if (!checks.baseSha) finding = 'BASE_SHA_MISMATCH';
+  else if (!checks.headSha) finding = 'HEAD_SHA_INVALID';
   return {
-    pass, checks, finding: receipt.code, prNumber, baseBranch,
+    pass, checks, finding, prNumber, baseBranch,
+    actualBaseSha: actualBaseSha || '(missing)',
+    expectedBaseSha,
     actualHeadSha: headSha || '(missing)',
     expectedHeadSha: pass ? headSha : null,
     authorizationCommentId: pass ? receipt.item.comment.id : null,
@@ -225,6 +244,7 @@ async function main() {
       repo: requireArg(args, 'repo'),
       prNumber: Number(requireArg(args, 'pr')),
       baseBranch: requireArg(args, 'base'),
+      expectedBaseSha: requireArg(args, 'base-sha'),
       author: requireArg(args, 'author'),
       evidence,
     });
@@ -232,6 +252,7 @@ async function main() {
     if (!result.pass) { console.error('MERGE_EXECUTION_GATE=FAIL'); process.exitCode = 2; return; }
     console.log('MERGE_EXECUTION_GATE=PASS');
     console.log(`EXPECTED_HEAD_SHA=${result.expectedHeadSha}`);
+    console.log(`EXPECTED_BASE_SHA=${result.expectedBaseSha}`);
     console.log(`AUTHORIZATION_COMMENT_ID=${result.authorizationCommentId}`);
     console.log(`AUTHORIZATION_SOURCE=${result.authorizationSource}`);
   } catch (error) {
