@@ -7,12 +7,14 @@ function argValue(name, fallback = '') {
   return i >= 0 && i + 1 < args.length ? args[i + 1] : fallback;
 }
 
-const scope = argValue('--scope');
-const minutesRaw = argValue('--estimated-user-minutes');
-const stepsRaw = argValue('--estimated-user-steps');
+const operationKind = argValue('--operation-kind', 'human-interactive').toLowerCase();
+const aiOnly = operationKind === 'ai-only';
+const scope = argValue('--scope', aiOnly ? 'local-dev' : '');
+const minutesRaw = argValue('--estimated-user-minutes', aiOnly ? '0' : '');
+const stepsRaw = argValue('--estimated-user-steps', aiOnly ? '0' : '');
 const alternativesReviewed = argValue('--alternatives-reviewed').toLowerCase();
 const simplestSafe = argValue('--simplest-safe').toLowerCase();
-const workImpact = argValue('--work-impact').toLowerCase();
+const workImpact = argValue('--work-impact', aiOnly ? 'none' : '').toLowerCase();
 const safeStop = argValue('--safe-stop').toLowerCase();
 const scheduledWindow = argValue('--scheduled-window', 'no').toLowerCase();
 const maintenancePlanReviewed = argValue('--maintenance-plan-reviewed').toLowerCase();
@@ -48,6 +50,7 @@ const jsonOnly = args.includes('--json');
 const findings = [];
 function add(status, code, detail = {}) { findings.push({ status, code, ...detail }); }
 
+const allowedOperationKinds = new Set(['human-interactive', 'ai-only']);
 const allowedScopes = new Set(['interactive', 'real-device', 'network', 'production']);
 const allowedImpacts = new Set(['none', 'low', 'medium', 'high']);
 const yesNo = new Set(['yes', 'no']);
@@ -96,7 +99,8 @@ const humanDecisionClasses = new Set([
   'business-policy',
 ]);
 
-if (!allowedScopes.has(scope)) add('STOP', 'OPERATION_SCOPE_REQUIRED');
+if (!allowedOperationKinds.has(operationKind)) add('STOP', 'OPERATION_KIND_INVALID');
+if (!aiOnly && !allowedScopes.has(scope)) add('STOP', 'OPERATION_SCOPE_REQUIRED');
 
 const hasMinutes = minutesRaw.trim() !== '';
 const hasSteps = stepsRaw.trim() !== '';
@@ -117,10 +121,10 @@ if (!allowedImpacts.has(workImpact)) add('STOP', 'WORK_IMPACT_REQUIRED');
 if (!yesNo.has(safeStop)) add('STOP', 'SAFE_STOP_ASSESSMENT_REQUIRED');
 if (!yesNo.has(scheduledWindow)) add('STOP', 'SCHEDULED_WINDOW_VALUE_INVALID');
 if (!yesNo.has(lifecycleImpact)) add('STOP', 'LIFECYCLE_IMPACT_STATUS_REQUIRED');
-if (!allowedHumanProfiles.has(humanProfile)) add('STOP', 'HUMAN_PROFILE_REQUIRED');
-if (!allowedHumanRoles.has(humanRole)) add('STOP', 'HUMAN_ROLE_REQUIRED');
-if (!allowedTechnicalJudgmentOwners.has(technicalJudgmentOwner)) add('STOP', 'TECHNICAL_JUDGMENT_OWNER_REQUIRED');
-if (!allowedInstructionModes.has(instructionMode)) add('STOP', 'INSTRUCTION_MODE_REQUIRED');
+if (!aiOnly && !allowedHumanProfiles.has(humanProfile)) add('STOP', 'HUMAN_PROFILE_REQUIRED');
+if (!aiOnly && !allowedHumanRoles.has(humanRole)) add('STOP', 'HUMAN_ROLE_REQUIRED');
+if (!aiOnly && !allowedTechnicalJudgmentOwners.has(technicalJudgmentOwner)) add('STOP', 'TECHNICAL_JUDGMENT_OWNER_REQUIRED');
+if (!aiOnly && !allowedInstructionModes.has(instructionMode)) add('STOP', 'INSTRUCTION_MODE_REQUIRED');
 if (!allowedChangeClasses.has(changeClass)) add('STOP', 'CHANGE_CLASS_REQUIRED');
 if (!yesNo.has(repeatedManualPattern)) add('STOP', 'REPEATED_MANUAL_PATTERN_STATUS_REQUIRED');
 if (!allowedAiWorkStructures.has(aiWorkStructure)) add('STOP', 'AI_WORK_STRUCTURE_REQUIRED');
@@ -129,6 +133,13 @@ if (!hasSameClassFailureCount || !Number.isInteger(sameClassFailureCount) || sam
   add('STOP', 'SAME_CLASS_FAILURE_COUNT_REQUIRED');
 }
 if (!allowedPostFailureActions.has(postFailureAction)) add('STOP', 'POST_FAILURE_ACTION_REQUIRED');
+
+if (aiOnly) {
+  const humanFieldsPresent = [humanProfile, humanRole, technicalJudgmentOwner, instructionMode].some(Boolean);
+  if (humanFieldsPresent || estimatedUserMinutes !== 0 || estimatedUserSteps !== 0 || workImpact !== 'none' || scheduledWindow !== 'no' || scope !== 'local-dev') {
+    add('STOP', 'AI_ONLY_HUMAN_OPERATION_CONFLICT');
+  }
+}
 
 if (Number.isInteger(sameClassFailureCount) && sameClassFailureCount >= 0) {
   if (sameClassFailureCount === 0 && postFailureAction !== 'not-applicable') {
@@ -190,7 +201,7 @@ if (changeClass === 'lifecycle-responsibility' && lifecycleImpact !== 'yes') {
   add('STOP', 'LIFECYCLE_RESPONSIBILITY_REQUIRES_LIFECYCLE_REVIEW');
 }
 
-if (humanProfile === 'non-engineer') {
+if (!aiOnly && humanProfile === 'non-engineer') {
   if (humanRole === 'technical-decider') {
     add('STOP', 'NON_ENGINEER_ASSIGNED_TECHNICAL_DECISION');
   }
@@ -267,15 +278,16 @@ if ((workImpact === 'medium' || workImpact === 'high') && scheduledWindow !== 'y
 
 if (!findings.some((f) => f.status === 'STOP')) {
   add('SAFE_CONFIRMED', 'OPERATION_PLAN_ACCEPTABLE', {
+    operationKind,
     scope,
     estimatedUserMinutes,
     estimatedUserSteps,
     workImpact,
     scheduledWindow,
-    humanProfile,
-    humanRole,
-    technicalJudgmentOwner,
-    instructionMode,
+    humanProfile: aiOnly ? null : humanProfile,
+    humanRole: aiOnly ? null : humanRole,
+    technicalJudgmentOwner: aiOnly ? null : technicalJudgmentOwner,
+    instructionMode: aiOnly ? null : instructionMode,
     changeClass,
     importantHumanChoice,
     lifecycleImpact,
@@ -300,13 +312,14 @@ if (!findings.some((f) => f.status === 'STOP')) {
 const result = findings.some((f) => f.status === 'STOP') ? 'STOP' : 'PROCEED';
 const output = {
   result,
+  operationKind,
   scope: scope || '(missing)',
   estimatedUserMinutes: Number.isFinite(estimatedUserMinutes) ? estimatedUserMinutes : null,
   estimatedUserSteps: Number.isInteger(estimatedUserSteps) ? estimatedUserSteps : null,
-  humanProfile: humanProfile || '(missing)',
-  humanRole: humanRole || '(missing)',
-  technicalJudgmentOwner: technicalJudgmentOwner || '(missing)',
-  instructionMode: instructionMode || '(missing)',
+  humanProfile: aiOnly ? null : (humanProfile || '(missing)'),
+  humanRole: aiOnly ? null : (humanRole || '(missing)'),
+  technicalJudgmentOwner: aiOnly ? null : (technicalJudgmentOwner || '(missing)'),
+  instructionMode: aiOnly ? null : (instructionMode || '(missing)'),
   changeClass: changeClass || '(missing)',
   importantHumanChoice,
   lifecycleImpact: lifecycleImpact || '(missing)',

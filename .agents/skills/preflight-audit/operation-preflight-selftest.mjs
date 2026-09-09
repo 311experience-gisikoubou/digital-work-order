@@ -62,6 +62,19 @@ const routineBase = [
   ...progressSingle,
 ];
 
+const aiOnlyBase = [
+  '--operation-kind', 'ai-only',
+  '--alternatives-reviewed', 'yes',
+  '--simplest-safe', 'yes',
+  '--safe-stop', 'yes',
+  '--change-class', 'implementation',
+  '--lifecycle-impact', 'no',
+  '--repeated-manual-pattern', 'no',
+  '--same-class-failure-count', '0',
+  '--post-failure-action', 'not-applicable',
+  ...progressSingle,
+];
+
 const lifecycleSafe = [
   '--lifecycle-impact', 'yes',
   '--maintenance-plan-reviewed', 'yes',
@@ -70,6 +83,17 @@ const lifecycleSafe = [
   '--removal-owner', 'ai-workflow',
   '--estimated-user-maintenance-minutes-month', '0',
 ];
+
+const aiOnlyResult = run(aiOnlyBase);
+if (aiOnlyResult.status !== 0) throw new Error(`expected AI-only PROCEED: ${aiOnlyResult.stdout} ${aiOnlyResult.stderr}`);
+const aiOnlyOutput = JSON.parse(aiOnlyResult.stdout);
+if (aiOnlyOutput.operationKind !== 'ai-only' || aiOnlyOutput.scope !== 'local-dev') throw new Error('AI-only defaults missing');
+if (aiOnlyOutput.estimatedUserMinutes !== 0 || aiOnlyOutput.estimatedUserSteps !== 0) throw new Error('AI-only human burden must default to zero');
+if (aiOnlyOutput.humanProfile !== null || aiOnlyOutput.humanRole !== null || aiOnlyOutput.instructionMode !== null) throw new Error('AI-only human fields must be non-applicable');
+expectStop([...aiOnlyBase, '--estimated-user-minutes', '1'], 'AI_ONLY_HUMAN_OPERATION_CONFLICT');
+expectStop([...aiOnlyBase, '--human-profile', 'non-engineer'], 'AI_ONLY_HUMAN_OPERATION_CONFLICT');
+expectStop([...aiOnlyBase, '--scope', 'network'], 'AI_ONLY_HUMAN_OPERATION_CONFLICT');
+expectStop([...routineBase, '--operation-kind', 'unsupported'], 'OPERATION_KIND_INVALID');
 
 expectStop([
   '--scope', 'network',

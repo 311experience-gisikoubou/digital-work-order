@@ -252,7 +252,9 @@ node .agents/skills/preflight-audit/fast-path-classifier-selftest.mjs .agents/sk
 
 Before asking a human to perform real-device, network, production, installation, service-adoption, or other interactive setup, run `operation-preflight.mjs`.
 
-For AI-owned `multi-step` or `long-running` work, run `operation-preflight.mjs` when the Fast Path classifier returns `FULL_GATE`, when a human interactive operation is actually required, or when repeated-failure / lifecycle / value-ownership conditions independently trigger the gate. A valid `FAST_PATH` classification explicitly exempts unchanged-scope AI-only work from `operation-preflight`; progress communication still applies, but no machine gate call is required solely because the AI work has multiple steps. If no human operation is required on a Full Gate path, use `--estimated-user-minutes 0` and `--estimated-user-steps 0`; do not invent human work merely to satisfy the gate.
+For AI-owned `multi-step` or `long-running` work, run `operation-preflight.mjs` when the Fast Path classifier returns `FULL_GATE`, when a human interactive operation is actually required, or when repeated-failure / lifecycle / value-ownership conditions independently trigger the gate. A valid `FAST_PATH` classification explicitly exempts unchanged-scope AI-only work from `operation-preflight`; progress communication still applies, but no machine gate call is required solely because the AI work has multiple steps.
+
+For local Full Gate work with **no human operation**, use `--operation-kind ai-only`. In that mode the gate derives `scope=local-dev`, user minutes/steps `0`, `work-impact=none`, and `scheduled-window=no`; human profile/role/technical-judgment-owner/instruction-mode are non-applicable and must not be supplied. Any conflicting human-operation field or non-local scope fails closed with `AI_ONLY_HUMAN_OPERATION_CONFLICT`. All safety-relevant planning, lifecycle/value decisions, repeated-failure handling, and progress requirements remain unchanged.
 
 Required planning inputs:
 
@@ -428,7 +430,7 @@ node .agents/skills/preflight-audit/operation-preflight.mjs --scope interactive 
 ### Example: multi-step AI work with no human operation
 
 ```text
-node .agents/skills/preflight-audit/operation-preflight.mjs --scope interactive --estimated-user-minutes 0 --estimated-user-steps 0 --alternatives-reviewed yes --simplest-safe yes --work-impact none --safe-stop yes --scheduled-window no --human-profile non-engineer --human-role observer --technical-judgment-owner ai-workflow --instruction-mode stepwise-ui --change-class implementation --lifecycle-impact no --repeated-manual-pattern no --same-class-failure-count 0 --post-failure-action not-applicable --ai-work-structure multi-step --progress-update-event task-start --progress-update-sent yes --progress-current-stage-present yes --progress-meaning-present yes --progress-next-step-present yes --progress-user-action-status-present yes
+node .agents/skills/preflight-audit/operation-preflight.mjs --operation-kind ai-only --alternatives-reviewed yes --simplest-safe yes --safe-stop yes --change-class implementation --lifecycle-impact no --repeated-manual-pattern no --same-class-failure-count 0 --post-failure-action not-applicable --ai-work-structure multi-step --progress-update-event task-start --progress-update-sent yes --progress-current-stage-present yes --progress-meaning-present yes --progress-next-step-present yes --progress-user-action-status-present yes
 ```
 
 ### Example: fully managed software/service adoption
