@@ -238,3 +238,14 @@
 - post-update foundation-sync-audit: PASS
 - product/runtime/data changes: none; repository-local files preserved
 - merge: requires fresh explicit human authorization
+
+## 2026-09-09 - ai-dev-foundation 1.0.0-dev.58
+- source commit: 53944e7c27da5750c202964e4648da6f3f40a8dc
+- trusted previous foundation: 1.0.0-dev.47 (c78a61a77023983cf7e2e15f921b6f68568763ec)
+- target branch: chore/foundation-dev58-sync
+- method: fail-closed foundation-update.mjs dev.47 → dev.58
+- local merge-execution gate from PR #54 was normalized to trusted dev.47 only on this dedicated branch, then replaced by the canonical dev.58 implementation
+- post-update foundation-sync-audit: PASS; canonical missing/stale 0/0
+- Foundation selftests: 20/20 PASS; git diff --check PASS
+- product/runtime/data changes: none; repository-local extras preserved; REAL_DEVICE not required
+- merge: requires fresh explicit human authorization

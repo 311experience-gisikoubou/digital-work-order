@@ -64,14 +64,38 @@ function versionFrom(text) {
   const match = String(text || '').match(/\b\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\b/);
   return match ? match[0] : null;
 }
+function safeCreditsSnapshot(credits) {
+  if (!credits || typeof credits !== 'object' || Array.isArray(credits)) return { status: 'UNAVAILABLE' };
+  const hasCredits = credits.hasCredits ?? credits.has_credits;
+  if (typeof hasCredits !== 'boolean') return { status: 'UNAVAILABLE' };
+  if (hasCredits === false) return { status: 'AVAILABLE', hasCredits: false, balanceState: 'NONE' };
+  if (credits.unlimited === true) return { status: 'AVAILABLE', hasCredits: true, balanceState: 'UNLIMITED' };
+  const rawBalance = credits.balance;
+  const balance = typeof rawBalance === 'number' ? rawBalance
+    : (typeof rawBalance === 'string' && /^\d+(?:\.\d+)?$/.test(rawBalance.trim()) ? Number(rawBalance) : NaN);
+  if (!Number.isFinite(balance) || balance < 0) return { status: 'AVAILABLE', hasCredits: true, balanceState: 'UNKNOWN' };
+  return { status: 'AVAILABLE', hasCredits: true, balanceState: balance === 0 ? 'ZERO' : 'POSITIVE' };
+}
+
+function safeNonnegativeNumber(value) {
+  if (typeof value === 'number') return Number.isFinite(value) && value >= 0 ? value : null;
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(text)) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function safeWindow(window) {
-  if (!window || !Number.isFinite(Number(window.usedPercent))) return null;
-  const used = Math.min(100, Math.max(0, Math.round(Number(window.usedPercent))));
+  if (!window || typeof window !== 'object' || Array.isArray(window)) return null;
+  const usedRaw = safeNonnegativeNumber(window.usedPercent);
+  if (usedRaw === null) return null;
+  const used = Math.min(100, Math.max(0, Math.round(usedRaw)));
   return {
     usedPercent: used,
     remainingPercent: 100 - used,
-    windowDurationMins: Number.isFinite(Number(window.windowDurationMins)) ? Number(window.windowDurationMins) : null,
-    resetsAt: Number.isFinite(Number(window.resetsAt)) ? Number(window.resetsAt) : null,
+    windowDurationMins: safeNonnegativeNumber(window.windowDurationMins),
+    resetsAt: safeNonnegativeNumber(window.resetsAt),
   };
 }
 
@@ -86,6 +110,7 @@ export function sanitizeCodexRateLimits(payload) {
     source: 'codex_app_server_account_rateLimits_read',
     primary,
     secondary,
+    credits: safeCreditsSnapshot(rateLimits.credits),
   };
 }
 
@@ -112,6 +137,8 @@ function terminateChild(child) {
   escalation.unref();
 }
 
+const MAX_CODEX_STDIO_BUFFER_BYTES = 256 * 1024;
+
 export async function observeCodex(timeoutMs, desc = commandDescriptor('codex')) {
   const versionRun = runSync(desc, ['--version'], Math.min(timeoutMs, 4000));
   if (versionRun.error || versionRun.status !== 0) {
@@ -137,6 +164,11 @@ export async function observeCodex(timeoutMs, desc = commandDescriptor('codex'))
     child.stdin.on('error', () => finish({ status: 'UNAVAILABLE', reason: 'codex_app_server_stdin_failed' }));
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
+      if (settled) return;
+      if (Buffer.byteLength(buffer, 'utf8') + Buffer.byteLength(chunk, 'utf8') > MAX_CODEX_STDIO_BUFFER_BYTES) {
+        finish({ status: 'UNAVAILABLE', reason: 'codex_rate_limit_output_too_large' });
+        return;
+      }
       buffer += chunk;
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() || '';
