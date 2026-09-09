@@ -25,6 +25,7 @@ Use after a PR has already been merged on the remote host and the user asks to v
 - Local `main` and `origin/main` SHA equality
 - Final working tree status
 - Branch deletion safety judgment
+- Authorization provenance: verify that a valid `MERGE_AUTHORIZATION_V1` receipt for the exact merged PR and exact pre-merge HEAD existed **before** `merged_at`; later approval is never retroactive authorization
 
 ## Merge Method Verification
 
@@ -33,6 +34,16 @@ Use after a PR has already been merged on the remote host and the user asks to v
 - Evaluate tree equality (content) and history shape (commit graph, parent count) as two separate checks. A merge method different from what was expected is not, by itself, a content problem if tree equality still holds.
 - If the actual merge method differs from what was expected or requested, stop and report the discrepancy for the user to decide, rather than proceeding silently or rewriting history to force a match.
 - Never rebase, reset, force-push, or otherwise rewrite the resulting history in order to make an unexpected merge method match what was expected.
+
+## Unauthorized Merge Containment
+
+If the merged PR has no valid exact-PR/exact-HEAD authorization receipt created before the merge, classify the event as `UNAUTHORIZED_MERGE_INCIDENT` even when the merged tree is technically correct.
+
+- Do not treat later human approval as retroactive authorization.
+- Do not call post-merge verification PASS merely because tree equality is correct.
+- Record/update an incident Issue with only non-sensitive metadata: PR number, audited head, merge commit, merge time, and receipt finding.
+- Enter **MERGE FREEZE** for subsequent merge operations in the affected repository until the human decides whether to accept the already-merged result or revert it. Safe read-only investigation, testing, and corrective branch work may continue; further merge is the frozen action.
+- MERGE FREEZE is containment only. It never authorizes history rewrite, force-push, or automatic revert.
 
 ## Do Not Do
 
@@ -57,6 +68,8 @@ Use after a PR has already been merged on the remote host and the user asks to v
 - Unexpected commits appear on `origin/main` after remote update.
 - GitHub PR data is unavailable and local refs cannot verify the requested facts.
 - Branch deletion lacks explicit user permission.
+- Authorization provenance is missing, mismatched, created after merge, or otherwise cannot be proven for the exact PR/HEAD.
+- An unresolved MERGE FREEZE exists for the repository.
 - Any paid service, external API, automatic billing, or added dependency may be involved.
 
 ## GitHub Information Limits

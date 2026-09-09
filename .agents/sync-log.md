@@ -249,3 +249,13 @@
 - Foundation selftests: 20/20 PASS; git diff --check PASS
 - product/runtime/data changes: none; repository-local extras preserved; REAL_DEVICE not required
 - merge: requires fresh explicit human authorization
+
+## 2026-09-09 - ai-dev-foundation 1.0.0-dev.63
+- source commit: bd7338e847a82130028bf20baa6393f4a2cf74c5
+- trusted previous foundation: 1.0.0-dev.59 (36b51fe12ea84535f8ae97b5b3d88d04fc83b5d7)
+- target branch: chore/foundation-dev63-rollout
+- method: fail-closed foundation-update.mjs dev.59 -> dev.63
+- post-update foundation-sync-audit: PASS; canonical missing/stale 0/0
+- free-tier merge hardening: Draft Lock Mode + non-transferable merge authorization + unauthorized-merge freeze
+- product/runtime/data changes: none; repository-local extras preserved; REAL_DEVICE not required
+- merge: Draft remains locked until a fresh explicit human authorization is bound to this exact rollout PR/head

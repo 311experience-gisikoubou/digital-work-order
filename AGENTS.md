@@ -67,6 +67,8 @@
 - `CURRENT_STATUS.md`だけを根拠に「実装済み」「強制済み」「テスト済み」と断定しない。実装・gate・PR等の証拠と矛盾する場合は証拠を優先し、statusを修正する。
 - `Merge authorized: YES`は、有効な人間の明示merge承認が存在する場合だけ使用する。
 - Actual merge execution must use the exact-PR / exact-HEAD authorization receipt gate defined by `final-pr-audit`; a status flag or continuation instruction alone never authorizes merge execution.
+- When the target branch lacks verified server-side merge protection, PRs must stay Draft until the active conversation directly receives explicit merge authorization. Only that merge-coordinator flow may unlock Draft->Ready, immediately re-run the exact-HEAD gate, and merge. Direct writes, ref updates, or contents writes to `main` are prohibited as a bypass.
+- A merged PR with no valid pre-merge exact-PR/exact-HEAD authorization receipt is an `UNAUTHORIZED_MERGE_INCIDENT`; later approval is not retroactive, and subsequent merge operations enter MERGE FREEZE until the human resolves the incident.
 
 ## 共通ルール変更ゲート
 
