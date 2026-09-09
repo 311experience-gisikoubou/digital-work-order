@@ -248,6 +248,27 @@ Classifier self-test:
 node .agents/skills/preflight-audit/fast-path-classifier-selftest.mjs .agents/skills/preflight-audit/fast-path-classifier.mjs
 ```
 
+## Full Gate Selftest Scope
+
+When the classifier returns `FULL_GATE`, reuse the **same change-evidence JSON** with `full-gate-selftest-selector.mjs` before running Foundation selftests:
+
+```text
+<change-evidence-json> | node .agents/skills/preflight-audit/full-gate-selftest-selector.mjs --pretty
+```
+
+- This does not downgrade Full Gate. It only chooses which Foundation selftests are relevant to the touched governance components. Independent review, lifecycle/value gates, security boundaries, WIP control, diff checking, and merge authorization keep their own triggers.
+- `IMPACT_SCOPED` always includes the merge-authorization, merge-execution, Fast Path classifier, security-preflight, and selector selftests, plus the mapped impacted family. The output includes fixed machine-readable `commands` so callers do not reconstruct test invocations.
+- Unknown governance paths, selector changes, Fast Path classifier changes, merge-control code/instructions, any `.agents/skills/*/SKILL.md` change, or any declared impact flag set to `true` fail closed to `FULL_SUITE`. Skill instructions are governance code and never self-authorize a narrow suite, even when mixed with otherwise mapped implementation paths. Incomplete evidence also uses the full suite; malformed evidence exits non-zero.
+- `CHANGELOG.md` and `VERSION` are neutral only when accompanied by at least one mapped implementation/test path. Metadata-only governance changes do not self-authorize a narrow suite.
+- There is no diff-size threshold. Measured runtime is optimization evidence, never a safety classifier.
+- On the 2026-09-09 baseline, the 20-test pre-selector suite measured 83.9s. An operation-preflight-only example selected 6 tests and measured 8.4s; these are observations, not promised runtimes.
+
+Selector self-test:
+
+```text
+node .agents/skills/preflight-audit/full-gate-selftest-selector-selftest.mjs .agents/skills/preflight-audit/full-gate-selftest-selector.mjs
+```
+
 ## Interactive / AI Work Operation Gate
 
 Before asking a human to perform real-device, network, production, installation, service-adoption, or other interactive setup, run `operation-preflight.mjs`.
@@ -285,13 +306,15 @@ For `multi-step` or `long-running`, `progress-update-event=none` is a fail-close
 - what happens next;
 - whether user action is required, explicitly stating `none`/不要 when no action is needed.
 
-The gate requires:
+For existing/human-interactive callers, the detailed attestation remains:
 
 - `--progress-update-sent yes`
 - `--progress-current-stage-present yes`
 - `--progress-meaning-present yes`
 - `--progress-next-step-present yes`
 - `--progress-user-action-status-present yes`
+
+For `--operation-kind ai-only`, the same already-sent update may instead be attested once with `--progress-update-complete yes`. This compact attestation means all five detailed conditions above are true. It is invalid for human-interactive work, invalid when `progress-update-event=none`, and must not be mixed with detailed progress flags.
 
 Do not substitute speculative future completion-time promises for progress visibility. When exact duration cannot be guaranteed, communicate the work scale and current phase, such as a short check, multi-stage audit, or final verification phase.
 
@@ -430,7 +453,7 @@ node .agents/skills/preflight-audit/operation-preflight.mjs --scope interactive 
 ### Example: multi-step AI work with no human operation
 
 ```text
-node .agents/skills/preflight-audit/operation-preflight.mjs --operation-kind ai-only --alternatives-reviewed yes --simplest-safe yes --safe-stop yes --change-class implementation --lifecycle-impact no --repeated-manual-pattern no --same-class-failure-count 0 --post-failure-action not-applicable --ai-work-structure multi-step --progress-update-event task-start --progress-update-sent yes --progress-current-stage-present yes --progress-meaning-present yes --progress-next-step-present yes --progress-user-action-status-present yes
+node .agents/skills/preflight-audit/operation-preflight.mjs --operation-kind ai-only --alternatives-reviewed yes --simplest-safe yes --safe-stop yes --change-class implementation --lifecycle-impact no --repeated-manual-pattern no --same-class-failure-count 0 --post-failure-action not-applicable --ai-work-structure multi-step --progress-update-event task-start --progress-update-complete yes
 ```
 
 ### Example: fully managed software/service adoption

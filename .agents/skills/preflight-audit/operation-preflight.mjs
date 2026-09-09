@@ -34,6 +34,7 @@ const repeatedManualPattern = argValue('--repeated-manual-pattern').toLowerCase(
 const structuralAutomationReviewed = argValue('--structural-automation-reviewed').toLowerCase();
 const aiWorkStructure = argValue('--ai-work-structure').toLowerCase();
 const progressUpdateEvent = argValue('--progress-update-event').toLowerCase();
+const progressUpdateComplete = argValue('--progress-update-complete').toLowerCase();
 const progressUpdateSent = argValue('--progress-update-sent').toLowerCase();
 const progressCurrentStagePresent = argValue('--progress-current-stage-present').toLowerCase();
 const progressMeaningPresent = argValue('--progress-meaning-present').toLowerCase();
@@ -129,6 +130,9 @@ if (!allowedChangeClasses.has(changeClass)) add('STOP', 'CHANGE_CLASS_REQUIRED')
 if (!yesNo.has(repeatedManualPattern)) add('STOP', 'REPEATED_MANUAL_PATTERN_STATUS_REQUIRED');
 if (!allowedAiWorkStructures.has(aiWorkStructure)) add('STOP', 'AI_WORK_STRUCTURE_REQUIRED');
 if (!allowedProgressEvents.has(progressUpdateEvent)) add('STOP', 'PROGRESS_UPDATE_EVENT_REQUIRED');
+if (progressUpdateComplete && !yesNo.has(progressUpdateComplete)) add('STOP', 'PROGRESS_UPDATE_COMPLETE_STATUS_INVALID');
+if (progressUpdateComplete && !aiOnly) add('STOP', 'COMPACT_PROGRESS_ATTESTATION_AI_ONLY');
+if (progressUpdateComplete && progressUpdateEvent === 'none') add('STOP', 'PROGRESS_ATTESTATION_WITHOUT_EVENT');
 if (!hasSameClassFailureCount || !Number.isInteger(sameClassFailureCount) || sameClassFailureCount < 0) {
   add('STOP', 'SAME_CLASS_FAILURE_COUNT_REQUIRED');
 }
@@ -184,11 +188,17 @@ if (progressRequired && progressUpdateEvent === 'none') {
   add('STOP', 'PROGRESS_UPDATE_REQUIRED_FOR_COMPLEX_WORK', { aiWorkStructure });
 }
 if (progressUpdateEvent && progressUpdateEvent !== 'none') {
-  if (progressUpdateSent !== 'yes') add('STOP', 'PROGRESS_UPDATE_NOT_SENT', { progressUpdateEvent });
-  if (progressCurrentStagePresent !== 'yes') add('STOP', 'PROGRESS_CURRENT_STAGE_REQUIRED');
-  if (progressMeaningPresent !== 'yes') add('STOP', 'PROGRESS_MEANING_REQUIRED');
-  if (progressNextStepPresent !== 'yes') add('STOP', 'PROGRESS_NEXT_STEP_REQUIRED');
-  if (progressUserActionStatusPresent !== 'yes') add('STOP', 'PROGRESS_USER_ACTION_STATUS_REQUIRED');
+  const detailedProgressPresent = [progressUpdateSent, progressCurrentStagePresent, progressMeaningPresent, progressNextStepPresent, progressUserActionStatusPresent].some(Boolean);
+  if (progressUpdateComplete && detailedProgressPresent) add('STOP', 'PROGRESS_ATTESTATION_CONFLICT');
+  if (aiOnly && progressUpdateComplete) {
+    if (progressUpdateComplete !== 'yes') add('STOP', 'PROGRESS_UPDATE_INCOMPLETE', { progressUpdateEvent });
+  } else {
+    if (progressUpdateSent !== 'yes') add('STOP', 'PROGRESS_UPDATE_NOT_SENT', { progressUpdateEvent });
+    if (progressCurrentStagePresent !== 'yes') add('STOP', 'PROGRESS_CURRENT_STAGE_REQUIRED');
+    if (progressMeaningPresent !== 'yes') add('STOP', 'PROGRESS_MEANING_REQUIRED');
+    if (progressNextStepPresent !== 'yes') add('STOP', 'PROGRESS_NEXT_STEP_REQUIRED');
+    if (progressUserActionStatusPresent !== 'yes') add('STOP', 'PROGRESS_USER_ACTION_STATUS_REQUIRED');
+  }
 }
 
 if (alternativesReviewed === 'no') add('STOP', 'ALTERNATIVES_NOT_REVIEWED');
@@ -295,7 +305,8 @@ if (!findings.some((f) => f.status === 'STOP')) {
     structuralAutomationReviewed: structuralAutomationReviewed || null,
     aiWorkStructure,
     progressUpdateEvent,
-    progressUpdateSent: progressUpdateEvent === 'none' ? null : progressUpdateSent,
+    progressUpdateComplete: progressUpdateEvent === 'none' ? null : (progressUpdateComplete || null),
+    progressUpdateSent: progressUpdateEvent === 'none' ? null : (progressUpdateComplete ? null : progressUpdateSent),
     sameClassFailureCount: Number.isInteger(sameClassFailureCount) ? sameClassFailureCount : null,
     postFailureAction: postFailureAction || null,
     materialChangeReviewed: postFailureAction === 'retry-materially-changed' ? materialChangeReviewed : null,
@@ -326,6 +337,7 @@ const output = {
   repeatedManualPattern: repeatedManualPattern || '(missing)',
   aiWorkStructure: aiWorkStructure || '(missing)',
   progressUpdateEvent: progressUpdateEvent || '(missing)',
+  progressUpdateComplete: progressUpdateComplete || null,
   progressRequired,
   sameClassFailureCount: Number.isInteger(sameClassFailureCount) ? sameClassFailureCount : null,
   postFailureAction: postFailureAction || '(missing)',

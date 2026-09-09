@@ -75,6 +75,13 @@ const aiOnlyBase = [
   ...progressSingle,
 ];
 
+const aiOnlyComplexCompact = [
+  ...aiOnlyBase.filter((v, i, a) => !(v === '--ai-work-structure' || a[i - 1] === '--ai-work-structure' || v === '--progress-update-event' || a[i - 1] === '--progress-update-event')),
+  '--ai-work-structure', 'multi-step',
+  '--progress-update-event', 'task-start',
+  '--progress-update-complete', 'yes',
+];
+
 const lifecycleSafe = [
   '--lifecycle-impact', 'yes',
   '--maintenance-plan-reviewed', 'yes',
@@ -94,6 +101,12 @@ expectStop([...aiOnlyBase, '--estimated-user-minutes', '1'], 'AI_ONLY_HUMAN_OPER
 expectStop([...aiOnlyBase, '--human-profile', 'non-engineer'], 'AI_ONLY_HUMAN_OPERATION_CONFLICT');
 expectStop([...aiOnlyBase, '--scope', 'network'], 'AI_ONLY_HUMAN_OPERATION_CONFLICT');
 expectStop([...routineBase, '--operation-kind', 'unsupported'], 'OPERATION_KIND_INVALID');
+expectProceed(aiOnlyComplexCompact);
+expectStop([...aiOnlyComplexCompact, '--progress-update-complete', 'no'], 'PROGRESS_UPDATE_INCOMPLETE');
+expectStop([...aiOnlyComplexCompact, '--progress-update-sent', 'yes'], 'PROGRESS_ATTESTATION_CONFLICT');
+expectStop([...aiOnlyBase, '--progress-update-complete', 'yes'], 'PROGRESS_ATTESTATION_WITHOUT_EVENT');
+expectStop([...routineBase, '--progress-update-complete', 'yes'], 'COMPACT_PROGRESS_ATTESTATION_AI_ONLY');
+
 
 expectStop([
   '--scope', 'network',
