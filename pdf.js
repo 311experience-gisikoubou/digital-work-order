@@ -3,7 +3,6 @@
 //  html2canvas + pdf-lib は vendor/pdf のローカル同梱資産のみを使用する。
 // ============================================================
 var pendingPrintRequest = null;
-var activePdfObjectUrls = [];
 
 function exportPDF(id, id2) {
   pendingPrintRequest = { id: id || null, id2: id2 != null ? id2 : null };
@@ -36,54 +35,19 @@ function confirmPrintPaperSize(paperSize) {
   _startFixedPdfExport(request.id, request.id2, normalized);
 }
 
-function _openPdfPreviewWindow(paperSize) {
-  var label = paperSize === 'a4' ? 'A4' : 'B5';
-  try {
-    var preview = window.open('', '_blank');
-    if (!preview) return null;
-    preview.document.open();
-    preview.document.write('<!DOCTYPE html><meta charset="UTF-8"><title>' + label + ' PDF作成中</title><body style="font-family:sans-serif;padding:24px">' + label + ' PDFを作成しています…</body>');
-    preview.document.close();
-    return preview;
-  } catch (error) {
-    return null;
-  }
-}
-
 function _startFixedPdfExport(id, id2, paperSize) {
   var label = paperSize === 'a4' ? 'A4' : 'B5';
-  var previewWindow = _openPdfPreviewWindow(paperSize);
   showToast(label + ' PDFをブラウザ内で作成しています');
   _createFixedPdfBlob(id, id2, paperSize)
     .then(function(blob) {
       var url = URL.createObjectURL(blob);
-      activePdfObjectUrls.push(url);
-      if (previewWindow && !previewWindow.closed) {
-        previewWindow.location.replace(url);
-      } else {
-        var link = document.createElement('a');
-        link.href = url;
-        link.download = 'dental-work-order-' + label + '.pdf';
-        link.rel = 'noopener';
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-      }
-      setTimeout(function() { _revokePdfObjectUrl(url); }, 600000);
       showToast(label + ' PDFを作成しました');
+      window.location.assign(url);
     })
     .catch(function() {
-      if (previewWindow && !previewWindow.closed) previewWindow.close();
       showToast('PDFを作成できませんでした', 'error');
     });
 }
-
-function _revokePdfObjectUrl(url) {
-  var index = activePdfObjectUrls.indexOf(url);
-  if (index >= 0) activePdfObjectUrls.splice(index, 1);
-  URL.revokeObjectURL(url);
-}
-
 function pdfMmToPoints(mm) {
   return Number(mm) * 72 / 25.4;
 }

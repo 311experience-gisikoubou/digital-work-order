@@ -82,6 +82,8 @@ test('direct PDF path does not call browser print', () => {
   assert.ok(pdfSource.includes('application/pdf'));
   assert.ok(!pdfSource.includes('.print()'));
   assert.ok(!pdfSource.includes('contentWindow.print'));
+  assert.ok(!pdfSource.includes('window.open('));
+  assert.ok(pdfSource.includes('window.location.assign(url)'));
 });
 test('generated B5 PDF is exactly one 182mm x 257mm page', async () => {
   const result = await generatedPdfGeometry('b5');
