@@ -4,25 +4,31 @@
 仕様書・履歴・議事録を複製せず、現在の作業状態だけを保ちます。
 
 - Status: `ACTIVE`
-- Current phase: `merge authorization safety / Issue #53 implementation and final audit`
-- Current branch: `chore/merge-authorization-gate`
-- Current PR: `#54 (Ready)`
-- Last completed gate: `PR #54 final-pr-audit PASS; mergeable=true; no reviews/threads/workflows; merge-execution gate selftest PASS; full Node suite 54/54 PASS; merged-PR live fail-closed check PASS`
+- Project: `311experience-gisikoubou/digital-work-order`
+- Project boundary: `デジタル歯科技工指示書専用。dental-delivery-billing は別Repoであり、このプロジェクトでは実装・PR・実機確認を行わない。`
+- Current phase: `post-foundation-dev.67 / product backlog selection`
+- Current branch: `chore/refresh-current-status-dwo`
+- Current PR: `NONE（status refresh準備中）`
+- Latest main: `c7c8f7cf853ee16818042ab3054bb64b8cfca796`
+- Last completed gate: `PR #59 Foundation dev.67 sync merged`
+- Last completed product work: `PR #52 納品連携JSON export merged`
+- Open product issues: `0`
+- Open PRs: `0`
 - Current blocker: `NONE`
-- Next action: `explicit merge authorization for PR #54`
-- PC-free work: `PR #54 merge decision`
-- PC-required work: `NONE`
-- User action required: `YES（PR #54のmerge判断のみ）`
+- Next action: `CURRENT_STATUSを現状へ戻した後、DWO固有の次product taskを1件選定する`
+- PC-free work: `product backlog audit`
+- PC-required work: `選定したproduct taskに実機確認が必要な場合のみ`
+- User action required: `NO`
 - Merge authorized: `NO`
-- Last updated: `2026-09-08`
+- Last updated: `2026-09-10`
 
 ## Optional short notes
 
-- PR #40 / Issue #39はmerge済み。ブラウザ内OCRは補助機能として維持する。
-- PR #42 / Issue #41の精度改善実験はmergeせず終了。手入力を主経路とする。
-- Issue #45は既存Object URLを再利用し、既存医院側フォームへ紙画像参照UIだけを追加する。
-- 保存形式・PDF・歯式・clasp・drawing・collectFormData()は変更しない。
-- PR #52 / Issue #50はmainに入った。並行コンテキストによる想定外state driftを検出したため、Issue #53でmerge実行ゲートを補強中。自動revertは行わない。
+- PR #40 / Issue #39: ブラウザ内OCRは補助機能としてmerge済み。
+- PR #42 / Issue #41: OCR精度改善実験はmergeせず終了。紙画像を見ながらの手入力を主経路とする。
+- PR #47 / Issue #45: 紙画像を見ながら既存フォームへ入力するUIをmerge済み。
+- PR #49 / Issue #46: stable `workOrderRef` をmerge済み。
+- PR #52 / Issue #50: versioned delivery-intake JSON exportをmerge済み。受信側アプリの実装はこのRepoの対象外。
 
 ## Rules
 
