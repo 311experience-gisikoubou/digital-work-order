@@ -280,3 +280,13 @@
 - classification: FULL_GATE; selftest selection: FULL_SUITE
 - product/runtime/data changes: none; repository-local extras preserved; REAL_DEVICE not required
 - merge: Draft remains locked until fresh explicit human authorization is bound to the exact rollout PR/head
+
+## 2026-09-10 - ai-dev-foundation 1.0.0-dev.67
+- source commit: 831478a80cbdca752c57e305686dab08dcfae2a9
+- trusted previous foundation: 1.0.0-dev.65 (b7f5d1a1db01bfb7b6b9a1cb0223fb07d7153004)
+- target branch: chore/foundation-dev67-rollout
+- method: exact official patches from Foundation PR #90 (dev.66) and PR #94 (dev.67); source/target dev.65 blob equality proven before patching; resulting six managed-file blob SHAs verified against dev.67 source
+- fresh WIP review evidence: CONTINUE before work start
+- classification: FULL_GATE; selftest selection: FULL_SUITE; verification: 21/21 PASS (20 hosted Ubuntu commands + unchanged Claude runner selftest on required hosted Windows job)
+- product/runtime/data changes: none; repository-local extras preserved; REAL_DEVICE not required
+- merge: Draft remains locked until fresh explicit human authorization is bound to the exact rollout PR/head

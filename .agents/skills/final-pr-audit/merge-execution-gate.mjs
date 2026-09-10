@@ -70,6 +70,7 @@ function evidenceFailure(code, prNumber, baseBranch, expectedBaseSha) {
     baseBranch,
     actualBaseSha: '(unverified)',
     expectedBaseSha,
+    reportedPrBaseSha: '(unverified)',
     actualHeadSha: '(unverified)',
     expectedHeadSha: null,
     authorizationCommentId: null,
@@ -88,7 +89,7 @@ export function parseEvidenceJson(raw) {
 
 export function validateMergeEvidence(evidence, { repo, prNumber, nowMs }) {
   if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
-  if (evidence.schemaVersion !== 2) return { ok: false, code: 'EVIDENCE_SCHEMA_UNSUPPORTED' };
+  if (evidence.schemaVersion !== 3) return { ok: false, code: 'EVIDENCE_SCHEMA_UNSUPPORTED' };
   if (evidence.repository !== repo) return { ok: false, code: 'EVIDENCE_REPOSITORY_MISMATCH' };
   const fetchedMs = Date.parse(evidence.fetchedAt ?? '');
   if (!Number.isFinite(fetchedMs)) return { ok: false, code: 'EVIDENCE_FETCH_TIME_INVALID' };
@@ -100,12 +101,14 @@ export function validateMergeEvidence(evidence, { repo, prNumber, nowMs }) {
   if (!evidence.pr.base || typeof evidence.pr.base !== 'object' || Array.isArray(evidence.pr.base)) return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
   if (typeof evidence.pr.base.ref !== 'string' || !/^[0-9a-f]{40}$/i.test(String(evidence.pr.base.sha ?? ''))) return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
   if (!evidence.pr.head || typeof evidence.pr.head !== 'object' || Array.isArray(evidence.pr.head) || !/^[0-9a-f]{40}$/i.test(String(evidence.pr.head.sha ?? ''))) return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
+  if (!evidence.liveBase || typeof evidence.liveBase !== 'object' || Array.isArray(evidence.liveBase)) return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
+  if (typeof evidence.liveBase.ref !== 'string' || !/^refs\/heads\/[A-Za-z0-9._\/-]+$/.test(evidence.liveBase.ref) || !/^[0-9a-f]{40}$/i.test(String(evidence.liveBase.sha ?? ''))) return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
   if (!Array.isArray(evidence.authorizationComments) || evidence.authorizationComments.length > 1000) return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
   for (const comment of evidence.authorizationComments) {
     if (!comment || typeof comment !== 'object' || typeof comment.body !== 'string' || comment.body.length > 2048) return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
     if (typeof comment.created_at !== 'string' || !comment.user || typeof comment.user.login !== 'string') return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
   }
-  return { ok: true, pr: evidence.pr, comments: evidence.authorizationComments };
+  return { ok: true, pr: evidence.pr, liveBase: evidence.liveBase, comments: evidence.authorizationComments };
 }
 
 export async function fetchJson(url, fetchImpl, timeoutMs = FETCH_TIMEOUT_MS) {
@@ -144,6 +147,9 @@ async function fetchAllComments(apiBase, prNumber, fetchImpl) {
   }
   return all;
 }
+function encodeRefPath(ref) {
+  return ref.split('/').map(part => encodeURIComponent(part)).join('/');
+}
 function classifyReceipt(comments, { author, prNumber, headSha, nowMs }) {
   const parsed = comments.map(comment => ({
     comment,
@@ -180,34 +186,39 @@ export async function runMergeExecutionGate({ repo, prNumber, baseBranch, expect
 
   let pr;
   let comments;
+  let liveBase;
   let effectiveNowMs;
   if (evidence !== NO_EVIDENCE) {
     effectiveNowMs = nowMs ?? nowFn();
     const validated = validateMergeEvidence(evidence, { repo, prNumber, nowMs: effectiveNowMs });
     if (!validated.ok) return evidenceFailure(validated.code, prNumber, baseBranch, normalizedExpectedBaseSha);
     pr = validated.pr;
+    liveBase = validated.liveBase;
     comments = validated.comments;
   } else {
     const apiBase = `https://api.github.com/repos/${owner}/${repoName}`;
     comments = await fetchAllComments(apiBase, prNumber, fetchImpl);
-    // Fetch PR state last so base/head/draft/open checks use the freshest snapshot immediately before merge execution.
     pr = await fetchJson(`${apiBase}/pulls/${prNumber}`, fetchImpl);
+    // Fetch the live target-branch ref last. PR base.sha can lag behind the actual branch head.
+    const liveRef = await fetchJson(`${apiBase}/git/ref/heads/${encodeRefPath(baseBranch)}`, fetchImpl);
+    liveBase = { ref: liveRef?.ref, sha: liveRef?.object?.sha };
     effectiveNowMs = nowMs ?? nowFn();
   }
 
   const headSha = String(pr?.head?.sha ?? '').toLowerCase();
-  const actualBaseSha = String(pr?.base?.sha ?? '').toLowerCase();
-  return classifyAndBuild({ pr, comments, author, prNumber, baseBranch, expectedBaseSha: normalizedExpectedBaseSha, actualBaseSha, headSha, nowMs: effectiveNowMs });
+  const actualBaseSha = String(liveBase?.sha ?? '').toLowerCase();
+  const reportedPrBaseSha = String(pr?.base?.sha ?? '').toLowerCase();
+  return classifyAndBuild({ pr, liveBase, comments, author, prNumber, baseBranch, expectedBaseSha: normalizedExpectedBaseSha, actualBaseSha, reportedPrBaseSha, headSha, nowMs: effectiveNowMs });
 }
 
-function classifyAndBuild({ pr, comments, author, prNumber, baseBranch, expectedBaseSha, actualBaseSha, headSha, nowMs }) {
+function classifyAndBuild({ pr, liveBase, comments, author, prNumber, baseBranch, expectedBaseSha, actualBaseSha, reportedPrBaseSha, headSha, nowMs }) {
   const receipt = classifyReceipt(comments, { author, prNumber, headSha, nowMs });
   const checks = {
     evidence: true,
     prNumber: Number(pr?.number) === prNumber,
     prOpen: pr?.state === 'open' && !pr?.merged_at,
     notDraft: pr?.draft === false,
-    baseBranch: pr?.base?.ref === baseBranch,
+    baseBranch: pr?.base?.ref === baseBranch && liveBase?.ref === `refs/heads/${baseBranch}`,
     baseSha: /^[0-9a-f]{40}$/.test(actualBaseSha) && actualBaseSha === expectedBaseSha,
     headSha: /^[0-9a-f]{40}$/.test(headSha),
     authorizationReceipt: receipt.code === 'AUTHORIZATION_RECEIPT_VALID',
@@ -224,6 +235,7 @@ function classifyAndBuild({ pr, comments, author, prNumber, baseBranch, expected
     pass, checks, finding, prNumber, baseBranch,
     actualBaseSha: actualBaseSha || '(missing)',
     expectedBaseSha,
+    reportedPrBaseSha: reportedPrBaseSha || '(missing)',
     actualHeadSha: headSha || '(missing)',
     expectedHeadSha: pass ? headSha : null,
     authorizationCommentId: pass ? receipt.item.comment.id : null,
