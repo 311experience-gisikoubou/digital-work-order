@@ -49,7 +49,7 @@ function renderOrders() {
   // 日付でソート
   const sortedDates = Object.keys(groups).sort();
 
-  // B5印刷ツールバー
+  // 印刷ツールバー
   const toolbar = document.createElement('div');
   toolbar.style.cssText = 'padding:8px 0 12px;text-align:right;';
   const printBtn = document.createElement('button');
@@ -57,8 +57,8 @@ function renderOrders() {
   printBtn.disabled = printSelection.length === 0;
   printBtn.style.cssText = 'padding:6px 14px;font-size:13px;cursor:pointer;';
   printBtn.textContent = printSelection.length > 0
-    ? '選択分をB5印刷 (' + printSelection.length + '件)'
-    : '選択分をB5印刷';
+    ? '選択分を印刷 (' + printSelection.length + '件)'
+    : '選択分を印刷';
   printBtn.addEventListener('click', printSelected);
   toolbar.appendChild(printBtn);
   container.appendChild(toolbar);
@@ -191,13 +191,13 @@ function togglePrintSelect(id) {
   if (btn) {
     btn.disabled = printSelection.length === 0;
     btn.textContent = printSelection.length > 0
-      ? '選択分をB5印刷 (' + printSelection.length + '件)'
-      : '選択分をB5印刷';
+      ? '選択分を印刷 (' + printSelection.length + '件)'
+      : '選択分を印刷';
   }
 }
 
 // ============================================================
-//  B5 2面付け印刷実行
+//  2面付け印刷実行
 // ============================================================
 function printSelected() {
   if (printSelection.length === 0) {

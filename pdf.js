@@ -2,7 +2,44 @@
 //  PDF出力（window.print() 方式）
 //  日本語はブラウザ/OSのフォントで表示。jsPDFは使用しない。
 // ============================================================
+var pendingPrintRequest = null;
+
 function exportPDF(id, id2) {
+  pendingPrintRequest = {
+    id: id || null,
+    id2: id2 != null ? id2 : null
+  };
+
+  var modal = document.getElementById('modal-print-paper');
+  if (!modal) {
+    var fallbackRequest = pendingPrintRequest;
+    pendingPrintRequest = null;
+    _printPDF(fallbackRequest.id, fallbackRequest.id2, 'b5');
+    return;
+  }
+  modal.classList.add('open');
+}
+
+function cancelPrintPaperSize() {
+  pendingPrintRequest = null;
+  var modal = document.getElementById('modal-print-paper');
+  if (modal) modal.classList.remove('open');
+}
+
+function confirmPrintPaperSize(paperSize) {
+  if (!pendingPrintRequest) {
+    cancelPrintPaperSize();
+    return;
+  }
+  var normalized = paperSize === 'a4' ? 'a4' : 'b5';
+  var request = pendingPrintRequest;
+  pendingPrintRequest = null;
+  var modal = document.getElementById('modal-print-paper');
+  if (modal) modal.classList.remove('open');
+  _printPDF(request.id, request.id2, normalized);
+}
+
+function _printPDF(id, id2, paperSize) {
   var order1 = id ? state.orders.find(function(o){ return o.id === id; }) : collectFormData();
   if (!order1) { showToast('PDF出力するデータがありません', 'error'); return; }
 
@@ -16,7 +53,7 @@ function exportPDF(id, id2) {
     ? order1.memoStrokes
     : (typeof memoStrokes !== 'undefined' && Array.isArray(memoStrokes) ? memoStrokes : []);
   var memoHtml = buildMemoPngHTML(sourceMemoStrokes) || buildMemoSvgHTML(sourceMemoStrokes);
-  var html = _buildPrintHTML(order1, chartHtml, order2, memoHtml);
+  var html = _buildPrintHTML(order1, chartHtml, order2, memoHtml, paperSize);
 
   var iframe = document.createElement('iframe');
   iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:0;height:0;border:0;';
@@ -36,7 +73,7 @@ function exportPDF(id, id2) {
     setTimeout(cleanup, 30000);
     iframe.contentWindow.print();
   }, 2000);
-  showToast('印刷ダイアログを開きます');
+  showToast((paperSize === 'a4' ? 'A4' : 'B5') + '設定で印刷を要求します。印刷画面でも用紙サイズをご確認ください');
 }
 
 function escAttr(s) {
@@ -106,7 +143,12 @@ function buildMemoPngHTML(strokes) {
     : '';
 }
 
-function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
+function _buildPrintHTML(order1, chartHtml, order2, memoHtml, paperSize) {
+  var normalizedPaperSize = paperSize === 'a4' ? 'a4' : 'b5';
+  var pageSizeFallback = normalizedPaperSize === 'a4' ? '210mm 297mm' : '182mm 257mm';
+  var pageSizeNamed = normalizedPaperSize === 'a4' ? 'A4 portrait' : 'JIS-B5 portrait';
+  var pageWidth = normalizedPaperSize === 'a4' ? '210mm' : '182mm';
+  var pageHeight = normalizedPaperSize === 'a4' ? '297mm' : '257mm';
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;')
@@ -475,8 +517,8 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
 
   var css = `
     @page {
-      size: 182mm 257mm;
-      size: JIS-B5 portrait;
+      size: ${pageSizeFallback};
+      size: ${pageSizeNamed};
       margin: 0;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -484,14 +526,15 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
     body {
       margin: 0;
       padding: 0;
-      width: 182mm;
-      height: 257mm;
+      width: ${pageWidth};
+      height: ${pageHeight};
     }
     body {
       font-family: 'Meiryo', 'Hiragino Kaku Gothic Pro', 'Yu Gothic', 'MS Gothic', sans-serif;
       display: flex;
       flex-direction: column;
-      align-items: stretch;
+      align-items: center;
+      justify-content: center;
       background: #fff;
       font-size: 6.8pt;
       color: #1f2933;
