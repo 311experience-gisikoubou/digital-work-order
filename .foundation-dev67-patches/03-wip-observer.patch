@@ -1,0 +1,30 @@
+diff --git a/.agents/skills/preflight-audit/wip-review-queue-observer.mjs b/.agents/skills/preflight-audit/wip-review-queue-observer.mjs
+--- a/.agents/skills/preflight-audit/wip-review-queue-observer.mjs
++++ b/.agents/skills/preflight-audit/wip-review-queue-observer.mjs
+@@ -108,7 +108,7 @@ export function validateWipEvidence(evidence, { repo, nowMs }) {
+     if (seenNumbers.has(pr.number)) return { ok: false, code: 'EVIDENCE_PULL_REQUEST_DUPLICATE' };
+     seenNumbers.add(pr.number);
+   }
+-  return { ok: true, pullRequests: evidence.pullRequests };
++  return { ok: true, evidenceFetchedAt: evidence.fetchedAt, pullRequests: evidence.pullRequests };
+ }
+ 
+ export function aggregatePendingReview(pullRequests) {
+@@ -137,7 +137,7 @@ export function aggregatePendingReview(pullRequests) {
+ 
+ function failClosedReport({ code, repo, generatedAt }) {
+   return {
+-    ok: false, code, repository: repo, generatedAt,
++    ok: false, code, repository: repo, generatedAt, evidenceFetchedAt: null,
+     wipMax: WIP_MAX, decision: null, pendingReviewCount: null,
+     totalPendingDiffLines: null, pendingPullRequests: null,
+   };
+@@ -156,7 +156,7 @@ export function buildReport({ evidence, repo, nowMs, generatedAt }) {
+   const { pending, pendingReviewCount, totalPendingDiffLines } = aggregate;
+   const decision = pendingReviewCount < WIP_MAX ? 'CONTINUE' : 'STOP_NEW_WORK';
+   return {
+-    ok: true, code: null, schemaVersion: 1, repository: repo, generatedAt,
++    ok: true, code: null, schemaVersion: 1, repository: repo, generatedAt, evidenceFetchedAt: validated.evidenceFetchedAt,
+     wipMax: WIP_MAX, decision, pendingReviewCount, totalPendingDiffLines,
+     pendingPullRequests: pending,
+   };
