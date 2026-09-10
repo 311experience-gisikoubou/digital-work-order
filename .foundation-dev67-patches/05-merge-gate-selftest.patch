@@ -1,0 +1,148 @@
+diff --git a/.agents/skills/final-pr-audit/merge-execution-gate-selftest.mjs b/.agents/skills/final-pr-audit/merge-execution-gate-selftest.mjs
+--- a/.agents/skills/final-pr-audit/merge-execution-gate-selftest.mjs
++++ b/.agents/skills/final-pr-audit/merge-execution-gate-selftest.mjs
+@@ -34,33 +34,29 @@ function comment(body, { login = AUTHOR, createdAt = '2026-09-08T10:25:00Z', id
+   return { id, body, created_at: createdAt, user: { login } };
+ }
+ 
+-function fakeFetch(pr, comments) {
++function fakeFetch(pr, comments, options = {}) {
++  const liveBaseSha = options.liveBaseSha ?? pr?.base?.sha ?? BASE_A;
++  const liveBaseRef = options.liveBaseRef ?? 'refs/heads/main';
+   return async url => {
+-    if (url.includes('/pulls/52')) {
+-      return { ok: true, status: 200, json: async () => pr };
+-    }
+     if (url.includes('/issues/52/comments')) {
+       const page = new URL(url).searchParams.get('page');
+       return { ok: true, status: 200, json: async () => (page === '1' ? comments : []) };
+     }
++    if (url.includes('/pulls/52')) return { ok: true, status: 200, json: async () => pr };
++    if (url.includes('/git/ref/heads/')) return { ok: true, status: 200, json: async () => ({ ref: liveBaseRef, object: { sha: liveBaseSha } }) };
+     return { ok: false, status: 404, json: async () => ({}) };
+   };
+ }
+ 
+-async function run(pr, comments, expectedBaseSha = BASE_A) {
++async function run(pr, comments, expectedBaseSha = BASE_A, liveOptions = {}) {
+   return runMergeExecutionGate({
+-    repo: 'example/repository',
+-    prNumber: 52,
+-    baseBranch: 'main',
+-    expectedBaseSha,
+-    author: AUTHOR,
+-    nowMs: NOW,
+-    fetchImpl: fakeFetch(pr, comments),
++    repo: 'example/repository', prNumber: 52, baseBranch: 'main', expectedBaseSha, author: AUTHOR, nowMs: NOW,
++    fetchImpl: fakeFetch(pr, comments, liveOptions),
+   });
+ }
+ 
+-function makeEvidence({ repository = 'example/repository', fetchedAt = '2026-09-08T10:29:00Z', pr = makePr(), authorizationComments = [comment(receipt())], schemaVersion = 2 } = {}) {
+-  return { schemaVersion, repository, fetchedAt, pr, authorizationComments };
++function makeEvidence({ repository = 'example/repository', fetchedAt = '2026-09-08T10:29:00Z', pr = makePr(), liveBase = { ref: 'refs/heads/main', sha: BASE_A }, authorizationComments = [comment(receipt())], schemaVersion = 3 } = {}) {
++  return { schemaVersion, repository, fetchedAt, pr, liveBase, authorizationComments };
+ }
+ 
+ async function runEvidence(evidence) {
+@@ -93,6 +89,7 @@ assert.equal(valid.pass, true);
+ assert.equal(valid.expectedHeadSha, HEAD_A);
+ assert.equal(valid.expectedBaseSha, BASE_A);
+ assert.equal(valid.actualBaseSha, BASE_A);
++assert.equal(valid.reportedPrBaseSha, BASE_A);
+ assert.equal(valid.authorizationCommentId, 100);
+ assert.equal(valid.authorizationSource, 'EXPLICIT_HUMAN');
+ 
+@@ -135,6 +132,47 @@ assert.equal(wrongBase.pass, false);
+ assert.equal(wrongBase.checks.baseBranch, false);
+ assert.equal(wrongBase.finding, 'BASE_BRANCH_MISMATCH');
+ 
++const mismatchedLiveRef = await run(makePr(), [comment(receipt())], BASE_A, { liveBaseRef: 'refs/heads/release' });
++assert.equal(mismatchedLiveRef.pass, false, 'returned live ref must match the requested base branch');
++assert.equal(mismatchedLiveRef.finding, 'BASE_BRANCH_MISMATCH');
++
++const malformedLiveRef = await run(makePr(), [comment(receipt())], BASE_A, { liveBaseSha: '' });
++assert.equal(malformedLiveRef.pass, false, 'malformed live ref SHA must fail closed');
++assert.equal(malformedLiveRef.finding, 'BASE_SHA_MISMATCH');
++
++const slashPr = makePr({ base: { ref: 'release/hotfix', sha: BASE_A } });
++const slashDelegate = fakeFetch(slashPr, [comment(receipt())], { liveBaseRef: 'refs/heads/release/hotfix', liveBaseSha: BASE_A });
++const slashUrls = [];
++const slashResult = await runMergeExecutionGate({
++  repo: 'example/repository', prNumber: 52, baseBranch: 'release/hotfix', expectedBaseSha: BASE_A, author: AUTHOR, nowMs: NOW,
++  fetchImpl: async (url, options) => { slashUrls.push(url); return slashDelegate(url, options); },
++});
++assert.equal(slashResult.pass, true, 'slash-containing base branch should use a valid live-ref route');
++assert.equal(slashUrls.at(-1), 'https://api.github.com/repos/example/repository/git/ref/heads/release/hotfix');
++
++const refFetchFailure = await assert.rejects(
++  runMergeExecutionGate({
++    repo: 'example/repository', prNumber: 52, baseBranch: 'main', expectedBaseSha: BASE_A, author: AUTHOR, nowMs: NOW,
++    fetchImpl: async url => {
++      if (url.includes('/issues/52/comments')) return { ok: true, status: 200, json: async () => [comment(receipt())] };
++      if (url.includes('/pulls/52')) return { ok: true, status: 200, json: async () => makePr() };
++      return { ok: false, status: 503, json: async () => ({}) };
++    },
++  }),
++  /GitHub API HTTP 503/,
++);
++
++const stalePrBase = await run(makePr(), [comment(receipt())], BASE_A, { liveBaseSha: BASE_B });
++assert.equal(stalePrBase.pass, false, 'stale PR base.sha must not hide a live target-branch advance');
++assert.equal(stalePrBase.finding, 'BASE_SHA_MISMATCH');
++assert.equal(stalePrBase.reportedPrBaseSha, BASE_A);
++assert.equal(stalePrBase.actualBaseSha, BASE_B);
++
++const stalePrBaseRefreshedAudit = await run(makePr(), [comment(receipt({ source: 'PERSISTED_AFTER_AUDIT' }))], BASE_B, { liveBaseSha: BASE_B });
++assert.equal(stalePrBaseRefreshedAudit.pass, true, 'fresh audit may bind to live base even while PR base.sha remains stale');
++assert.equal(stalePrBaseRefreshedAudit.reportedPrBaseSha, BASE_A);
++assert.equal(stalePrBaseRefreshedAudit.actualBaseSha, BASE_B);
++
+ const advancedBase = await run(makePr({ base: { ref: 'main', sha: BASE_B } }), [comment(receipt())]);
+ assert.equal(advancedBase.pass, false);
+ assert.equal(advancedBase.checks.baseSha, false);
+@@ -160,15 +198,19 @@ const driftDuringCommentFetch = async url => {
+     fetchOrder.push('pr');
+     return { ok: true, status: 200, json: async () => livePr };
+   }
++  if (url.includes('/git/ref/heads/main')) {
++    fetchOrder.push('live-base');
++    return { ok: true, status: 200, json: async () => ({ ref: 'refs/heads/main', object: { sha: livePr.base.sha } }) };
++  }
+   return { ok: false, status: 404, json: async () => ({}) };
+ };
+ const lateBaseDrift = await runMergeExecutionGate({
+   repo: 'example/repository', prNumber: 52, baseBranch: 'main', expectedBaseSha: BASE_A, author: AUTHOR,
+   nowMs: NOW, fetchImpl: driftDuringCommentFetch,
+ });
+-assert.equal(lateBaseDrift.pass, false, 'base drift during receipt retrieval must be seen by the final PR snapshot');
++assert.equal(lateBaseDrift.pass, false, 'base drift during receipt retrieval must be seen by the final live target-branch snapshot');
+ assert.equal(lateBaseDrift.finding, 'BASE_SHA_MISMATCH');
+-assert.deepEqual(fetchOrder, ['comments', 'pr'], 'live route fetches PR state after receipt comments');
++assert.deepEqual(fetchOrder, ['comments', 'pr', 'live-base'], 'live route fetches comments, PR state, then live base ref last');
+ 
+ const beforeDrift = await run(makePr(), [comment(receipt())]);
+ assert.equal(beforeDrift.pass, true);
+@@ -243,13 +285,22 @@ const validEvidence = await runEvidence(makeEvidence());
+ assert.equal(validEvidence.pass, true);
+ assert.equal(validEvidence.expectedHeadSha, HEAD_A);
+ 
++const stalePrivatePrBase = await runEvidence(makeEvidence({ pr: makePr(), liveBase: { ref: 'refs/heads/main', sha: BASE_B } }));
++assert.equal(stalePrivatePrBase.pass, false);
++assert.equal(stalePrivatePrBase.finding, 'BASE_SHA_MISMATCH');
++assert.equal(stalePrivatePrBase.reportedPrBaseSha, BASE_A);
++assert.equal(stalePrivatePrBase.actualBaseSha, BASE_B);
++
+ await expectEvidenceFail(makeEvidence({ repository: 'example/other' }), 'EVIDENCE_REPOSITORY_MISMATCH');
++await expectEvidenceFail(makeEvidence({ schemaVersion: 2 }), 'EVIDENCE_SCHEMA_UNSUPPORTED');
+ await expectEvidenceFail(makeEvidence({ schemaVersion: 1 }), 'EVIDENCE_SCHEMA_UNSUPPORTED');
+ await expectEvidenceFail(makeEvidence({ fetchedAt: '2026-09-08T10:00:00Z' }), 'EVIDENCE_STALE');
+ await expectEvidenceFail(makeEvidence({ fetchedAt: '2026-09-08T10:40:00Z' }), 'EVIDENCE_FROM_FUTURE');
+ await expectEvidenceFail(makeEvidence({ pr: makePr({ number: 51 }) }), 'EVIDENCE_PR_MISMATCH');
+ await expectEvidenceFail(makeEvidence({ pr: makePr({ base: { ref: 'main' } }) }), 'EVIDENCE_SHAPE_INVALID');
+ await expectEvidenceFail(makeEvidence({ pr: makePr({ head: {} }) }), 'EVIDENCE_SHAPE_INVALID');
++await expectEvidenceFail(makeEvidence({ liveBase: null }), 'EVIDENCE_SHAPE_INVALID');
++await expectEvidenceFail(makeEvidence({ liveBase: { ref: 'refs/heads/main', sha: 'bad' } }), 'EVIDENCE_SHAPE_INVALID');
+ await expectEvidenceFail(makeEvidence({ authorizationComments: [{ body: receipt(), created_at: '2026-09-08T10:25:00Z', user: {} }] }), 'EVIDENCE_SHAPE_INVALID');
+ 
+ const malformed = `${receipt()}\nEXTRA: no`;
