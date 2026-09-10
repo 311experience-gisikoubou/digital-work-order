@@ -6,18 +6,18 @@
 - Status: `ACTIVE`
 - Project: `311experience-gisikoubou/digital-work-order`
 - Project boundary: `デジタル歯科技工指示書専用。dental-delivery-billing は別Repoであり、このプロジェクトでは実装・PR・実機確認を行わない。`
-- Current phase: `post-foundation-dev.67 / product backlog selection`
+- Current phase: `Issue #61 / iPad Safari JIS B5 print size mismatch`
 - Current branch: `chore/refresh-current-status-dwo`
 - Current PR: `#60 (Draft)`
 - Latest main: `c7c8f7cf853ee16818042ab3054bb64b8cfca796`
 - Last completed gate: `PR #59 Foundation dev.67 sync merged`
 - Last completed product work: `PR #52 納品連携JSON export merged`
-- Open product issues: `0`
+- Open product issues: `1 (#61)`
 - Open PRs: `0`
 - Current blocker: `NONE`
-- Next action: `DWO固有の次product taskを1件選定する。PR #60のmergeは明示承認待ち`
-- PC-free work: `product backlog audit`
-- PC-required work: `選定したproduct taskに実機確認が必要な場合のみ`
+- Next action: `PR #60をmerge後、Issue #61の再現→原因特定→最小修正へ進む`
+- PC-free work: `Issue #61のprint CSS /既存テスト経路の診断`
+- PC-required work: `Issue #61の最終iPad Safari REAL_DEVICE確認`
 - User action required: `YES（PR #60のmerge判断のみ）`
 - Merge authorized: `NO`
 - Last updated: `2026-09-10`
