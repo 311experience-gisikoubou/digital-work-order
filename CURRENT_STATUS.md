@@ -8,17 +8,17 @@
 - Project boundary: `デジタル歯科技工指示書専用。dental-delivery-billing は別Repoであり、このプロジェクトでは実装・PR・実機確認を行わない。`
 - Current phase: `post-foundation-dev.67 / product backlog selection`
 - Current branch: `chore/refresh-current-status-dwo`
-- Current PR: `NONE（status refresh準備中）`
+- Current PR: `#60 (Draft)`
 - Latest main: `c7c8f7cf853ee16818042ab3054bb64b8cfca796`
 - Last completed gate: `PR #59 Foundation dev.67 sync merged`
 - Last completed product work: `PR #52 納品連携JSON export merged`
 - Open product issues: `0`
 - Open PRs: `0`
 - Current blocker: `NONE`
-- Next action: `CURRENT_STATUSを現状へ戻した後、DWO固有の次product taskを1件選定する`
+- Next action: `DWO固有の次product taskを1件選定する。PR #60のmergeは明示承認待ち`
 - PC-free work: `product backlog audit`
 - PC-required work: `選定したproduct taskに実機確認が必要な場合のみ`
-- User action required: `NO`
+- User action required: `YES（PR #60のmerge判断のみ）`
 - Merge authorized: `NO`
 - Last updated: `2026-09-10`
 
