@@ -83,13 +83,15 @@
 ## 7. PDF
 
 - PDF関連処理は `pdf.js`。
-- `exportPDF(id, id2)` は印刷用HTMLを iframe に書き込み、`iframe.contentWindow.print()` を呼ぶ。
-- `jsPDF` は使用していない旨のコメントがある。
-- 印刷用HTMLは `_buildPrintHTML()` で組み立てる。
-- `exportPDF()` は `.chart-wrap` の `outerHTML` を印刷用HTMLへ埋め込む。
-- `memoSvg` に `.draw-path` が1本以上ある場合、`memoSvg.outerHTML` を印刷用HTMLへ埋め込む。
-- PDF出力内では `claspState` を参照し、クラスプ配置の件数表示を組み立てる処理がある。
-- 印刷後の iframe は `afterprint` または30秒後のcleanupで削除される。
+- `exportPDF(id, id2)` は用紙選択を開き、B5を標準、A4を代替として選べる。
+- B5は182×257mm、A4は210×297mmの1ページPDFとしてブラウザ内で直接生成する。
+- 指示書本体のレイアウトは常に182×257mmの上下2面とし、A4ではそのB5内容を中央配置して拡大しない。
+- 印刷用HTMLは既存の `_buildPrintHTML()` で組み立て、画面外iframeへ一時描画する。
+- 同梱した `html2canvas 1.4.1` で印刷DOMを画像化し、`pdf-lib 1.17.1` で固定寸法PDFへ埋め込む。
+- 両ライブラリは `vendor/pdf/` のローカル資産のみを使用し、実行時CDNや外部PDF APIへ患者・医院・受注情報を送らない。
+- 生成PDFはブラウザ内のBlob/Object URLとして一時保持し、新しいタブで開く。永続保存先をアプリ側に追加しない。
+- 画面外iframeは生成完了または失敗時に削除し、Object URLは一定時間後またはページ離脱時に解放する。
+- `.chart-wrap` と手書きメモの既存印刷表現を再利用し、保存形式・歯式・クラスプ・手書きデータ構造は変更しない。
 
 ## 8. 歯式図・歯番号
 

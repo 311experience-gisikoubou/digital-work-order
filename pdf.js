@@ -1,15 +1,125 @@
 // ============================================================
-//  PDF出力（window.print() 方式）
-//  日本語はブラウザ/OSのフォントで表示。jsPDFは使用しない。
+//  固定寸法PDF出力（ブラウザ内生成）
+//  html2canvas + pdf-lib は vendor/pdf のローカル同梱資産のみを使用する。
 // ============================================================
+var pendingPrintRequest = null;
+
 function exportPDF(id, id2) {
+  pendingPrintRequest = { id: id || null, id2: id2 != null ? id2 : null };
+  var modal = document.getElementById('modal-print-paper');
+  if (!modal) {
+    var fallbackRequest = pendingPrintRequest;
+    pendingPrintRequest = null;
+    _startFixedPdfExport(fallbackRequest.id, fallbackRequest.id2, 'b5');
+    return;
+  }
+  modal.classList.add('open');
+}
+
+function cancelPrintPaperSize() {
+  pendingPrintRequest = null;
+  var modal = document.getElementById('modal-print-paper');
+  if (modal) modal.classList.remove('open');
+}
+
+function confirmPrintPaperSize(paperSize) {
+  if (!pendingPrintRequest) {
+    cancelPrintPaperSize();
+    return;
+  }
+  var normalized = paperSize === 'a4' ? 'a4' : 'b5';
+  var request = pendingPrintRequest;
+  pendingPrintRequest = null;
+  var modal = document.getElementById('modal-print-paper');
+  if (modal) modal.classList.remove('open');
+  _startFixedPdfExport(request.id, request.id2, normalized);
+}
+
+function _startFixedPdfExport(id, id2, paperSize) {
+  var label = paperSize === 'a4' ? 'A4' : 'B5';
+  showToast(label + ' PDFをブラウザ内で作成しています');
+  _createFixedPdfBlob(id, id2, paperSize)
+    .then(function(blob) {
+      var url = URL.createObjectURL(blob);
+      showToast(label + ' PDFを作成しました');
+      window.location.assign(url);
+    })
+    .catch(function() {
+      showToast('PDFを作成できませんでした', 'error');
+    });
+}
+function pdfMmToPoints(mm) {
+  return Number(mm) * 72 / 25.4;
+}
+
+function getFixedPdfPageSpec(paperSize) {
+  var isA4 = paperSize === 'a4';
+  return {
+    paperSize: isA4 ? 'a4' : 'b5',
+    pageWidthMm: isA4 ? 210 : 182,
+    pageHeightMm: isA4 ? 297 : 257,
+    contentWidthMm: 182,
+    contentHeightMm: 257
+  };
+}
+
+async function buildFixedSizePdfBytes(pngDataUrl, paperSize) {
+  if (typeof PDFLib === 'undefined' || !PDFLib.PDFDocument) throw new Error('pdf-lib unavailable');
+  var spec = getFixedPdfPageSpec(paperSize);
+  var pdfDocument = await PDFLib.PDFDocument.create();
+  var pageWidth = pdfMmToPoints(spec.pageWidthMm);
+  var pageHeight = pdfMmToPoints(spec.pageHeightMm);
+  var page = pdfDocument.addPage([pageWidth, pageHeight]);
+
+  if (pngDataUrl) {
+    var image = await pdfDocument.embedPng(pngDataUrl);
+    var contentWidth = pdfMmToPoints(spec.contentWidthMm);
+    var contentHeight = pdfMmToPoints(spec.contentHeightMm);
+    page.drawImage(image, {
+      x: (pageWidth - contentWidth) / 2,
+      y: (pageHeight - contentHeight) / 2,
+      width: contentWidth,
+      height: contentHeight
+    });
+  }
+  return pdfDocument.save();
+}
+
+function _waitForRenderImage(image) {
+  if (image.complete) return Promise.resolve();
+  return new Promise(function(resolve) {
+    var done = false;
+    function finish() {
+      if (done) return;
+      done = true;
+      image.removeEventListener('load', finish);
+      image.removeEventListener('error', finish);
+      resolve();
+    }
+    image.addEventListener('load', finish, { once: true });
+    image.addEventListener('error', finish, { once: true });
+    setTimeout(finish, 3000);
+  });
+}
+
+async function _waitForPrintFrame(iframe) {
+  var doc = iframe.contentDocument;
+  if (!doc) throw new Error('print frame unavailable');
+  if (doc.fonts && doc.fonts.ready) {
+    try { await doc.fonts.ready; } catch (error) {}
+  }
+  var images = Array.prototype.slice.call(doc.images || []);
+  await Promise.all(images.map(_waitForRenderImage));
+  await new Promise(function(resolve) {
+    requestAnimationFrame(function() { requestAnimationFrame(resolve); });
+  });
+}
+
+async function _createFixedPdfBlob(id, id2, paperSize) {
+  if (typeof html2canvas !== 'function') throw new Error('html2canvas unavailable');
   var order1 = id ? state.orders.find(function(o){ return o.id === id; }) : collectFormData();
-  if (!order1) { showToast('PDF出力するデータがありません', 'error'); return; }
-
-  var order2 = (id2 != null)
-    ? (state.orders.find(function(o){ return o.id === id2; }) || null)
-    : null;
-
+  if (!order1) throw new Error('PDF data unavailable');
+  var order2 = (id2 != null) ? (state.orders.find(function(o){ return o.id === id2; }) || null) : null;
   var chartWrap = document.querySelector('.chart-wrap');
   var chartHtml = chartWrap ? chartWrap.outerHTML : '';
   var sourceMemoStrokes = Array.isArray(order1.memoStrokes)
@@ -19,25 +129,34 @@ function exportPDF(id, id2) {
   var html = _buildPrintHTML(order1, chartHtml, order2, memoHtml);
 
   var iframe = document.createElement('iframe');
-  iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:0;height:0;border:0;';
+  iframe.style.cssText = 'position:fixed;top:0;left:-10000px;width:182mm;height:257mm;border:0;background:#fff;pointer-events:none;';
   document.body.appendChild(iframe);
-  iframe.contentDocument.open();
-  iframe.contentDocument.write(html);
-  iframe.contentDocument.close();
-  setTimeout(function() {
-    iframe.contentWindow.focus();
-    var removed = false;
-    function cleanup() {
-      if (removed) return;
-      removed = true;
-      if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
-    }
-    iframe.contentWindow.addEventListener('afterprint', cleanup);
-    setTimeout(cleanup, 30000);
-    iframe.contentWindow.print();
-  }, 2000);
-  showToast('印刷ダイアログを開きます');
+  try {
+    iframe.contentDocument.open();
+    iframe.contentDocument.write(html);
+    iframe.contentDocument.close();
+    await _waitForPrintFrame(iframe);
+    var body = iframe.contentDocument.body;
+    var canvas = await html2canvas(body, {
+      backgroundColor: '#ffffff',
+      scale: 2,
+      logging: false,
+      useCORS: false,
+      allowTaint: false,
+      width: body.scrollWidth,
+      height: body.scrollHeight,
+      windowWidth: body.scrollWidth,
+      windowHeight: body.scrollHeight,
+      scrollX: 0,
+      scrollY: 0
+    });
+    var pdfBytes = await buildFixedSizePdfBytes(canvas.toDataURL('image/png'), paperSize);
+    return new Blob([pdfBytes], { type: 'application/pdf' });
+  } finally {
+    if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+  }
 }
+
 
 function escAttr(s) {
   return String(s == null ? '' : s)
@@ -152,23 +271,17 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
     );
   }
   function missingToothNotation(missingSet) {
-    function n(fdiNum, posNum) {
-      var active = missingSet.has(fdiNum);
-      return '<span class="missing-num' + (active ? ' active' : '') + '">' + posNum + '</span>';
+    function selectedText(teeth) {
+      return teeth.filter(function(num) { return missingSet.has(num); }).join('・');
     }
-    var upper =
-      '<div class="missing-line"><span class="missing-jaw">上顎</span>' +
-      n(17,7) + n(16,6) + n(15,5) + n(14,4) + n(13,3) + n(12,2) + n(11,1) +
-      '<span class="missing-mid">|</span>' +
-      n(21,1) + n(22,2) + n(23,3) + n(24,4) + n(25,5) + n(26,6) + n(27,7) +
-      '</div>';
-    var lower =
-      '<div class="missing-line"><span class="missing-jaw">下顎</span>' +
-      n(47,7) + n(46,6) + n(45,5) + n(44,4) + n(43,3) + n(42,2) + n(41,1) +
-      '<span class="missing-mid">|</span>' +
-      n(31,1) + n(32,2) + n(33,3) + n(34,4) + n(35,5) + n(36,6) + n(37,7) +
-      '</div>';
-    return '<span class="missing-chart">' + upper + lower + '</span>';
+    var upperRight = selectedText([17,16,15,14,13,12,11]);
+    var upperLeft = selectedText([21,22,23,24,25,26,27]);
+    var lowerRight = selectedText([47,46,45,44,43,42,41]);
+    var lowerLeft = selectedText([31,32,33,34,35,36,37]);
+    var lines = [];
+    if (upperRight || upperLeft) lines.push('上顎：' + (upperRight || '—') + '｜' + (upperLeft || '—'));
+    if (lowerRight || lowerLeft) lines.push('下顎：' + (lowerRight || '—') + '｜' + (lowerLeft || '—'));
+    return '<div class="missing-text">' + lines.map(esc).join('<br>') + '</div>';
   }
   function toothMaterialName(value) {
     if (value === '硬レ歯') return '硬質レジン歯';
@@ -474,7 +587,11 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
   }
 
   var css = `
-    @page { size: 182mm 257mm; margin: 0; }
+    @page {
+      size: 182mm 257mm;
+      size: JIS-B5 portrait;
+      margin: 0;
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html,
     body {
@@ -690,24 +807,13 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
     .grid-row.dim .grid-val { color: #555; font-size: 6.8pt; }
     .missing-chart-row { align-items: flex-start; }
     .missing-chart-row .grid-val { display: block; }
-    .missing-chart {
-      display: inline-flex;
-      flex-direction: column;
-      width: 100%;
-      gap: 0.3mm;
-      padding: 0;
-      border: 0;
-      border-radius: 0;
-      background: #fff;
-      line-height: 1.05;
-      -webkit-print-color-adjust: exact;
-      print-color-adjust: exact;
+    .missing-text {
+      color: #111;
+      font-size: 6.2pt;
+      font-weight: 800;
+      line-height: 1.35;
+      white-space: normal;
     }
-    .missing-line { display: flex; align-items: center; height: 3.2mm; gap: 1.1mm; }
-    .missing-jaw { flex: 0 0 7mm; color: #36515a; font-size: 5.8pt; font-weight: 800; }
-    .missing-num { flex: 0 0 3.5mm; text-align: center; color: #c2ccd3; font-size: 5.8pt; font-weight: 700; }
-    .missing-num.active { color: #111; }
-    .missing-mid { flex: 0 0 2mm; text-align: center; color: #aeb9c1; font-size: 5pt; }
     .inline-info {
       display: flex;
       flex-wrap: wrap;

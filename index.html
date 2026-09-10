@@ -885,6 +885,22 @@
 </div><!-- /view-lab -->
 
 
+<!-- ===== 印刷用紙モーダル ===== -->
+<div class="modal-overlay" id="modal-print-paper" style="z-index:210">
+  <div class="modal" style="position:relative;max-width:460px">
+    <button class="modal-close" onclick="cancelPrintPaperSize()">✕</button>
+    <div class="modal-title">🖨️ PDF用紙を選択</div>
+    <div style="font-size:13px;color:var(--text-secondary);line-height:1.7;margin-bottom:14px">
+      B5が標準です。B5は182×257mm、A4は210×297mmのPDFとして作成します。
+    </div>
+    <div class="modal-actions" style="justify-content:stretch">
+      <button class="btn-secondary" style="flex:1" onclick="confirmPrintPaperSize('a4')">A4 PDFを作成</button>
+      <button class="btn-primary" style="flex:1" onclick="confirmPrintPaperSize('b5')">B5 PDFを作成（標準）</button>
+    </div>
+  </div>
+</div>
+
+
 <!-- ===== 詳細モーダル ===== -->
 <div class="modal-overlay" id="modal-detail">
   <div class="modal" style="position:relative">
@@ -909,6 +925,8 @@
 <script src="delivery-intake-export.js"></script>
 <script src="orders.js"></script>
 <script src="modal.js"></script>
+<script src="vendor/pdf/html2canvas-1.4.1.min.js"></script>
+<script src="vendor/pdf/pdf-lib-1.17.1.min.js"></script>
 <script src="pdf.js"></script>
 <script src="calendar.js"></script>
 <script src="vendor/ocr/tesseract.min.js"></script>
