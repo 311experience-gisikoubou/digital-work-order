@@ -1,20 +1,17 @@
 // ============================================================
-//  PDF出力（window.print() 方式）
-//  日本語はブラウザ/OSのフォントで表示。jsPDFは使用しない。
+//  固定寸法PDF出力（ブラウザ内生成）
+//  html2canvas + pdf-lib は vendor/pdf のローカル同梱資産のみを使用する。
 // ============================================================
 var pendingPrintRequest = null;
+var activePdfObjectUrls = [];
 
 function exportPDF(id, id2) {
-  pendingPrintRequest = {
-    id: id || null,
-    id2: id2 != null ? id2 : null
-  };
-
+  pendingPrintRequest = { id: id || null, id2: id2 != null ? id2 : null };
   var modal = document.getElementById('modal-print-paper');
   if (!modal) {
     var fallbackRequest = pendingPrintRequest;
     pendingPrintRequest = null;
-    _printPDF(fallbackRequest.id, fallbackRequest.id2, 'b5');
+    _startFixedPdfExport(fallbackRequest.id, fallbackRequest.id2, 'b5');
     return;
   }
   modal.classList.add('open');
@@ -36,44 +33,173 @@ function confirmPrintPaperSize(paperSize) {
   pendingPrintRequest = null;
   var modal = document.getElementById('modal-print-paper');
   if (modal) modal.classList.remove('open');
-  _printPDF(request.id, request.id2, normalized);
+  _startFixedPdfExport(request.id, request.id2, normalized);
 }
 
-function _printPDF(id, id2, paperSize) {
+function _openPdfPreviewWindow(paperSize) {
+  var label = paperSize === 'a4' ? 'A4' : 'B5';
+  try {
+    var preview = window.open('', '_blank');
+    if (!preview) return null;
+    preview.document.open();
+    preview.document.write('<!DOCTYPE html><meta charset="UTF-8"><title>' + label + ' PDF作成中</title><body style="font-family:sans-serif;padding:24px">' + label + ' PDFを作成しています…</body>');
+    preview.document.close();
+    return preview;
+  } catch (error) {
+    return null;
+  }
+}
+
+function _startFixedPdfExport(id, id2, paperSize) {
+  var label = paperSize === 'a4' ? 'A4' : 'B5';
+  var previewWindow = _openPdfPreviewWindow(paperSize);
+  showToast(label + ' PDFをブラウザ内で作成しています');
+  _createFixedPdfBlob(id, id2, paperSize)
+    .then(function(blob) {
+      var url = URL.createObjectURL(blob);
+      activePdfObjectUrls.push(url);
+      if (previewWindow && !previewWindow.closed) {
+        previewWindow.location.replace(url);
+      } else {
+        var link = document.createElement('a');
+        link.href = url;
+        link.download = 'dental-work-order-' + label + '.pdf';
+        link.rel = 'noopener';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }
+      setTimeout(function() { _revokePdfObjectUrl(url); }, 600000);
+      showToast(label + ' PDFを作成しました');
+    })
+    .catch(function() {
+      if (previewWindow && !previewWindow.closed) previewWindow.close();
+      showToast('PDFを作成できませんでした', 'error');
+    });
+}
+
+function _revokePdfObjectUrl(url) {
+  var index = activePdfObjectUrls.indexOf(url);
+  if (index >= 0) activePdfObjectUrls.splice(index, 1);
+  URL.revokeObjectURL(url);
+}
+
+function pdfMmToPoints(mm) {
+  return Number(mm) * 72 / 25.4;
+}
+
+function getFixedPdfPageSpec(paperSize) {
+  var isA4 = paperSize === 'a4';
+  return {
+    paperSize: isA4 ? 'a4' : 'b5',
+    pageWidthMm: isA4 ? 210 : 182,
+    pageHeightMm: isA4 ? 297 : 257,
+    contentWidthMm: 182,
+    contentHeightMm: 257
+  };
+}
+
+async function buildFixedSizePdfBytes(pngDataUrl, paperSize) {
+  if (typeof PDFLib === 'undefined' || !PDFLib.PDFDocument) throw new Error('pdf-lib unavailable');
+  var spec = getFixedPdfPageSpec(paperSize);
+  var pdfDocument = await PDFLib.PDFDocument.create();
+  var pageWidth = pdfMmToPoints(spec.pageWidthMm);
+  var pageHeight = pdfMmToPoints(spec.pageHeightMm);
+  var page = pdfDocument.addPage([pageWidth, pageHeight]);
+
+  if (pngDataUrl) {
+    var image = await pdfDocument.embedPng(pngDataUrl);
+    var contentWidth = pdfMmToPoints(spec.contentWidthMm);
+    var contentHeight = pdfMmToPoints(spec.contentHeightMm);
+    page.drawImage(image, {
+      x: (pageWidth - contentWidth) / 2,
+      y: (pageHeight - contentHeight) / 2,
+      width: contentWidth,
+      height: contentHeight
+    });
+  }
+  return pdfDocument.save();
+}
+
+function _waitForRenderImage(image) {
+  if (image.complete) return Promise.resolve();
+  return new Promise(function(resolve) {
+    var done = false;
+    function finish() {
+      if (done) return;
+      done = true;
+      image.removeEventListener('load', finish);
+      image.removeEventListener('error', finish);
+      resolve();
+    }
+    image.addEventListener('load', finish, { once: true });
+    image.addEventListener('error', finish, { once: true });
+    setTimeout(finish, 3000);
+  });
+}
+
+async function _waitForPrintFrame(iframe) {
+  var doc = iframe.contentDocument;
+  if (!doc) throw new Error('print frame unavailable');
+  if (doc.fonts && doc.fonts.ready) {
+    try { await doc.fonts.ready; } catch (error) {}
+  }
+  var images = Array.prototype.slice.call(doc.images || []);
+  await Promise.all(images.map(_waitForRenderImage));
+  await new Promise(function(resolve) {
+    requestAnimationFrame(function() { requestAnimationFrame(resolve); });
+  });
+}
+
+async function _createFixedPdfBlob(id, id2, paperSize) {
+  if (typeof html2canvas !== 'function') throw new Error('html2canvas unavailable');
   var order1 = id ? state.orders.find(function(o){ return o.id === id; }) : collectFormData();
-  if (!order1) { showToast('PDF出力するデータがありません', 'error'); return; }
-
-  var order2 = (id2 != null)
-    ? (state.orders.find(function(o){ return o.id === id2; }) || null)
-    : null;
-
+  if (!order1) throw new Error('PDF data unavailable');
+  var order2 = (id2 != null) ? (state.orders.find(function(o){ return o.id === id2; }) || null) : null;
   var chartWrap = document.querySelector('.chart-wrap');
   var chartHtml = chartWrap ? chartWrap.outerHTML : '';
   var sourceMemoStrokes = Array.isArray(order1.memoStrokes)
     ? order1.memoStrokes
     : (typeof memoStrokes !== 'undefined' && Array.isArray(memoStrokes) ? memoStrokes : []);
   var memoHtml = buildMemoPngHTML(sourceMemoStrokes) || buildMemoSvgHTML(sourceMemoStrokes);
-  var html = _buildPrintHTML(order1, chartHtml, order2, memoHtml, paperSize);
+  var html = _buildPrintHTML(order1, chartHtml, order2, memoHtml);
 
   var iframe = document.createElement('iframe');
-  iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:0;height:0;border:0;';
+  iframe.style.cssText = 'position:fixed;top:0;left:-10000px;width:182mm;height:257mm;border:0;background:#fff;pointer-events:none;';
   document.body.appendChild(iframe);
-  iframe.contentDocument.open();
-  iframe.contentDocument.write(html);
-  iframe.contentDocument.close();
-  setTimeout(function() {
-    iframe.contentWindow.focus();
-    var removed = false;
-    function cleanup() {
-      if (removed) return;
-      removed = true;
-      if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
-    }
-    iframe.contentWindow.addEventListener('afterprint', cleanup);
-    setTimeout(cleanup, 30000);
-    iframe.contentWindow.print();
-  }, 2000);
-  showToast((paperSize === 'a4' ? 'A4' : 'B5') + '設定で印刷を要求します。印刷画面でも用紙サイズをご確認ください');
+  try {
+    iframe.contentDocument.open();
+    iframe.contentDocument.write(html);
+    iframe.contentDocument.close();
+    await _waitForPrintFrame(iframe);
+    var body = iframe.contentDocument.body;
+    var canvas = await html2canvas(body, {
+      backgroundColor: '#ffffff',
+      scale: 2,
+      logging: false,
+      useCORS: false,
+      allowTaint: false,
+      width: body.scrollWidth,
+      height: body.scrollHeight,
+      windowWidth: body.scrollWidth,
+      windowHeight: body.scrollHeight,
+      scrollX: 0,
+      scrollY: 0
+    });
+    var pdfBytes = await buildFixedSizePdfBytes(canvas.toDataURL('image/png'), paperSize);
+    return new Blob([pdfBytes], { type: 'application/pdf' });
+  } finally {
+    if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+  }
+}
+
+
+function _revokeAllPdfObjectUrls() {
+  activePdfObjectUrls.splice(0).forEach(function(url) { URL.revokeObjectURL(url); });
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', _revokeAllPdfObjectUrls);
 }
 
 function escAttr(s) {
@@ -143,12 +269,7 @@ function buildMemoPngHTML(strokes) {
     : '';
 }
 
-function _buildPrintHTML(order1, chartHtml, order2, memoHtml, paperSize) {
-  var normalizedPaperSize = paperSize === 'a4' ? 'a4' : 'b5';
-  var pageSizeFallback = normalizedPaperSize === 'a4' ? '210mm 297mm' : '182mm 257mm';
-  var pageSizeNamed = normalizedPaperSize === 'a4' ? 'A4 portrait' : 'JIS-B5 portrait';
-  var pageWidth = normalizedPaperSize === 'a4' ? '210mm' : '182mm';
-  var pageHeight = normalizedPaperSize === 'a4' ? '297mm' : '257mm';
+function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;')
@@ -517,8 +638,8 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml, paperSize) {
 
   var css = `
     @page {
-      size: ${pageSizeFallback};
-      size: ${pageSizeNamed};
+      size: 182mm 257mm;
+      size: JIS-B5 portrait;
       margin: 0;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -526,15 +647,14 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml, paperSize) {
     body {
       margin: 0;
       padding: 0;
-      width: ${pageWidth};
-      height: ${pageHeight};
+      width: 182mm;
+      height: 257mm;
     }
     body {
       font-family: 'Meiryo', 'Hiragino Kaku Gothic Pro', 'Yu Gothic', 'MS Gothic', sans-serif;
       display: flex;
       flex-direction: column;
-      align-items: center;
-      justify-content: center;
+      align-items: stretch;
       background: #fff;
       font-size: 6.8pt;
       color: #1f2933;
