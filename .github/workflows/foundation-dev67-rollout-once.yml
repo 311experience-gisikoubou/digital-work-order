@@ -1,0 +1,172 @@
+name: foundation-dev67-rollout-once
+
+on:
+  push:
+    branches:
+      - chore/foundation-dev67-rollout
+
+permissions:
+  contents: write
+
+concurrency:
+  group: foundation-dev67-rollout-once
+  cancel-in-progress: false
+
+jobs:
+  rollout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BASE_SHA: ce055ea29b49f9b36dadc1f1976fed99a4c51a45
+      SOURCE_SHA: 831478a80cbdca752c57e305686dab08dcfae2a9
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chore/foundation-dev67-rollout
+          fetch-depth: 0
+
+      - name: Guard branch and fresh WIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "chore/foundation-dev67-rollout"
+          git merge-base --is-ancestor "$BASE_SHA" HEAD
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const repo = process.env.GITHUB_REPOSITORY;
+          const headers = {
+            Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+            Accept: 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28',
+          };
+          const api = `https://api.github.com/repos/${repo}`;
+          const response = await fetch(`${api}/pulls?state=open&per_page=100`, { headers, cache: 'no-store' });
+          if (!response.ok) throw new Error(`pull list failed: ${response.status}`);
+          const list = await response.json();
+          if (!Array.isArray(list) || list.length >= 100) throw new Error('WIP retrieval incomplete');
+          const pullRequests = [];
+          for (const item of list) {
+            const r = await fetch(`${api}/pulls/${item.number}`, { headers, cache: 'no-store' });
+            if (!r.ok) throw new Error(`pull fetch failed: ${r.status}`);
+            const pr = await r.json();
+            pullRequests.push({
+              number: pr.number, state: pr.state, draft: pr.draft,
+              additions: pr.additions, deletions: pr.deletions,
+              changedFiles: pr.changed_files, baseRef: pr.base.ref, headSha: pr.head.sha,
+            });
+          }
+          const fetchedAt = new Date().toISOString();
+          const observer = await import('./.agents/skills/preflight-audit/wip-review-queue-observer.mjs');
+          const report = observer.buildReport({
+            evidence: { schemaVersion: 1, repository: repo, fetchedAt, retrievalComplete: true, pullRequests },
+            repo, nowMs: Date.now(), generatedAt: new Date().toISOString(),
+          });
+          if (!report.ok || report.decision !== 'CONTINUE') throw new Error(`WIP blocked: ${report.code ?? report.decision}`);
+          const impacts = Object.fromEntries([
+            'production','network','realDevice','installOrAdoption','dependency','securitySensitive','authOrCredential','mergeAuthority',
+            'workflowOrDeployment','databaseOrMigration','externalDataRoute','recurringCost','lifecycle','businessPolicy','architecture',
+          ].map(k => [k, k === 'workflowOrDeployment']));
+          const evidence = {
+            schemaVersion: 2, evidenceComplete: true, changeClass: 'implementation', dataMode: 'source-only', executionScope: 'local-dev',
+            impacts,
+            changedFiles: [
+              '.agents/skills/preflight-audit/SKILL.md',
+              '.agents/skills/preflight-audit/wip-review-queue-observer-selftest.mjs',
+              '.agents/skills/preflight-audit/wip-review-queue-observer.mjs',
+              '.agents/skills/final-pr-audit/SKILL.md',
+              '.agents/skills/final-pr-audit/merge-execution-gate-selftest.mjs',
+              '.agents/skills/final-pr-audit/merge-execution-gate.mjs',
+              '.agents/sync-log.md',
+            ],
+            wipReview: { decision: report.decision, evidenceFetchedAt: report.evidenceFetchedAt },
+          };
+          const classifier = await import('./.agents/skills/preflight-audit/fast-path-classifier.mjs');
+          const classified = classifier.classifyChange(evidence);
+          if (!classified.evidenceValid || !classified.workStartAllowed || classified.decision !== 'FULL_GATE') throw new Error('Full Gate preflight failed');
+          const selector = await import('./.agents/skills/preflight-audit/full-gate-selftest-selector.mjs');
+          const selection = selector.selectSelftests(evidence);
+          if (!selection.evidenceValid || selection.selection !== 'FULL_SUITE' || selection.commands.length !== 21) throw new Error('Full Suite selection failed');
+          fs.writeFileSync('/tmp/full-suite.json', JSON.stringify(selection), 'utf8');
+          console.log(`WIP=${report.pendingReviewCount}; FULL_SUITE=${selection.commands.length}`);
+          NODE
+
+      - name: Apply official dev.66 and dev.67 patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          for patch in .foundation-dev67-patches/*.patch; do
+            git apply --check "$patch"
+            git apply "$patch"
+          done
+          test "$(git hash-object .agents/skills/preflight-audit/SKILL.md)" = "98cf7e83f1f0a90e4b8315be32c61732c77df375"
+          test "$(git hash-object .agents/skills/preflight-audit/wip-review-queue-observer-selftest.mjs)" = "387af4a963560171805f340d614f42ddad1739fe"
+          test "$(git hash-object .agents/skills/preflight-audit/wip-review-queue-observer.mjs)" = "415b7e7ea1b3df9effb442b5e741a514c59c9ccd"
+          test "$(git hash-object .agents/skills/final-pr-audit/SKILL.md)" = "e3feecc302f261d63fc61cb43808ecacfd768401"
+          test "$(git hash-object .agents/skills/final-pr-audit/merge-execution-gate-selftest.mjs)" = "3043e7f4a6504699ab7b233efb4a21fc4d9d003e"
+          test "$(git hash-object .agents/skills/final-pr-audit/merge-execution-gate.mjs)" = "42f48629c42facb55b6425d21bc1c49c26cdc6d6"
+
+      - name: Run Foundation Full Suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { spawnSync } from 'node:child_process';
+          const selection = JSON.parse(fs.readFileSync('/tmp/full-suite.json', 'utf8'));
+          let passed = 0;
+          for (const command of selection.commands) {
+            const [exe, ...args] = command.argv;
+            const r = spawnSync(exe, args, { encoding: 'utf8', stdio: 'pipe' });
+            if (r.status !== 0) {
+              console.error(`FAIL ${command.id}`);
+              console.error(r.stdout);
+              console.error(r.stderr);
+              process.exit(1);
+            }
+            passed += 1;
+            console.log(`PASS ${command.id}`);
+          }
+          console.log(`FULL_SUITE_PASS=${passed}`);
+          NODE
+
+      - name: Record rollout and commit final-only diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >> .agents/sync-log.md <<'EOF'
+
+          ## 2026-09-10 - ai-dev-foundation 1.0.0-dev.67
+          - source commit: 831478a80cbdca752c57e305686dab08dcfae2a9
+          - trusted previous foundation: 1.0.0-dev.65 (b7f5d1a1db01bfb7b6b9a1cb0223fb07d7153004)
+          - target branch: chore/foundation-dev67-rollout
+          - method: exact official patches from Foundation PR #90 (dev.66) and PR #94 (dev.67); source/target dev.65 blob equality proven before patching; resulting six managed-file blob SHAs verified against dev.67 source
+          - fresh WIP review evidence: CONTINUE before work start
+          - classification: FULL_GATE; selftest selection: FULL_SUITE; verification: 21/21 PASS
+          - product/runtime/data changes: none; repository-local extras preserved; REAL_DEVICE not required
+          - merge: Draft remains locked until fresh explicit human authorization is bound to the exact rollout PR/head
+          EOF
+          rm -rf .foundation-dev67-patches
+          rm -f .github/workflows/foundation-dev67-rollout-once.yml
+          rmdir .github/workflows 2>/dev/null || true
+          rmdir .github 2>/dev/null || true
+          git diff --check
+          mapfile -t changed < <(git diff --name-only "$BASE_SHA" -- | sort)
+          expected=(
+            ".agents/skills/final-pr-audit/SKILL.md"
+            ".agents/skills/final-pr-audit/merge-execution-gate-selftest.mjs"
+            ".agents/skills/final-pr-audit/merge-execution-gate.mjs"
+            ".agents/skills/preflight-audit/SKILL.md"
+            ".agents/skills/preflight-audit/wip-review-queue-observer-selftest.mjs"
+            ".agents/skills/preflight-audit/wip-review-queue-observer.mjs"
+            ".agents/sync-log.md"
+          )
+          mapfile -t expected_sorted < <(printf '%s\n' "${expected[@]}" | sort)
+          test "${#changed[@]}" -eq "${#expected_sorted[@]}"
+          for i in "${!changed[@]}"; do test "${changed[$i]}" = "${expected_sorted[$i]}"; done
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "chore: sync AI foundation dev.67"
+          git push origin HEAD:chore/foundation-dev67-rollout
