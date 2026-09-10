@@ -79,11 +79,14 @@ jobs:
               '.agents/skills/final-pr-audit/merge-execution-gate.mjs',
               '.agents/sync-log.md',
             ],
-            wipReview: { decision: report.decision, evidenceFetchedAt: report.evidenceFetchedAt },
+            // dev.65 validates this source timestamp but does not expose it in the report; dev.66 fixes that output gap.
+            wipReview: { decision: report.decision, evidenceFetchedAt: fetchedAt },
           };
           const classifier = await import('./.agents/skills/preflight-audit/fast-path-classifier.mjs');
           const classified = classifier.classifyChange(evidence);
-          if (!classified.evidenceValid || !classified.workStartAllowed || classified.decision !== 'FULL_GATE') throw new Error('Full Gate preflight failed');
+          if (!classified.evidenceValid || !classified.workStartAllowed || classified.decision !== 'FULL_GATE') {
+            throw new Error(`Full Gate preflight failed: ${JSON.stringify(classified.reasons ?? [])}`);
+          }
           const selector = await import('./.agents/skills/preflight-audit/full-gate-selftest-selector.mjs');
           const selection = selector.selectSelftests(evidence);
           if (!selection.evidenceValid || selection.selection !== 'FULL_SUITE' || selection.commands.length !== 21) throw new Error('Full Suite selection failed');
