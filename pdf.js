@@ -474,7 +474,11 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
   }
 
   var css = `
-    @page { size: 182mm 257mm; margin: 0; }
+    @page {
+      size: 182mm 257mm;
+      size: JIS-B5 portrait;
+      margin: 0;
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html,
     body {
