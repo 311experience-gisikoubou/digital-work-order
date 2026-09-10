@@ -84,7 +84,21 @@ test('direct PDF path does not call browser print', () => {
   assert.ok(!pdfSource.includes('contentWindow.print'));
   assert.ok(!pdfSource.includes('window.open('));
   assert.ok(pdfSource.includes('window.location.assign(url)'));
+  assert.ok(!pdfSource.includes('activePdfObjectUrls'));
+  assert.ok(!pdfSource.includes('_revokeAllPdfObjectUrls'));
 });
+test('upper 7-to-7 missing teeth are emitted as plain PDF text', () => {
+  const sandbox = { console, setTimeout, clearTimeout, Blob, URL, window: { location: { assign() {} } } };
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(pdfSource, sandbox, { filename: 'pdf.js' });
+  sandbox.__order = { selectedTeeth: [17,16,15,14,13,12,11,21,22,23,24,25,26,27], insuranceType: 'insurance', orderTypes: [], devices: [] };
+  const html = vm.runInContext("_buildPrintHTML(__order, '', null, '')", sandbox);
+  assert.ok(html.includes('欠損歯式'));
+  assert.ok(html.includes('上顎：17・16・15・14・13・12・11｜21・22・23・24・25・26・27'));
+  assert.ok(!html.includes('missing-num active'));
+});
+
 test('generated B5 PDF is exactly one 182mm x 257mm page', async () => {
   const result = await generatedPdfGeometry('b5');
   assert.equal(result.pageCount, 1);

@@ -158,14 +158,6 @@ async function _createFixedPdfBlob(id, id2, paperSize) {
 }
 
 
-function _revokeAllPdfObjectUrls() {
-  activePdfObjectUrls.splice(0).forEach(function(url) { URL.revokeObjectURL(url); });
-}
-
-if (typeof window !== 'undefined') {
-  window.addEventListener('pagehide', _revokeAllPdfObjectUrls);
-}
-
 function escAttr(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;')
@@ -279,23 +271,17 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
     );
   }
   function missingToothNotation(missingSet) {
-    function n(fdiNum, posNum) {
-      var active = missingSet.has(fdiNum);
-      return '<span class="missing-num' + (active ? ' active' : '') + '">' + posNum + '</span>';
+    function selectedText(teeth) {
+      return teeth.filter(function(num) { return missingSet.has(num); }).join('・');
     }
-    var upper =
-      '<div class="missing-line"><span class="missing-jaw">上顎</span>' +
-      n(17,7) + n(16,6) + n(15,5) + n(14,4) + n(13,3) + n(12,2) + n(11,1) +
-      '<span class="missing-mid">|</span>' +
-      n(21,1) + n(22,2) + n(23,3) + n(24,4) + n(25,5) + n(26,6) + n(27,7) +
-      '</div>';
-    var lower =
-      '<div class="missing-line"><span class="missing-jaw">下顎</span>' +
-      n(47,7) + n(46,6) + n(45,5) + n(44,4) + n(43,3) + n(42,2) + n(41,1) +
-      '<span class="missing-mid">|</span>' +
-      n(31,1) + n(32,2) + n(33,3) + n(34,4) + n(35,5) + n(36,6) + n(37,7) +
-      '</div>';
-    return '<span class="missing-chart">' + upper + lower + '</span>';
+    var upperRight = selectedText([17,16,15,14,13,12,11]);
+    var upperLeft = selectedText([21,22,23,24,25,26,27]);
+    var lowerRight = selectedText([47,46,45,44,43,42,41]);
+    var lowerLeft = selectedText([31,32,33,34,35,36,37]);
+    var lines = [];
+    if (upperRight || upperLeft) lines.push('上顎：' + (upperRight || '—') + '｜' + (upperLeft || '—'));
+    if (lowerRight || lowerLeft) lines.push('下顎：' + (lowerRight || '—') + '｜' + (lowerLeft || '—'));
+    return '<div class="missing-text">' + lines.map(esc).join('<br>') + '</div>';
   }
   function toothMaterialName(value) {
     if (value === '硬レ歯') return '硬質レジン歯';
@@ -821,24 +807,13 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
     .grid-row.dim .grid-val { color: #555; font-size: 6.8pt; }
     .missing-chart-row { align-items: flex-start; }
     .missing-chart-row .grid-val { display: block; }
-    .missing-chart {
-      display: inline-flex;
-      flex-direction: column;
-      width: 100%;
-      gap: 0.3mm;
-      padding: 0;
-      border: 0;
-      border-radius: 0;
-      background: #fff;
-      line-height: 1.05;
-      -webkit-print-color-adjust: exact;
-      print-color-adjust: exact;
+    .missing-text {
+      color: #111;
+      font-size: 6.2pt;
+      font-weight: 800;
+      line-height: 1.35;
+      white-space: normal;
     }
-    .missing-line { display: flex; align-items: center; height: 3.2mm; gap: 1.1mm; }
-    .missing-jaw { flex: 0 0 7mm; color: #36515a; font-size: 5.8pt; font-weight: 800; }
-    .missing-num { flex: 0 0 3.5mm; text-align: center; color: #c2ccd3; font-size: 5.8pt; font-weight: 700; }
-    .missing-num.active { color: #111; }
-    .missing-mid { flex: 0 0 2mm; text-align: center; color: #aeb9c1; font-size: 5pt; }
     .inline-info {
       display: flex;
       flex-wrap: wrap;
