@@ -301,8 +301,8 @@
       try {
         const copied = copyApproved(document, candidates, approved);
         const summary = copied.map(key => `${labels[key]}：${get(fields[key]).value}`).join(' / ');
-        status(`反映・照合済み（受注は未確定）：${summary}。医院側フォームで続けて確認してください。納期のカレンダー表示・料金は再計算していません。画像は保持しています。`);
-        for (const key of Object.keys(fields)) get(`paper-approve-${key}`).checked = false;
+        clearPaperWorkOrderPreview();
+        status(`反映・照合済み（受注は未確定）：${summary}。一時画像を破棄しました。端末の写真・ファイルは削除していません。医院側フォームで続けて確認してください。納期のカレンダー表示・料金は再計算していません。`);
       } catch (_) {
         status('反映・照合に失敗しました。選択項目と入力内容、コピー先を確認してください。画像は保持しています。');
       }

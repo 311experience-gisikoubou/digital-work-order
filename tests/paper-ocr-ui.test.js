@@ -66,7 +66,7 @@ test('one Phase 1 intake mounts once with original camera, preview and discard I
   assert.equal(ui.get('paper-ocr-start').disabled, true);
   assert.equal(ui.get('paper-work-order-preview').src, undefined);
 });
-test('review does not write destinations; editing revokes approval; selected copy verifies current value', async () => {
+test('verified approved copy auto-discards temporary paper image', async () => {
   const ui = setup(); ui.select();
   await ui.get('paper-ocr-start').click();
   assert.equal(ui.get('patient-name').value, '');
@@ -81,8 +81,12 @@ test('review does not write destinations; editing revokes approval; selected cop
   assert.equal(ui.get('patient-name').value, '編集済み架空患者');
   assert.equal(ui.get('delivery-date').value, '');
   assert.match(ui.get('paper-ocr-status').textContent, /反映・照合済み/);
-  assert.equal(ui.get('paper-work-order-preview-wrap').hidden, false);
-  assert.equal(ui.revoked.length, 0);
+  assert.match(ui.get('paper-ocr-status').textContent, /一時画像を破棄/);
+  assert.equal(ui.get('paper-work-order-preview-wrap').hidden, true);
+  assert.equal(ui.get('paper-work-order-reference').hidden, true);
+  assert.equal(ui.revoked.length, 1);
+  ui.get('paper-work-order-discard').click();
+  assert.equal(ui.revoked.length, 1);
 });
 test('cancel preserves preview, clears candidates and cannot copy', async () => {
   const ui = setup(); ui.select(); await ui.get('paper-ocr-start').click();
