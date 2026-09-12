@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "projectContextId": "digital-work-order-v1",
+  "projectName": "デジタル歯科技工指示書",
+  "projectRootRepository": "311experience-gisikoubou/digital-work-order",
+  "finalObjective": "iPad Safari と Apple Pencil を主利用環境として、歯科技工指示書の入力、手書き、PDFと印刷、安全な後続受注連携を一貫して扱う。",
+  "thisRepository": "311experience-gisikoubou/digital-work-order",
+  "repositoryRole": "ROOT"
+}

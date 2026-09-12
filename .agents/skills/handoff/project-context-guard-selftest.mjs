@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url';
 const guardArg = process.argv[2];
 if (!guardArg) throw new Error('guard path required');
 const guardPath = resolve(guardArg);
-const { validateProjectContext, renderHandoffSkeleton, validateHandoffArtifact, parseJsonStrict } = await import(pathToFileURL(guardPath).href);
+const { validateProjectContext, renderHandoffSkeleton, validateHandoffArtifact, parseJsonStrict, observeProjectContextEvidence } = await import(pathToFileURL(guardPath).href);
 
 function assert(condition, message) { if (!condition) throw new Error(`FAIL: ${message}`); }
 function complete(markdown) { return markdown; }
@@ -289,6 +289,17 @@ try {
   const handoffPath = join(temp, 'handoff.md');
   await writeFile(manifestPath, JSON.stringify(manifest()), 'utf8');
   await writeFile(statePath, JSON.stringify(state({ currentTaskRepository: '311experience-gisikoubou/digital-work-order' })), 'utf8');
+  spawnSync('git', ['-C', temp, 'config', 'user.email', 'selftest@example.invalid'], { encoding:'utf8' });
+  spawnSync('git', ['-C', temp, 'config', 'user.name', 'Selftest'], { encoding:'utf8' });
+  const addContext = spawnSync('git', ['-C', temp, 'add', 'PROJECT_CONTEXT.json'], { encoding:'utf8' });
+  assert(addContext.status === 0, 'context fixture add should pass');
+  const commitContext = spawnSync('git', ['-C', temp, 'commit', '-m', 'context fixture'], { encoding:'utf8' });
+  assert(commitContext.status === 0, 'context fixture commit should pass');
+  const liveObservation = observeProjectContextEvidence(manifestPath);
+  assert(liveObservation.result === 'PROCEED' && liveObservation.actualRepository === '311experience-gisikoubou/dental-delivery-billing' && /^[a-f0-9]{40}$/.test(liveObservation.headSha), 'live Project Context observation must bind committed identity to Git');
+  await writeFile(manifestPath, JSON.stringify(manifest({ projectName:'Drifted Working Identity' })), 'utf8');
+  assert(observeProjectContextEvidence(manifestPath).code === 'PROJECT_CONTEXT_WORKTREE_DRIFT', 'working Project Context drift from HEAD must stop');
+  await writeFile(manifestPath, JSON.stringify(manifest()), 'utf8');
   const childDir = join(temp, 'child-worktree'); await mkdir(childDir); const childManifest = join(childDir, 'PROJECT_CONTEXT.json'); await writeFile(childManifest, JSON.stringify(manifest()), 'utf8');
   const envOverride = spawnSync(process.execPath, [guardPath, '--context-file', childManifest, '--state-file', statePath], { encoding: 'utf8', env: { ...process.env, GIT_DIR: join(temp, '.git'), GIT_WORK_TREE: childDir } });
   assert(envOverride.status === 2 && JSON.parse(envOverride.stdout).code === 'PROJECT_CONTEXT_GIT_ENV_OVERRIDE', 'GIT_DIR/GIT_WORK_TREE overrides must fail closed');
