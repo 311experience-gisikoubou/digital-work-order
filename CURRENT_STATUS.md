@@ -4,13 +4,13 @@
 仕様書・履歴・議事録を複製せず、製品・主要タスクの安定した現在地だけを保ちます。
 
 - Status: `IDLE`
-- Current phase: `active-tab reload recovery completed`
+- Current phase: `completion roadmap established; public entrypoint remediation pending`
 - Active product Issue: `NONE`
 - Active product PR: `NONE`
 - Last completed product work: `Issue #85: same-tab active view recovery implemented`
-- Current blocker: `NONE`
-- Next action: `identify the next product Issue`
-- PC-free work: `next Issue selection and planning`
+- Current blocker: `stale GitHub Pages deployment does not match current main`
+- Next action: `align the supported public entrypoint with audited current main, then run AI-verifiable public-entry smoke`
+- PC-free work: `Pages source/config investigation, remediation planning, and objective public-entry verification`
 - PC-required work: `NONE`
 - User action required: `NO`
 - Merge authorized: `NO`
@@ -18,6 +18,7 @@
 
 ## Optional short notes
 
+- 完成条件と残件A〜F分類は `docs/completion-roadmap.md` を正本とする。現在確認済みの完成必須A項目は「古いGitHub Pages公開入口をcurrent mainへ揃える」の1件。
 - `state.orders` is restored from same-tab `sessionStorage` only after strict validation; no long-term order persistence is added.
 - 同一タブ再読み込みでは最後に開いていた `clinic` / `lab` 画面もallowlist検証後に復元する。不正値やstorage利用不可時は `clinic` へ戻す。
 - 受注1件以上では画面内の一時受注警告を表示する。対応ブラウザでは `beforeunload` も有効化するが、iPad Safariでは標準ダイアログ表示を保証しない。

@@ -14,7 +14,7 @@
 - 今後、確定した業務仕様・画面仕様は `docs/design.md` を正本とする。
 - `README.md` は利用・確認手順を置く。
 - `CLAUDE.md` はAI作業ルールを置く。
-- 今回は `README.md` と `CLAUDE.md` 自体は変更しない。
+- プロジェクトの完成条件と残件分類は `docs/completion-roadmap.md` に置き、業務仕様そのものは重複させない。
 
 ## 3. 保険 / 自費
 
@@ -203,8 +203,8 @@ Issue #82で、受注の自動長期保存ではなく **`sessionStorage` を使
 - 復元失敗時はsession側の不正データを再利用せず、ページ内メモリの空状態から継続できるようにする。
 - PDF / OCR / 歯式 / clasp / drawing / `collectFormData()` の業務意味は変更しない。
 - 実装確認は、架空受注のみで「追加 → 再読込 → 復元」「受付状態の再読込維持」「0件時のsession削除」「不正schemaのfail closed」「storage利用不可時のフォールバック」を最低限確認する。
-- README上、公開環境の有無はリポジトリ内のファイルだけでは確認できない。
-- Cloudflare Pages導入予定の記載は既存文書にあるが、現状このリポジトリ内の設定ファイルだけでは実装済みとは確認していない。
+- プロジェクトの完成条件と残件分類は `docs/completion-roadmap.md` を参照する。
+- 2026-09-13の読み取り確認ではGitHub Pages自体は存在するが、最新deployは旧feature ref `claude/redesign-dental-form-qG3Ue` / `5fea9c3...` で、current mainの安全改善を含まない。公開入口をcurrent mainへ揃えるまで現行安定版として扱わない。
 - `tools/manual-ui-smoke-test.mjs` は実装済み。架空PDF/紙指示書の2経路と主要実機チェックを1コマンドで準備する。
 
 ## 13. 技工所側・紙指示書画像取り込み（Phase 1）
