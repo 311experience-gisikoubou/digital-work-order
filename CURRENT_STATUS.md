@@ -4,21 +4,21 @@
 仕様書・履歴・議事録を複製せず、製品・主要タスクの安定した現在地だけを保ちます。
 
 - Status: `IDLE`
-- Current phase: `GitHub Pages source corrected to main; public rebuild verification pending`
-- Active product Issue: `#91`
+- Current phase: `primary completion criteria satisfied; maintenance/backlog only`
+- Active product Issue: `NONE`
 - Active product PR: `NONE`
-- Last completed product work: `Issue #85: same-tab active view recovery implemented`
-- Current blocker: `public Pages deployment still shows the pre-change feature ref until the next main push/rebuild completes`
-- Next action: `trigger the native Pages rebuild with the next audited main merge, then verify deployment SHA and public runtime bytes`
-- PC-free work: `objective Pages deployment and public-content verification`
+- Last completed product work: `Issue #91: GitHub Pages aligned to current main and public runtime verified`
+- Current blocker: `NONE`
+- Next action: `no completion-blocking work; address B/C backlog only when an explicit business need appears`
+- PC-free work: `maintenance/backlog only`
 - PC-required work: `NONE`
 - User action required: `NO`
 - Merge authorized: `NO`
-- Last product-state update: `2026-09-13`
+- Last product-state update: `2026-09-14`
 
 ## Optional short notes
 
-- 完成条件と残件A〜F分類は `docs/completion-roadmap.md` を正本とする。現在確認済みの完成必須A項目は「古いGitHub Pages公開入口をcurrent mainへ揃える」の1件。
+- 完成条件と残件A〜F分類は `docs/completion-roadmap.md` を正本とする。Issue #91の公開入口検証まで完了し、現在確認済みの完成必須A項目は0件。
 - `state.orders` is restored from same-tab `sessionStorage` only after strict validation; no long-term order persistence is added.
 - 同一タブ再読み込みでは最後に開いていた `clinic` / `lab` 画面もallowlist検証後に復元する。不正値やstorage利用不可時は `clinic` へ戻す。
 - 受注1件以上では画面内の一時受注警告を表示する。対応ブラウザでは `beforeunload` も有効化するが、iPad Safariでは標準ダイアログ表示を保証しない。

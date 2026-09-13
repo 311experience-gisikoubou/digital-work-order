@@ -28,7 +28,7 @@ iPad Safari + Apple Pencil を主利用環境として、歯科技工指示書�
 
 | 区分 | 種別 | 項目 | 判定理由 |
 | --- | --- | --- | --- |
-| A | 未完成修正 | 公開GitHub Pagesを監査済み現行版へ揃える | Pages sourceは2026-09-14に `main` / `/` へ修正済み。旧feature deploymentからcurrent mainへの再buildと公開内容の客観検証が完了するまでAとして残す。 |
+| A | 完成必須 | なし | Issue #91でGitHub Pagesを `main` / `/` へ揃え、deployment ref/SHA、公開runtime一致、再読み込み復元を客観確認済み。 |
 | B | 追加機能 | タブ/ブラウザ終了後まで受注を長期復元する | 便利だが、保持期限・明示削除・共有端末残留を含む新しい患者情報保持方針が必要。現行の`sessionStorage`境界で主目的は成立する。 |
 | B | 追加機能 | OCR対象を4項目より拡張する | 現行OCRは補助で、紙画像を見ながらの手入力を主経路として成立済み。精度・誤認リスクを増やす拡張は完成必須ではない。 |
 | C | 将来拡張 | 専用PC / LAN OCRへ切り替える | ブラウザ内OCRが実用不能と確認された場合だけ再検討する代替案。現在は追加サービス・画像転送境界を増やす理由がない。 |
@@ -37,12 +37,13 @@ iPad Safari + Apple Pencil を主利用環境として、歯科技工指示書�
 | E | 未完成修正ではない | 紙指示書OCR・画像参照・成功後自動破棄 | Issue #39 / #45 / #63で実装済み。古い「将来」記述が残る箇所は仕様追加ではなく文書整合の対象。 |
 | E | 未完成修正ではない | stable `workOrderRef` / delivery-intake JSON export | Stage 2-A / 2-Bで実装済み。 |
 | E | 未完成修正ではない | 一時受注とactive viewの同一タブ再読込復元 | Issue #82 / #85で実装済み。 |
-| F | ドキュメント修正 | READMEの安定版・公開環境説明を現状へ同期 | 製品挙動は変えない。公開版が現行mainではないことを誤認なく示す。 |
+| E | 未完成修正ではない | 公開GitHub Pagesを監査済み現行版へ揃える | Issue #91で `main` / `/` へ修正し、current main由来deploymentと公開runtime一致、synthetic smoke PASSを確認済み。 |
+| F | ドキュメント修正 | なし | 公開環境・完成状態の説明は現状へ同期済み。 |
 
-## A項目の証拠と次工程
+## 完成判定の証拠
 
-2026-09-13の読み取り確認では、公開GitHub PagesはHTTP 200で存在する一方、最新deployは2026-08-11の `claude/redesign-dental-form-qG3Ue` / `5fea9c3...` だった。2026-09-14にPagesのbranch publishing sourceを `main` / `/` へ修正し、設定APIでも反映を確認済み。設定変更だけでは新deploymentが即時作成されなかったため、次の監査済みmain pushでnative Pages rebuildを起動し、deployment ref/SHAと公開runtime bytesを確認する。
+2026-09-14、GitHub Pagesのbranch publishing sourceを `main` / `/` へ修正し、PR #92 merge後のdeploymentが `ref=main`、SHAがmerge後mainと一致、status=`success` であることを確認した。公開中の主要runtime 10ファイルは同じmain commitのGit blob bytesとSHA-256で一致した。
 
-したがって次の完成必須タスクは、**既存のGitHub Pagesという同じ配布経路を再利用し、公開入口を監査済みcurrent mainへ揃えたうえで、架空データだけで公開URLの表示値・画面構造・主要フローをAI側で客観確認すること**とする。新しいhosting serviceは追加しない。客観確認できる項目のためだけに人間確認は追加しない。
+さらに公開URLをヘッドレスChromeから操作し、架空の `SAMPLE-CLINIC / SAMPLE-DOCTOR / SAMPLE-PATIENT` だけを使って、受注反映 → 受注管理 → 同一タブ再読み込み後も受注・active view・警告が復元されることを確認した。表示値・DOM・保存復元・公開内容の一致はすべてAI側の客観確認で完了しており、人間確認は追加していない。
 
-このA項目を解消した後、現在確認できている完成必須A項目は0件になる見込み。解消後に再棚卸しし、A=0なら本ロードマップの主目的に対して完成判定へ進む。
+この結果、**現在確認できている完成必須A項目は0件**。本ロードマップの主目的に対する完成条件は満たした。B/Cは将来の明示的な業務ニーズが発生した場合だけ再評価する。
