@@ -28,6 +28,7 @@ test('manual UI smoke server exposes deterministic synthetic PDF, paper and orde
     const orderLossJs = await orderLossScript.text();
     assert.match(orderLossJs, new RegExp(`${SMOKE_MARKER}:ORDER_LOSS`));
     assert.match(orderLossJs, /SAMPLE-CLINIC/);
+    assert.match(orderLossJs, /shipping-date/);
     assert.match(orderLossJs, /delivery-date/);
     assert.equal(fixture.status, 200);
   } finally {

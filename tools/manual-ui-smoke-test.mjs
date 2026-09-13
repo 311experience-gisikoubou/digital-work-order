@@ -101,6 +101,8 @@ window.addEventListener('load', () => {
   set('patient-age','65');
   set('patient-gender','female');
   set('issue-date','2026-09-13');
+  set('shipping-date','2026-09-13');
+  if (typeof onShippingDateChange === 'function') onShippingDateChange();
   set('delivery-date','2026-09-30');
   if ($('btn-insurance') && !$('btn-insurance').classList.contains('active')) $('btn-insurance').click();
   click('#order-type-group input[value="\u5b8c\u6210"]');

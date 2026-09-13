@@ -54,6 +54,7 @@ When a real-device check requires form data, prepare deterministic fictional sam
 - Never require the human to type patient, clinic, or order data just to reach the behavior under test.
 - Use clearly fictional values only; never use real patient or production data.
 - Prefer an auto-filled smoke route dedicated to the current check.
+- Fill every field that the current UI marks as required before giving the URL to the human, unless missing-required-field behavior is itself the test target.
 - Keep the human action to the minimum behavior that actually needs confirmation.
 - If required sample data cannot be prepared, do not start the manual check; report the preparation gate as incomplete.
 - The sample route must still pass the exact-HEAD preview gate before it is shown to the human.
