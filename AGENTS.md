@@ -71,6 +71,10 @@
 - `【次のアクション：確認後に次へ】`はHuman Confirmation Pointが実際に残る時だけ使い、確認内容を1つに絞る。技術作業だけが残る場合は`【次のアクション：AIが自動継続】`とし、報告だけで停止しない。
 - 状態の整合は次で固定する：`MERGE` = `User action required: YES`かつ`Merge authorized: NO`かつ他のHuman Confirmation Pointなし、`CONFIRM_THEN_CONTINUE` = `User action required: YES`かつmerge承認以外のHuman Confirmation Pointあり、`AI_CONTINUES` = `User action required: NO`、`COMPLETE` = `Status: COMPLETE`かつ`User action required: NO`。`Merge authorized: YES`の進行中状態は`MERGE`に戻さず`AI_CONTINUES`とする。
 - merge-readyに見えても、仕様・価値判断・本番/破壊的操作・主観的実機確認などmerge承認とは別のHuman Confirmation Pointが1つでも残る場合は`CONFIRM_THEN_CONTINUE`を使う。その確認が解消した後、merge承認だけが残れば初めて`MERGE`へ移る。
+- PRを作る目的は、PR作業の開始時にユーザーへ1文で分かりやすく提示する。技術名ではなく「何を良くするPRか」を先に示す。
+- 目的提示後、Human Confirmation Pointや安全上の重大問題がなければ、実装・テスト・監査・修正・push・PR作成・final auditを途中報告のためだけに止めず、マージ直前まで自動継続する。
+- 途中報告は、仕様/安全境界の実質変更、想定外差分、解消できないgate失敗、データ/費用/本番/破壊的リスクなど、人間判断またはscope変更が必要な重大問題が出た時に限る。AIだけで安全に復旧できる一時的な経路失敗や通常の長時間テスト進行は報告理由にしない。
+- マージ承認を求める直前には、`目的 / 決まったこと・変更点 / 確認結果 / 注意点（なければなし）`を簡潔に報告し、その後に`【次のアクション：マージ】`と`あなたの操作：「マージして」と返信`を置く。
 - Actual merge execution must use the exact-PR / exact-HEAD authorization receipt gate defined by `final-pr-audit` **and** prove the current base SHA still equals the base SHA covered by the latest PASS audit; a status flag or continuation instruction alone never authorizes merge execution.
 - When the target branch lacks verified server-side merge protection, PRs must stay Draft until the active conversation directly receives explicit merge authorization. Only that merge-coordinator flow may unlock Draft->Ready, immediately re-run the exact-HEAD + exact-audited-base gate, and merge. Direct writes, ref updates, or contents writes to `main` are prohibited as a bypass.
 - A merged PR with no valid pre-merge exact-PR/exact-HEAD authorization receipt is an `UNAUTHORIZED_MERGE_INCIDENT`; later approval is not retroactive, and subsequent merge operations enter MERGE FREEZE until the human resolves the incident.
