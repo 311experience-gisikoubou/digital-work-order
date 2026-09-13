@@ -20,7 +20,13 @@ function handleOrderBeforeUnload(event) {
 function syncOrderLossGuard() {
   const hasOrders = hasTemporaryOrders();
   const warning = document.getElementById('order-loss-warning');
+  const warningMessage = document.getElementById('order-loss-warning-message');
   if (warning) warning.hidden = !hasOrders;
+  if (warningMessage && hasOrders) {
+    warningMessage.textContent = (typeof orderSessionStorageAvailable !== 'undefined' && orderSessionStorageAvailable === false)
+      ? 'この端末では再読み込み復元を利用できません。再読み込み・タブ終了・ブラウザ終了で消えます。'
+      : '同じタブの再読み込みでは復元します。タブ終了・ブラウザ終了で消えます。';
+  }
 
   if (hasOrders && !orderLossBeforeUnloadAttached) {
     window.addEventListener('beforeunload', handleOrderBeforeUnload);
@@ -28,6 +34,98 @@ function syncOrderLossGuard() {
   } else if (!hasOrders && orderLossBeforeUnloadAttached) {
     window.removeEventListener('beforeunload', handleOrderBeforeUnload);
     orderLossBeforeUnloadAttached = false;
+  }
+}
+
+// ============================================================
+//  Same-tab temporary-order reload recovery
+// ============================================================
+const ORDER_SESSION_STORAGE_KEY = 'dwo_session_orders_v1';
+const ORDER_SESSION_SCHEMA_VERSION = 'dwo-session-orders-v1';
+let orderSessionStorageAvailable = null;
+
+function isPlainOrderObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isValidSessionOrder(order) {
+  if (!isPlainOrderObject(order)) return false;
+  if (!/^dwo:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(order.workOrderRef || '')) return false;
+  if (!/^local_\d+$/.test(order.id || '')) return false;
+  if (!['pending', 'accepted'].includes(order.status)) return false;
+  if (!['insurance', 'jishi'].includes(order.insuranceType)) return false;
+  if (typeof order.createdAt !== 'string' || !Number.isFinite(Date.parse(order.createdAt))) return false;
+  for (const key of ['clinicName', 'doctorName', 'patientName', 'patientAge', 'patientGender', 'issueDate', 'deliveryDate', 'remarks']) {
+    if (typeof order[key] !== 'string') return false;
+  }
+  if (!Array.isArray(order.selectedTeeth) || !order.selectedTeeth.every(v => typeof v === 'string' || Number.isInteger(v))) return false;
+  if (!Array.isArray(order.orderTypes) || !order.orderTypes.every(v => typeof v === 'string')) return false;
+  if (!Array.isArray(order.devices) || !order.devices.every(v => typeof v === 'string')) return false;
+  if (!Array.isArray(order.memoStrokes)) return false;
+  return true;
+}
+
+function validateSessionOrdersEnvelope(value) {
+  if (!isPlainOrderObject(value)) return null;
+  if (value.schemaVersion !== ORDER_SESSION_SCHEMA_VERSION || !Array.isArray(value.orders)) return null;
+  if (!value.orders.every(isValidSessionOrder)) return null;
+  const refs = value.orders.map(order => order.workOrderRef);
+  if (new Set(refs).size !== refs.length) return null;
+  const ids = value.orders.map(order => order.id);
+  if (new Set(ids).size !== ids.length) return null;
+  return value.orders;
+}
+
+function getOrderSessionStorage(storage) {
+  if (storage) return storage;
+  return window.sessionStorage;
+}
+
+function clearInvalidOrderSession(storage) {
+  try { getOrderSessionStorage(storage).removeItem(ORDER_SESSION_STORAGE_KEY); } catch (_) { /* fail closed */ }
+}
+
+function syncTemporaryOrdersToSession(storage) {
+  try {
+    const target = getOrderSessionStorage(storage);
+    if (!Array.isArray(state.orders) || state.orders.length === 0) {
+      target.removeItem(ORDER_SESSION_STORAGE_KEY);
+    } else {
+      target.setItem(ORDER_SESSION_STORAGE_KEY, JSON.stringify({
+        schemaVersion: ORDER_SESSION_SCHEMA_VERSION,
+        orders: state.orders
+      }));
+    }
+    orderSessionStorageAvailable = true;
+    return true;
+  } catch (_) {
+    orderSessionStorageAvailable = false;
+    clearInvalidOrderSession(storage);
+    return false;
+  }
+}
+
+function restoreTemporaryOrdersFromSession(storage) {
+  try {
+    const target = getOrderSessionStorage(storage);
+    const raw = target.getItem(ORDER_SESSION_STORAGE_KEY);
+    orderSessionStorageAvailable = true;
+    if (!raw) return false;
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch (_) {
+      clearInvalidOrderSession(target);
+      return false;
+    }
+    const restored = validateSessionOrdersEnvelope(parsed);
+    if (!restored) {
+      clearInvalidOrderSession(target);
+      return false;
+    }
+    state.orders = restored;
+    return true;
+  } catch (_) {
+    orderSessionStorageAvailable = false;
+    return false;
   }
 }
 
@@ -243,6 +341,7 @@ function acceptOrder(id) {
   const order = state.orders.find(o => o.id === id);
   if (order) {
     order.status = 'accepted';
+    syncTemporaryOrdersToSession();
     renderOrders();
     showToast('受付済みにしました');
   }
@@ -252,7 +351,12 @@ function cancelOrder(id) {
   const order = state.orders.find(o => o.id === id);
   if (order) {
     order.status = 'pending';
+    syncTemporaryOrdersToSession();
     renderOrders();
     showToast('受付を取り消しました');
   }
 }
+
+// Restore only a validated snapshot from this tab's page session.
+restoreTemporaryOrdersFromSession();
+syncOrderLossGuard();
