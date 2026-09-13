@@ -4,31 +4,31 @@
 仕様書・履歴・議事録を複製せず、現在の作業状態だけを保ちます。
 
 - Status: `ACTIVE`
-- Current phase: `merge authorization safety / Issue #53 implementation and final audit`
-- Current branch: `chore/merge-authorization-gate`
-- Current PR: `#54 (Ready)`
-- Last completed gate: `PR #54 final-pr-audit PASS; mergeable=true; no reviews/threads/workflows; merge-execution gate selftest PASS; full Node suite 54/54 PASS; merged-PR live fail-closed check PASS`
+- Current phase: `project status sync / Issue #75`
+- Current branch: `chore/sync-current-status`
+- Current PR: `not created yet`
+- Base main: `d8206417aa478bf46dc30191a503cec1c20dfec7`
+- Last completed work: `Issue #72 / PR #74 merged; temporary page-order loss warning verified on iPad Safari`
 - Current blocker: `NONE`
-- Next action: `explicit merge authorization for PR #54`
-- PC-free work: `PR #54 merge decision`
+- Next action: `sync CURRENT_STATUS.md and README, then open Draft PR`
+- PC-free work: `docs-only sync and PR audit`
 - PC-required work: `NONE`
-- User action required: `YES（PR #54のmerge判断のみ）`
+- User action required: `NO until merge decision`
 - Merge authorized: `NO`
-- Last updated: `2026-09-08`
+- Last updated: `2026-09-13`
 
 ## Optional short notes
 
-- PR #40 / Issue #39はmerge済み。ブラウザ内OCRは補助機能として維持する。
-- PR #42 / Issue #41の精度改善実験はmergeせず終了。手入力を主経路とする。
-- Issue #45は既存Object URLを再利用し、既存医院側フォームへ紙画像参照UIだけを追加する。
-- 保存形式・PDF・歯式・clasp・drawing・collectFormData()は変更しない。
-- PR #52 / Issue #50はmainに入った。並行コンテキストによる想定外state driftを検出したため、Issue #53でmerge実行ゲートを補強中。自動revertは行わない。
+- 現在の受注一覧は `state.orders` のページ内メモリのみ。再読み込み・タブ終了・ブラウザ終了で消える。
+- 受注1件以上では画面内の一時受注警告を表示する。対応ブラウザでは `beforeunload` も有効化するが、iPad Safariでは標準ダイアログ表示を保証しない。
+- 紙指示書はブラウザ内ローカルOCRを補助機能として維持し、紙画像を見ながらの手入力を主経路とする。
+- OCR承認反映の4条件成立後だけ、一時画像を安全に自動破棄する。
+- `workOrderRef` と納品アプリ取り込み用JSON exportは実装済み。外部クラウド送信は追加していない。
 
 ## Rules
 
 - ここには長い仕様・過去ログ・詳細なテスト結果を複製しない。
 - 実装済みか不明な事項を「完了」と書かない。
-- `PC-free work` と `PC-required work` は、現在の残件を実行環境で分けた短い一覧だけを持つ。ローカル実機確認が必要な作業を `PC-free work` に入れない。
-- PC必須のBlockerがあっても、独立して安全に進められる `PC-free work` が残る場合は、プロジェクト全体を機械的に停止扱いにしない。
+- `PC-free work` と `PC-required work` は、現在の残件を実行環境で分けた短い一覧だけを持つ。
 - PR、主要タスク、Blocker、merge状態、またはPC要否の分類が変わった時に更新する。
 - `Merge authorized: YES` は、有効な人間の明示merge承認が存在する場合だけ使用する。
