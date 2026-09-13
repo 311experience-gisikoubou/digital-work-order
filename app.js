@@ -9,16 +9,67 @@ const state = {
 };
 
 // ============================================================
-//  タブ切り替え
+//  タブ切り替え / 同一タブ再読込時の画面復元
 // ============================================================
+const ACTIVE_TAB_SESSION_KEY = 'dwo_session_active_tab_v1';
+const ACTIVE_TAB_NAMES = new Set(['clinic', 'lab']);
+
+function normalizeActiveTab(tab) {
+  return ACTIVE_TAB_NAMES.has(tab) ? tab : 'clinic';
+}
+
+function getActiveTabSessionStorage(storage) {
+  if (storage) return storage;
+  return window.sessionStorage;
+}
+
+function syncActiveTabToSession(tab, storage) {
+  const safeTab = normalizeActiveTab(tab);
+  try {
+    getActiveTabSessionStorage(storage).setItem(ACTIVE_TAB_SESSION_KEY, safeTab);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function restoreActiveTabFromSession(storage) {
+  try {
+    const target = getActiveTabSessionStorage(storage);
+    const stored = target.getItem(ACTIVE_TAB_SESSION_KEY);
+    if (stored === null) return 'clinic';
+    if (!ACTIVE_TAB_NAMES.has(stored)) {
+      target.removeItem(ACTIVE_TAB_SESSION_KEY);
+      return 'clinic';
+    }
+    return stored;
+  } catch (_) {
+    return 'clinic';
+  }
+}
+
+function activateTab(tab, options) {
+  const safeTab = normalizeActiveTab(tab);
+  const button = document.querySelector(`.tab-btn[data-tab="${safeTab}"]`);
+  const view = document.getElementById(`view-${safeTab}`);
+  if (!button || !view) return false;
+
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  button.classList.add('active');
+  view.classList.add('active');
+
+  if (safeTab === 'lab' && typeof renderOrders === 'function') renderOrders();
+  if (!options || options.persist !== false) syncActiveTabToSession(safeTab);
+  return true;
+}
+
 document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById(`view-${btn.dataset.tab}`).classList.add('active');
-    if (btn.dataset.tab === 'lab') renderOrders();
-  });
+  btn.addEventListener('click', () => activateTab(btn.dataset.tab));
+});
+
+window.addEventListener('DOMContentLoaded', () => {
+  activateTab(restoreActiveTabFromSession(), { persist: false });
 });
 
 // ============================================================
