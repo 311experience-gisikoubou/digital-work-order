@@ -6,15 +6,6 @@
 <meta name="color-scheme" content="light only">
 <title>歯科技工指示書 | こよし技工房</title>
 
-<!-- Firebase SDK -->
-<script type="module">
-  // TODO: Firebase設定はここに追加
-  // import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  // import { getFirestore, collection, addDoc, getDocs, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-  // const firebaseConfig = { apiKey: "YOUR_KEY", ... };
-  // const app = initializeApp(firebaseConfig);
-  // window.db = getFirestore(app);
-</script>
 
 <link rel="stylesheet" href="style.css">
 </head>
@@ -829,9 +820,9 @@
     </div>
   </div>
 
-  <!-- 送信ボタン -->
+  <!-- 受注一覧反映ボタン -->
   <div class="submit-area">
-    <button class="submit-btn" id="submit-btn">指示書を送信する　→</button>
+    <button class="submit-btn" id="submit-btn">受注一覧へ反映する　→</button>
   </div>
   </div><!-- /clinic-form-content -->
 
@@ -877,8 +868,8 @@
     <!-- 動的生成 -->
     <div style="text-align:center;padding:48px;color:var(--text-muted)">
       <div style="font-size:32px;margin-bottom:12px">📋</div>
-      <div>受注データを読み込み中…</div>
-      <div style="font-size:12px;margin-top:8px">Firebase接続設定後に表示されます</div>
+      <div>受注データがありません</div>
+      <div style="font-size:12px;margin-top:8px">医院側入力から反映した、このページ内の受注データが表示されます</div>
     </div>
   </div>
 

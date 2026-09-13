@@ -5,7 +5,7 @@ const state = {
   selectedTeeth: new Set(),
   insuranceType: 'insurance',   // 'insurance' | 'jishi'
   priority: 'normal',
-  orders: []  // Firebaseから取得予定
+  orders: []  // このページ内の受注一覧のみ
 };
 
 // ============================================================
@@ -375,7 +375,7 @@ function generateWorkOrderRef(cryptoApi = globalThis.crypto) {
   return `dwo:${formatWorkOrderUuidV4(bytes)}`;
 }
 // ============================================================
-//  送信処理
+//  受注一覧反映処理
 // ============================================================
 document.getElementById('submit-btn').addEventListener('click', async () => {
   const data = collectFormData();
@@ -394,18 +394,9 @@ document.getElementById('submit-btn').addEventListener('click', async () => {
     return;
   }
 
-  // TODO: Firebase Firestore への保存
-  // try {
-  //   const docRef = await addDoc(collection(window.db, 'orders'), data);
-  //   console.log('Saved:', docRef.id);
-  // } catch(e) {
-  //   showToast('送信に失敗しました', 'error');
-  //   return;
-  // }
-
-  // 暫定：ローカル保存
+  // このページ内の受注一覧へ反映（永続保存・外部送信はしない）
   state.orders.unshift(data);
-  showToast('✅ 指示書を送信しました');
+  showToast('✅ このページの受注一覧へ反映しました');
   resetForm();
 });
 
@@ -462,33 +453,3 @@ function initDates() {
 // ============================================================
 initDates();
 syncNextAppointmentFromValue();
-
-// ============================================================
-//  Firebase（本番接続 — 設定後アンコメント）
-// ============================================================
-/*
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, orderBy, query }
-  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-
-const firebaseConfig = {
-  apiKey:            "YOUR_API_KEY",
-  authDomain:        "YOUR_PROJECT.firebaseapp.com",
-  projectId:         "YOUR_PROJECT_ID",
-  storageBucket:     "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId:             "YOUR_APP_ID"
-};
-
-const app = initializeApp(firebaseConfig);
-const db  = getFirestore(app);
-
-// リアルタイム受信（技工所側）
-const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
-onSnapshot(q, snapshot => {
-  state.orders = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-  renderOrders();
-});
-
-// 送信時の保存（上記 submit-btn の addDoc コメントをアンコメント）
-*/
