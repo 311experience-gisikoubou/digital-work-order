@@ -4,13 +4,13 @@
 仕様書・履歴・議事録を複製せず、製品・主要タスクの安定した現在地だけを保ちます。
 
 - Status: `IDLE`
-- Current phase: `backlog selection`
+- Current phase: `session-order recovery implementation selection`
 - Active product Issue: `NONE`
 - Active product PR: `NONE`
-- Last completed product work: `Issue #72 / PR #74 merged; temporary page-order loss warning verified on iPad Safari`
+- Last completed product work: `Issue #80 design completed; sessionStorage selected for same-tab reload recovery without long-term order persistence`
 - Current blocker: `NONE`
-- Next action: `select the next product task`
-- PC-free work: `backlog selection`
+- Next action: `create one implementation Issue for dwo-session-orders-v1 reload recovery`
+- PC-free work: `implementation issue planning`
 - PC-required work: `NONE`
 - User action required: `NO`
 - Merge authorized: `NO`
@@ -18,7 +18,7 @@
 
 ## Optional short notes
 
-- 現在の受注一覧は `state.orders` のページ内メモリのみ。再読み込み・タブ終了・ブラウザ終了で消える。
+- 現在コードの受注一覧はまだ `state.orders` のページ内メモリのみ。次実装では `sessionStorage` により同一タブの再読み込みだけ復元し、タブ終了後の長期保存は行わない。
 - 受注1件以上では画面内の一時受注警告を表示する。対応ブラウザでは `beforeunload` も有効化するが、iPad Safariでは標準ダイアログ表示を保証しない。
 - 紙指示書はブラウザ内ローカルOCRを補助機能として維持し、紙画像を見ながらの手入力を主経路とする。
 - OCR承認反映の4条件成立後だけ、一時画像を安全に自動破棄する。

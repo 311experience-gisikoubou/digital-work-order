@@ -167,8 +167,37 @@
 ## 12. 未確定・将来項目
 
 - Firebase / Firestoreの未実装TODO・接続サンプルは撤去済み。現状の受注反映は外部送信ではない。
-- `state.orders.unshift(data)` により、医院側入力は現在のページ内メモリの受注一覧へ反映される。ページリロード後の永続保存と外部送信は未実装。
-- `state.orders` が1件以上ある間は受注管理画面に消失警告を表示し、対応ブラウザでは `beforeunload` も有効化する。受注データ自体の永続保存は行わない。
+- `state.orders.unshift(data)` により、医院側入力は現在のページ内メモリの受注一覧へ反映される。現行mainではページリロード後の復元は未実装で、外部送信も行わない。
+- `state.orders` が1件以上ある間は受注管理画面に消失警告を表示し、対応ブラウザでは `beforeunload` も有効化する。iPad Safariでは標準ダイアログ表示を保証しない。
+
+### 12.1 一時受注の再読込復元境界（Issue #80設計）
+
+次の実装では、受注の自動長期保存ではなく **`sessionStorage` を使った同一タブ内の再読込復元** を採用する。
+
+- 目的は、誤ったページ再読み込みから `state.orders` を復元することに限定する。
+- `sessionStorage` は同一origin・同一タブのページセッションに限定し、再読み込み/ページ復元では維持される一方、タブ/ウィンドウを閉じると終了する性質を利用する。
+- 患者・医院・受注情報をFirebase / Firestore / 外部クラウド / 外部AIへ送信しない。
+- `localStorage` / IndexedDBは今回は採用しない。ブラウザ終了後も残り得るため、保持期限・削除・端末共有時の残留まで含む長期保存設計が別途必要になるためである。
+- 明示的なローカルファイル保存も既定経路には採用しない。患者情報を含む重複ファイルがFiles/Downloads等へ長期残留しやすく、手動運用も増えるためである。
+- 現行の画面内消失警告は残す。`sessionStorage` はタブ/ブラウザ終了からの復元を保証する仕組みではない。
+- `file://`、ストレージ拒否、容量不足、SecurityError等で `sessionStorage` が利用できない場合は、現在のページ内メモリ + 消失警告へ安全にフォールバックし、受注入力自体を壊さない。
+
+保存データはアプリ全体のstateを丸ごと入れず、受注一覧専用のversioned envelopeに限定する。
+
+```json
+{
+  "schemaVersion": "dwo-session-orders-v1",
+  "orders": []
+}
+```
+
+- 保存は `state.orders` の追加・受付・受付取消など、受注配列の意味が変わる操作の直後に同期する。
+- `state.orders` が0件ならsession keyを削除する。
+- 起動時の復元はJSON parse成功だけで採用せず、schemaVersion、orders配列、各orderの必要形状、`workOrderRef` 形式・重複を検証してから反映する。
+- 未知version、不正JSON、不正order、重複 `workOrderRef` はfail closedとし、`state.orders` へ部分復元しない。
+- 復元失敗時はsession側の不正データを再利用せず、ページ内メモリの空状態から継続できるようにする。
+- PDF / OCR / 歯式 / clasp / drawing / `collectFormData()` の業務意味は変更しない。
+- 実装確認は、架空受注のみで「追加 → 再読込 → 復元」「受付状態の再読込維持」「0件時のsession削除」「不正schemaのfail closed」「storage利用不可時のフォールバック」を最低限確認する。
 - README上、公開環境の有無はリポジトリ内のファイルだけでは確認できない。
 - Cloudflare Pages導入予定の記載は既存文書にあるが、現状このリポジトリ内の設定ファイルだけでは実装済みとは確認していない。
 - `tools/manual-ui-smoke-test.mjs` は実装済み。架空PDF/紙指示書の2経路と主要実機チェックを1コマンドで準備する。
