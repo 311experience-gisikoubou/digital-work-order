@@ -10,8 +10,8 @@
 正式な入口ファイルは `index.html` です。
 過去に使っていた旧HTML名は、現在の入口として案内しません。
 
-公開GitHub Pagesの配信sourceは2026-09-14に `main` / `/` へ修正済みです。
-Issue #91 でcurrent mainの再buildと公開内容の客観検証を進めています。検証完了まではローカルまたは監査済みpreviewを現行確認経路として扱います。
+公開GitHub Pagesは2026-09-14に `main` / `/` へ修正し、current main由来のdeployment成功と公開runtimeの一致を客観確認済みです。
+通常利用の公開入口として扱えます。
 ローカル確認では、対象ブランチのファイルを取得して `index.html` をブラウザで開いてください。
 
 1. 対象ブランチの内容を取得する
@@ -48,7 +48,7 @@ Issue #91 でcurrent mainの再buildと公開内容の客観検証を進めて�
 
 | 種別 | 基準 | 内容 |
 |---|---|---|
-| 現在の開発基準 | `main` | Issue #85までの監査済み変更を含むcurrent mainを基準とする |
-| 公開GitHub Pages | `main / /` | source設定は修正済み。Issue #91でcurrent mainの再build・公開検証待ち |
+| 現在の開発基準 | `main` | Issue #91までの監査済み変更を含むcurrent mainを基準とする |
+| 公開GitHub Pages | `main / /` | current main由来のdeployment成功・主要runtime一致・再読込復元smoke PASSを確認済み |
 
 問題が発生した場合も自動的に過去版へ戻さず、症状と影響範囲を確認してから判断してください。
