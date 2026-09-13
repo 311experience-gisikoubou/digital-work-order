@@ -7,6 +7,12 @@ const selectorArg = process.argv[2];
 if (!selectorArg) throw new Error('selector path required');
 const selectorPath = resolve(selectorArg);
 const selector = await import(pathToFileURL(selectorPath).href);
+const classifier = await import(pathToFileURL(resolve(selectorPath, '..', 'fast-path-classifier.mjs')).href);
+const live = classifier.observeLiveProjectContext();
+if (live.result !== 'PROCEED') throw new Error('live project context required for selector selftest');
+process.env.AI_ACTIVE_TASK_REPOSITORY=live.actualRepository;
+process.env.AI_ACTIVE_PROJECT_CONTEXT_ID=live.projectContextId;
+process.env.AI_ACTIVE_PROJECT_CONTEXT_FINGERPRINT=live.contextFingerprint;
 const impactKeys = [
   'production','network','realDevice','installOrAdoption','dependency','securitySensitive','authOrCredential','mergeAuthority',
   'workflowOrDeployment','databaseOrMigration','externalDataRoute','recurringCost','lifecycle','businessPolicy','architecture',
@@ -14,8 +20,9 @@ const impactKeys = [
 function impacts(overrides = {}) {
   return Object.fromEntries(impactKeys.map(key => [key, overrides[key] ?? false]));
 }
+function projectGuard() { return { expectedRepository:live.actualRepository, expectedProjectIdentifier:live.projectContextId, expectedContextFingerprint:live.contextFingerprint, referenceRepository:null, targetIssueRepository:null, targetPrRepository:null, operationType:'product-implementation', route:{ selection:'not-applicable', selectedPathId:null, alternateReasonCode:null, alternateReason:null } }; }
 function fixture(changedFiles, overrides = {}) {
-  return { schemaVersion:2, evidenceComplete:true, changeClass:'implementation', dataMode:'source-only', executionScope:'local-dev', impacts:impacts(), changedFiles, wipReview:{ decision:'CONTINUE', evidenceFetchedAt:new Date(Date.now()-1000).toISOString() }, ...overrides };
+  return { schemaVersion:3, evidenceComplete:true, changeClass:'implementation', dataMode:'source-only', executionScope:'local-dev', impacts:impacts(), changedFiles, wipReview:{ decision:'CONTINUE', evidenceFetchedAt:new Date(Date.now()-1000).toISOString() }, projectGuard:projectGuard(), ...overrides };
 }
 function assert(condition, message) {
   if (!condition) throw new Error(`FAIL: ${message}`);

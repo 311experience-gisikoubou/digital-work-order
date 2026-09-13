@@ -49,6 +49,8 @@ A URL may be shown only when the gate proves: exact target HEAD SHA, local HTTP 
 The preview identity includes PR number, short SHA, and purpose; the gate resolves the current PR HEAD directly from origin before allowing the URL.
 
 For this repository, if LAN direct access has already failed in the same iPad environment and Cloudflare Quick Tunnel has succeeded, Quick Tunnel is the default route unless LAN behavior itself is what is being tested. After the human check, stop the dedicated server and tunnel so stale previews cannot be mistaken for the next target.
+
+For the committed `ipad-quick-tunnel` REAL_DEVICE route, include the current Project Guard `ai-bind-<sha256>` marker exactly once in the Cloudflare Quick Tunnel process command line by using a `--logfile` path whose filename contains that marker. Keep the existing `tunnel --no-autoupdate --url ...` route; do not invent an unknown cloudflared option.
 ## Changes That Usually Need Real-Device UI Checks
 
 - Handwriting

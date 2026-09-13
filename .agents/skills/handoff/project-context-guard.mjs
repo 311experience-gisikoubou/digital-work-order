@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { lstatSync, realpathSync } from 'node:fs';
+import { lstatSync, realpathSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
@@ -211,6 +211,46 @@ function actualRepoForContextFile(contextFile) {
   const effectiveRepository = effectiveUrl ? repoFromRemoteUrl(effectiveUrl) : null;
   if (!effectiveRepository || effectiveRepository !== configuredRepository) return { error: stop('PROJECT_CONTEXT_REPOSITORY_UNVERIFIED', 'Effective Git origin destination conflicts with configured github.com repository identity.') };
   return { repository: configuredRepository };
+}
+
+export function observeProjectContextEvidence(contextFile) {
+  const resolvedContextFile = path.resolve(contextFile);
+  if (path.basename(resolvedContextFile) !== 'PROJECT_CONTEXT.json') return stop('PROJECT_CONTEXT_FILE_LOCATION_INVALID', 'Canonical project context file must be named PROJECT_CONTEXT.json at repository root.');
+  const contextDir = path.dirname(resolvedContextFile);
+  const gitEnv = cleanGitEvidenceEnv();
+  const startBranchResult = spawnSync('git', ['-C', contextDir, 'branch', '--show-current'], { windowsHide:true, timeout:5000, env:gitEnv });
+  const startHeadResult = spawnSync('git', ['-C', contextDir, 'rev-parse', 'HEAD'], { windowsHide:true, timeout:5000, env:gitEnv });
+  const currentBranch = decodeGitSingleLine(startBranchResult);
+  const headSha = decodeGitSingleLine(startHeadResult);
+  if (!currentBranch) return stop('PROJECT_CONTEXT_DETACHED_HEAD', 'Project Guard requires a named current branch.');
+  if (!headSha || !/^[a-f0-9]{40}$/.test(headSha)) return stop('PROJECT_CONTEXT_HEAD_UNVERIFIED', 'Project Guard could not verify the current Git HEAD.');
+  let workingManifest;
+  try { workingManifest = parseJsonStrict(decodeUtf8Fatal(readFileSync(resolvedContextFile))); }
+  catch { return stop('PROJECT_CONTEXT_FILE_INVALID', 'PROJECT_CONTEXT.json is missing, malformed, or contains duplicate keys.'); }
+  const workingNormalized = normalizeManifest(workingManifest);
+  if (workingNormalized.error) return workingNormalized.error;
+  const repositoryEvidence = actualRepoForContextFile(resolvedContextFile);
+  if (repositoryEvidence.error) return repositoryEvidence.error;
+  const committedResult = spawnSync('git', ['-C', contextDir, 'show', headSha + ':PROJECT_CONTEXT.json'], { windowsHide:true, timeout:5000, env:gitEnv });
+  let committedText;
+  try { if (committedResult.error || committedResult.status !== 0 || !Buffer.isBuffer(committedResult.stdout)) throw new Error('unavailable'); committedText = decodeUtf8Fatal(committedResult.stdout); }
+  catch { return stop('PROJECT_CONTEXT_COMMITTED_EVIDENCE_REQUIRED', 'Project Guard requires PROJECT_CONTEXT.json from the captured Git HEAD.'); }
+  let committedManifest;
+  try { committedManifest = parseJsonStrict(committedText); } catch { return stop('PROJECT_CONTEXT_COMMITTED_EVIDENCE_INVALID', 'Committed PROJECT_CONTEXT.json is malformed or contains duplicate keys.'); }
+  const committedNormalized = normalizeManifest(committedManifest);
+  if (committedNormalized.error) return stop('PROJECT_CONTEXT_COMMITTED_EVIDENCE_INVALID', 'Committed PROJECT_CONTEXT.json is invalid.');
+  const working = workingNormalized.value;
+  const m = committedNormalized.value;
+  if (JSON.stringify(working) !== JSON.stringify(m)) return stop('PROJECT_CONTEXT_WORKTREE_DRIFT', 'Working PROJECT_CONTEXT.json differs from the committed project identity.');
+  if (repositoryEvidence.repository !== m.thisRepo) return stop('PROJECT_CONTEXT_REPOSITORY_DRIFT', 'Committed PROJECT_CONTEXT.json thisRepository does not match the actual origin repository.');
+  const endBranch = decodeGitSingleLine(spawnSync('git', ['-C', contextDir, 'branch', '--show-current'], { windowsHide:true, timeout:5000, env:gitEnv }));
+  const endHead = decodeGitSingleLine(spawnSync('git', ['-C', contextDir, 'rev-parse', 'HEAD'], { windowsHide:true, timeout:5000, env:gitEnv }));
+  if (endBranch !== currentBranch || endHead !== headSha) return stop('PROJECT_CONTEXT_CHANGED_DURING_OBSERVATION', 'Branch or HEAD changed while Project Guard was collecting evidence.');
+  return {
+    result:'PROCEED', projectContextId:m.projectContextId, projectRootRepository:m.rootRepo, thisRepository:m.thisRepo,
+    contextFingerprint:fingerprint(m), actualRepository:repositoryEvidence.repository, worktreeRepository:repositoryEvidence.repository,
+    currentBranch, headSha, observedAt:new Date().toISOString(),
+  };
 }
 
 export function validateProjectContext(manifestInput, stateInput) {

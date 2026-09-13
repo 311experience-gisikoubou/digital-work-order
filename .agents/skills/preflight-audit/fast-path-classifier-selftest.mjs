@@ -1,7 +1,10 @@
 #!/usr/bin/env node
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
+import { copyFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 
 const classifierArg = process.argv[2];
 if (!classifierArg) throw new Error('classifier path required');
@@ -22,26 +25,70 @@ const impactKeys = [
 function impacts(overrides = {}) {
   return Object.fromEntries(impactKeys.map(key => [key, overrides[key] ?? false]));
 }
+const originalCwd = process.cwd();
+const live = classifier.observeLiveProjectContext();
+assert(live.result === 'PROCEED', 'selftest requires live project context evidence');
+process.env.AI_ACTIVE_TASK_REPOSITORY = live.actualRepository;
+process.env.AI_ACTIVE_PROJECT_CONTEXT_ID = live.projectContextId;
+process.env.AI_ACTIVE_PROJECT_CONTEXT_FINGERPRINT = live.contextFingerprint;
+function projectGuard(overrides = {}) {
+  const base = {
+    expectedRepository: live.actualRepository,
+    expectedProjectIdentifier: live.projectContextId,
+    expectedContextFingerprint: live.contextFingerprint,
+    referenceRepository: null,
+    targetIssueRepository: null,
+    targetPrRepository: null,
+    operationType: 'product-implementation',
+    route: { selection:'not-applicable', selectedPathId:null, alternateReasonCode:null, alternateReason:null },
+  };
+  return { ...base, ...overrides, route:{ ...base.route, ...(overrides.route ?? {}) } };
+}
 function fixture(overrides = {}) {
   return {
-    schemaVersion: 2,
-    evidenceComplete: true,
-    changeClass: 'routine',
-    dataMode: 'source-only',
-    executionScope: 'local-dev',
-    impacts: impacts(),
-    changedFiles: ['src/ui/label.ts'],
-    wipReview: { decision: 'CONTINUE', evidenceFetchedAt: new Date(Date.now() - 1000).toISOString() },
-    ...overrides,
+    schemaVersion: 3, evidenceComplete: true, changeClass: 'routine', dataMode: 'source-only', executionScope: 'local-dev',
+    impacts: impacts(), changedFiles: ['src/ui/label.ts'],
+    wipReview: { decision:'CONTINUE', evidenceFetchedAt:new Date(Date.now()-1000).toISOString() },
+    projectGuard: projectGuard(), ...overrides,
   };
 }
 function expectDecision(evidence, decision, reason = null) {
   const report = classifier.classifyChange(evidence);
-  assert(report.decision === decision, `${decision} expected, got ${report.decision}`);
-  if (reason) assert(report.reasons.includes(reason), `missing reason ${reason}`);
+  assert(report.decision === decision, decision + ' expected, got ' + report.decision + ' reasons=' + report.reasons.join(','));
+  if (reason) assert(report.reasons.includes(reason), 'missing reason ' + reason + ': ' + report.reasons.join(','));
   return report;
 }
-
+function git(repo, args) {
+  const result = spawnSync('git', ['-C', repo, ...args], { encoding:'utf8' });
+  assert(result.status === 0, 'git ' + args.join(' ') + ' failed: ' + result.stderr);
+  return result.stdout.trim();
+}
+function makeRepo(repository, projectContextId, registry = null) {
+  const repo = mkdtempSync(join(tmpdir(), 'project-guard-selftest-'));
+  assert(spawnSync('git', ['init', repo], { encoding:'utf8' }).status === 0, 'temp git init');
+  git(repo, ['config','user.email','selftest@example.invalid']); git(repo, ['config','user.name','Selftest']);
+  git(repo, ['remote','add','origin','https://github.com/' + repository + '.git']);
+  const manifest={schemaVersion:1,projectContextId,projectName:'Selftest Project',projectRootRepository:repository,finalObjective:'Exercise Project Guard with synthetic local Git evidence only.',thisRepository:repository,repositoryRole:'ROOT'};
+  writeFileSync(join(repo,'PROJECT_CONTEXT.json'),JSON.stringify(manifest,null,2));
+  if (registry !== null) { mkdirSync(join(repo,'.agents'),{recursive:true}); writeFileSync(join(repo,'.agents','known-good-paths.json'),JSON.stringify(registry,null,2)); }
+  git(repo,['add','.']); git(repo,['commit','-m','selftest fixture']); git(repo,['branch','-M','fixture-main']); return repo;
+}
+function withRepo(repo, action) {
+  process.chdir(repo);
+  try { return action(); } finally { process.chdir(originalCwd); }
+}
+function observeRepo(repo) { return withRepo(repo, () => classifier.observeLiveProjectContext()); }
+function withAuthority(obs, action) {
+  const prior=[process.env.AI_ACTIVE_TASK_REPOSITORY,process.env.AI_ACTIVE_PROJECT_CONTEXT_ID,process.env.AI_ACTIVE_PROJECT_CONTEXT_FINGERPRINT];
+  process.env.AI_ACTIVE_TASK_REPOSITORY=obs.actualRepository;
+  process.env.AI_ACTIVE_PROJECT_CONTEXT_ID=obs.projectContextId;
+  process.env.AI_ACTIVE_PROJECT_CONTEXT_FINGERPRINT=obs.contextFingerprint;
+  try { return action(); } finally {
+    const keys=['AI_ACTIVE_TASK_REPOSITORY','AI_ACTIVE_PROJECT_CONTEXT_ID','AI_ACTIVE_PROJECT_CONTEXT_FINGERPRINT'];
+    keys.forEach((k,i)=> prior[i] === undefined ? delete process.env[k] : process.env[k]=prior[i]);
+  }
+}
+function guardFor(obs, overrides={}) { return projectGuard({ expectedRepository:obs.actualRepository, expectedProjectIdentifier:obs.projectContextId, expectedContextFingerprint:obs.contextFingerprint, ...overrides }); }
 const fast = expectDecision(fixture(), 'FAST_PATH', 'ALL_FAST_PATH_CONDITIONS_MET');
 assert(fast.evidenceValid === true, 'fast evidence should be valid');
 assert(fast.requiredChecks.includes('SECURITY_PREFLIGHT'), 'fast path must retain security preflight');
@@ -54,6 +101,96 @@ assert(fast.skippedChecks.includes('OPERATION_PREFLIGHT_MULTI_STEP_ONLY'), 'fast
 assert(!fast.skippedChecks.includes('OSS_PRIOR_ART_SCAN'), 'OSS review must retain its own trigger');
 assert(!fast.skippedChecks.includes('INDEPENDENT_REVIEW'), 'independent review must retain its own trigger');
 assert(!fast.skippedChecks.includes('HISTORICAL_GIT_AUDIT'), 'history audit must retain its own trigger');
+
+const foreignRepository = live.actualRepository === '311experience-gisikoubou/digital-work-order'
+  ? '311experience-gisikoubou/dental-delivery-billing'
+  : '311experience-gisikoubou/digital-work-order';
+const foreignProjectId = foreignRepository.endsWith('/digital-work-order') ? 'digital-work-order-v1' : 'dental-delivery-billing-v1';
+const substituted = projectGuard({ expectedRepository:foreignRepository, expectedProjectIdentifier:foreignProjectId, expectedContextFingerprint:'b'.repeat(64) });
+assert(classifier.validateProjectGuard(substituted) === 'PROJECT_GUARD_EXPECTED_AUTHORITY_MISMATCH', 'caller cannot substitute the expected active project identity');
+
+const foreignRepo = makeRepo(foreignRepository, foreignProjectId);
+try {
+  const wrongExpected = projectGuard();
+  assert(withRepo(foreignRepo, () => classifier.validateProjectGuard(wrongExpected)) === 'EXPECTED_REPOSITORY_MISMATCH', 'expected active project / actual different repository must stop');
+} finally { rmSync(foreignRepo, { recursive:true, force:true }); }
+
+const dwoAuthorityRepo = makeRepo('311experience-gisikoubou/digital-work-order', 'digital-work-order-v1');
+const ddbRepo = makeRepo('311experience-gisikoubou/dental-delivery-billing', 'dental-delivery-billing-v1');
+try {
+  const dwoObs=observeRepo(dwoAuthorityRepo); assert(dwoObs.result==='PROCEED','DWO authority observation required');
+  for (const operationType of ['write','real-device']) {
+    const dwoGuard=guardFor(dwoObs,{operationType});
+    const result=withAuthority(dwoObs,()=>withRepo(ddbRepo,()=>classifier.validateProjectGuard(dwoGuard)));
+    assert(result === 'EXPECTED_REPOSITORY_MISMATCH', 'DWO project must stop DDB ' + operationType);
+  }
+} finally { rmSync(dwoAuthorityRepo,{recursive:true,force:true}); rmSync(ddbRepo,{recursive:true,force:true}); }
+
+const readOnlyGuard = projectGuard({ operationType:'read-only-reference', referenceRepository:foreignRepository });
+assert(classifier.validateProjectGuard(readOnlyGuard) === null, 'cross-repository read-only reference should pass direct Project Guard');
+assert(classifier.loadKnownGoodRoutes === undefined, 'committed route loader must not be public override surface');
+
+const probeName = process.platform === 'win32' ? 'node.exe' : 'node';
+const probeMarker = 'project-guard-live-selftest-' + process.pid;
+const liveRequirement = (kind,subject) => ({ kind, subject, processName:probeName, commandContains:[probeMarker] });
+const routeRegistry = { schemaVersion:1, routes:[
+  { id:'quick-tunnel', operationType:'real-device', status:'known-good', runtimeRequirements:[liveRequirement('preview-server','dwo-preview'),liveRequirement('tunnel','dwo-tunnel'),liveRequirement('device-session','ipad-session')] },
+  { id:'lan-direct', operationType:'real-device', status:'candidate', runtimeRequirements:[liveRequirement('device-session','ipad-session')] },
+  { id:'fresh-process', operationType:'write', status:'candidate', runtimeRequirements:[liveRequirement('process','preview-process')] },
+] };
+function bindingMarker(obs) {
+  return 'ai-bind-' + createHash('sha256').update(obs.actualRepository + '\n' + obs.contextFingerprint).digest('hex');
+}
+function startProbe(binding, marker=probeMarker, extraBindings=[]) {
+  return spawn(process.execPath,['-e','setInterval(()=>{},1000)','--',binding,marker,...extraBindings],{stdio:'ignore',windowsHide:true});
+}
+function stopProbe(child) { try { child.kill(); } catch {} }
+if (process.platform === 'win32') {
+  const routedRepo=makeRepo(live.actualRepository,live.projectContextId,routeRegistry);
+  let wrongProbe=null, goodProbe=null; const shadowDir=mkdtempSync(join(tmpdir(),'project-guard-shadow-')); const oldPath=process.env.PATH;
+  try {
+    const routedObs=observeRepo(routedRepo); assert(routedObs.result==='PROCEED','routed repo observation required');
+    const knownGood=guardFor(routedObs,{operationType:'real-device',route:{selection:'known-good',selectedPathId:'quick-tunnel',alternateReasonCode:null,alternateReason:null}});
+    wrongProbe=startProbe('ai-bind-'+'b'.repeat(64)); const wrongResult=withAuthority(routedObs,()=>withRepo(routedRepo,()=>classifier.validateProjectGuard(knownGood)));
+    assert(wrongResult==='RUNTIME_STATE_NOT_READY','same-name process with another repository/context binding must not authorize route; got '+wrongResult); stopProbe(wrongProbe); wrongProbe=null;
+    goodProbe=startProbe(bindingMarker(routedObs));
+    copyFileSync(process.env.ComSpec || 'C:/Windows/System32/cmd.exe',join(shadowDir,'powershell.exe')); process.env.PATH=shadowDir+';'+oldPath;
+    const oldPsModulePath=process.env.PSModulePath; const shadowModuleDir=join(shadowDir,'CimCmdlets'); const shadowSentinel=join(shadowDir,'shadow-module-loaded.txt'); mkdirSync(shadowModuleDir,{recursive:true}); writeFileSync(join(shadowModuleDir,'CimCmdlets.psm1'),`[IO.File]::WriteAllText('${shadowSentinel.replace(/'/g,"''")}', 'loaded')\nfunction Get-CimInstance { throw 'shadow module must never load' }`); process.env.PSModulePath=shadowDir;
+    assert(withAuthority(routedObs,()=>withRepo(routedRepo,()=>classifier.validateProjectGuard(knownGood)))===null,'system PowerShell/module boundary and exact project-bound process must pass despite PATH/PSModulePath shadow');
+    assert(!existsSync(shadowSentinel),'PSModulePath shadow module must never execute');
+    oldPsModulePath===undefined ? delete process.env.PSModulePath : process.env.PSModulePath=oldPsModulePath;
+    stopProbe(goodProbe); goodProbe=startProbe(bindingMarker(routedObs),probeMarker,['ai-bind-'+'b'.repeat(64)]);
+    assert(withAuthority(routedObs,()=>withRepo(routedRepo,()=>classifier.validateProjectGuard(knownGood)))==='RUNTIME_STATE_NOT_READY','duplicate conflicting project binding markers must fail closed');
+    stopProbe(goodProbe); goodProbe=startProbe(bindingMarker(routedObs));
+    const bypass=guardFor(routedObs,{operationType:'real-device',route:{selection:'new',selectedPathId:'lan-direct',alternateReasonCode:null,alternateReason:null}});
+    assert(withAuthority(routedObs,()=>withRepo(routedRepo,()=>classifier.validateProjectGuard(bypass)))==='KNOWN_GOOD_PATH_REQUIRED','known-good route must have priority');
+    const alternate=guardFor(routedObs,{operationType:'real-device',route:{selection:'alternate',selectedPathId:'lan-direct',alternateReasonCode:'purpose-mismatch',alternateReason:'Known-good route cannot exercise the required isolated LAN boundary.'}});
+    assert(withAuthority(routedObs,()=>withRepo(routedRepo,()=>classifier.validateProjectGuard(alternate)))===null,'committed alternate with reason should pass');
+    const processGuard=guardFor(routedObs,{operationType:'write',route:{selection:'new',selectedPathId:'fresh-process',alternateReasonCode:null,alternateReason:null}});
+    assert(withAuthority(routedObs,()=>withRepo(routedRepo,()=>classifier.validateProjectGuard(processGuard)))===null,'fresh project-bound process probe should pass');
+    const injected={...knownGood,runtimeEvidence:[{kind:'tunnel',subject:'dwo-tunnel',state:'running'}]}; assert(withAuthority(routedObs,()=>withRepo(routedRepo,()=>classifier.validateProjectGuard(injected)))==='PROJECT_GUARD_INVALID','caller runtime assertions must not be accepted');
+  } finally { process.env.PATH=oldPath; stopProbe(wrongProbe); stopProbe(goodProbe); rmSync(shadowDir,{recursive:true,force:true}); rmSync(routedRepo,{recursive:true,force:true}); }
+  const stoppedRegistry={schemaVersion:1,routes:[{id:'stopped-tunnel',operationType:'write',status:'candidate',runtimeRequirements:[{kind:'tunnel',subject:'stopped-tunnel',processName:probeName,commandContains:['definitely-not-running-project-guard-marker']}]}]};
+  const stoppedRepo=makeRepo(live.actualRepository,live.projectContextId,stoppedRegistry);
+  try { const obs=observeRepo(stoppedRepo); const guard=guardFor(obs,{operationType:'write',route:{selection:'new',selectedPathId:'stopped-tunnel',alternateReasonCode:null,alternateReason:null}}); assert(withAuthority(obs,()=>withRepo(stoppedRepo,()=>classifier.validateProjectGuard(guard)))==='RUNTIME_STATE_NOT_READY','stopped/old tunnel state must not be reused'); }
+  finally { rmSync(stoppedRepo,{recursive:true,force:true}); }
+}
+const originDriftRepo=makeRepo(live.actualRepository,live.projectContextId);
+try { const obs=observeRepo(originDriftRepo); git(originDriftRepo,['remote','set-url','origin','https://github.com/' + foreignRepository + '.git']); const guard=guardFor(obs); assert(withAuthority(obs,()=>withRepo(originDriftRepo,()=>classifier.validateProjectGuard(guard)))==='PROJECT_CONTEXT_REPOSITORY_DRIFT','origin drift must stop Project Guard'); }
+finally { rmSync(originDriftRepo,{recursive:true,force:true}); }
+const noRegistryRepo=makeRepo(live.actualRepository,live.projectContextId);
+try { const obs=observeRepo(noRegistryRepo); const real=guardFor(obs,{operationType:'real-device'}); assert(withAuthority(obs,()=>withRepo(noRegistryRepo,()=>classifier.validateProjectGuard(real)))==='KNOWN_GOOD_REGISTRY_REQUIRED_FOR_REAL_DEVICE','REAL_DEVICE requires committed registry'); mkdirSync(join(noRegistryRepo,'.agents'),{recursive:true}); writeFileSync(join(noRegistryRepo,'.agents','known-good-paths.json'),JSON.stringify(routeRegistry)); assert(withAuthority(obs,()=>withRepo(noRegistryRepo,()=>classifier.validateProjectGuard(real)))==='KNOWN_GOOD_REGISTRY_REQUIRED_FOR_REAL_DEVICE','uncommitted registry cannot authorize REAL_DEVICE'); }
+finally { rmSync(noRegistryRepo,{recursive:true,force:true}); }
+const badRegistryRepo=makeRepo(live.actualRepository,live.projectContextId,{schemaVersion:1,routes:[{id:'bad-device',operationType:'real-device',status:'candidate',runtimeRequirements:[]}]});
+try { const obs=observeRepo(badRegistryRepo); const bad=guardFor(obs,{operationType:'real-device',route:{selection:'new',selectedPathId:'bad-device',alternateReasonCode:null,alternateReason:null}}); assert(withAuthority(obs,()=>withRepo(badRegistryRepo,()=>classifier.validateProjectGuard(bad)))==='KNOWN_GOOD_REGISTRY_REAL_DEVICE_RUNTIME_REQUIRED','REAL_DEVICE route requires live runtime probe'); }
+finally { rmSync(badRegistryRepo,{recursive:true,force:true}); }
+
+const readOnlyChange = fixture({ projectGuard:readOnlyGuard });
+let guardBlocked = expectDecision(readOnlyChange, 'FULL_GATE', 'READ_ONLY_REFERENCE_NOT_CHANGE_AUTHORITY');
+assert(guardBlocked.workStartAllowed === false, 'read-only reference cannot authorize implementation work');
+const noProjectGuard = fixture(); delete noProjectGuard.projectGuard;
+guardBlocked = expectDecision(noProjectGuard, 'FULL_GATE', 'PROJECT_GUARD_REQUIRED');
+assert(guardBlocked.workStartAllowed === false, 'missing Project Guard evidence must block work start');
 
 expectDecision(fixture({ changeClass: 'implementation' }), 'FAST_PATH');
 expectDecision(fixture({ changeClass: 'configuration' }), 'FAST_PATH');
@@ -130,7 +267,7 @@ invalid = expectDecision(fixture({ changedFiles: ['./src/a.ts'] }), 'FULL_GATE',
 assert(invalid.evidenceValid === false, 'non-canonical dot path must invalidate evidence');
 
 const parsedBom = classifier.parseInput(`\uFEFF${JSON.stringify(fixture())}`);
-assert(parsedBom.value?.schemaVersion === 2, 'BOM JSON should parse');
+assert(parsedBom.value?.schemaVersion === 3, 'BOM JSON should parse');
 assert(classifier.parseInput('{bad').error === 'INPUT_JSON_INVALID', 'malformed JSON must fail closed');
 assert(classifier.parseInput('x'.repeat(classifier.MAX_INPUT_BYTES + 1)).error === 'INPUT_TOO_LARGE', 'oversized input must fail closed');
 function runCli(payload) {
@@ -140,7 +277,7 @@ function runCli(payload) {
 }
 
 let cli = runCli(JSON.stringify(fixture()));
-assert(cli.status === 0, `fast CLI should exit 0: ${cli.stderr}`);
+assert(cli.status === 0, `fast CLI should exit 0: ${cli.stdout} ${cli.stderr}`);
 assert(cli.stderr.includes('FAST_PATH_CLASSIFIER=FAST_PATH'), 'fast CLI status line missing');
 assert(JSON.parse(cli.stdout).decision === 'FAST_PATH', 'fast CLI JSON mismatch');
 

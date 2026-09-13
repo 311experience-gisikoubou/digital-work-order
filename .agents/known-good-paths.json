@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "routes": [
+    {
+      "id": "ipad-quick-tunnel",
+      "operationType": "real-device",
+      "status": "known-good",
+      "runtimeRequirements": [
+        {
+          "kind": "tunnel",
+          "subject": "quick-tunnel",
+          "processName": "cloudflared.exe",
+          "commandContains": [
+            "tunnel",
+            "--no-autoupdate",
+            "--url",
+            "--logfile"
+          ]
+        }
+      ]
+    }
+  ]
+}
