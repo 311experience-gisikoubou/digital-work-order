@@ -4,13 +4,13 @@
 仕様書・履歴・議事録を複製せず、製品・主要タスクの安定した現在地だけを保ちます。
 
 - Status: `IDLE`
-- Current phase: `completion roadmap established; public entrypoint remediation pending`
-- Active product Issue: `NONE`
+- Current phase: `GitHub Pages source corrected to main; public rebuild verification pending`
+- Active product Issue: `#91`
 - Active product PR: `NONE`
 - Last completed product work: `Issue #85: same-tab active view recovery implemented`
-- Current blocker: `stale GitHub Pages deployment does not match current main`
-- Next action: `align the supported public entrypoint with audited current main, then run AI-verifiable public-entry smoke`
-- PC-free work: `Pages source/config investigation, remediation planning, and objective public-entry verification`
+- Current blocker: `public Pages deployment still shows the pre-change feature ref until the next main push/rebuild completes`
+- Next action: `trigger the native Pages rebuild with the next audited main merge, then verify deployment SHA and public runtime bytes`
+- PC-free work: `objective Pages deployment and public-content verification`
 - PC-required work: `NONE`
 - User action required: `NO`
 - Merge authorized: `NO`
