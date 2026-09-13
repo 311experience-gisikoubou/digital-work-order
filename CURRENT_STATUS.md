@@ -6,12 +6,12 @@
 - Status: `ACTIVE`
 - Current phase: `project status sync / Issue #75`
 - Current branch: `chore/sync-current-status`
-- Current PR: `not created yet`
+- Current PR: `#77 (Draft)`
 - Base main: `d8206417aa478bf46dc30191a503cec1c20dfec7`
 - Last completed work: `Issue #72 / PR #74 merged; temporary page-order loss warning verified on iPad Safari`
 - Current blocker: `NONE`
-- Next action: `sync CURRENT_STATUS.md and README, then open Draft PR`
-- PC-free work: `docs-only sync and PR audit`
+- Next action: `docs-only PR #77 audit; then wait for explicit merge authorization`
+- PC-free work: `PR #77 audit and merge decision`
 - PC-required work: `NONE`
 - User action required: `NO until merge decision`
 - Merge authorized: `NO`
