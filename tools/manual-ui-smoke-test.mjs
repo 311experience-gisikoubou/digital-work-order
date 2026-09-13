@@ -90,8 +90,32 @@ window.addEventListener('load', async () => {
     if (status) status.textContent = '架空サンプルの自動投入に失敗しました。';
   }
 });`;
+const ORDER_LOSS_SAMPLE_SCRIPT = `// ${SMOKE_MARKER}:ORDER_LOSS
+window.addEventListener('load', () => {
+  const $ = id => document.getElementById(id);
+  const set = (id, value) => { const el = $(id); if (el) el.value = value; };
+  const click = selector => { const el = document.querySelector(selector); if (el && !el.checked && !el.classList.contains('active')) el.click(); };
+  set('clinic-name','SAMPLE-CLINIC');
+  set('doctor-name','SAMPLE-DOCTOR');
+  set('patient-name','SAMPLE-PATIENT');
+  set('patient-age','65');
+  set('patient-gender','female');
+  set('issue-date','2026-09-13');
+  set('shipping-date','2026-09-13');
+  if (typeof onShippingDateChange === 'function') onShippingDateChange();
+  set('delivery-date','2026-09-30');
+  if ($('btn-insurance') && !$('btn-insurance').classList.contains('active')) $('btn-insurance').click();
+  click('#order-type-group input[value="\u5b8c\u6210"]');
+  click('#bed-insurance button[data-val="\u30ec\u30b8\u30f3\u5e8a"]');
+  ${banner('SYNTHETIC SAMPLE LOADED - do not use real patient data. Tap the order-list reflection button.')}
+  setTimeout(() => $('submit-btn')?.scrollIntoView({ block:'center', behavior:'smooth' }), 150);
+});`;
 function injectSmokeScript(html, kind) {
-  const src = kind === 'paper' ? '/__manual-smoke-paper.js' : '/__manual-smoke-pdf.js';
+  const src = kind === 'paper'
+    ? '/__manual-smoke-paper.js'
+    : kind === 'order-loss'
+      ? '/__manual-smoke-order-loss.js'
+      : '/__manual-smoke-pdf.js';
   return html.replace('</body>', `<script src="${src}"></script></body>`);
 }
 
@@ -112,7 +136,8 @@ export async function createSmokeServer({ worktree, host = '127.0.0.1', port = 0
       const url = new URL(req.url, `http://${host}`);
       if (url.pathname === '/__manual-smoke-pdf.js') return send(res, 200, 'text/javascript; charset=utf-8', PDF_SAMPLE_SCRIPT);
       if (url.pathname === '/__manual-smoke-paper.js') return send(res, 200, 'text/javascript; charset=utf-8', PAPER_SAMPLE_SCRIPT);
-      if (url.pathname === '/' && ['pdf','paper'].includes(url.searchParams.get('smoke'))) {
+      if (url.pathname === '/__manual-smoke-order-loss.js') return send(res, 200, 'text/javascript; charset=utf-8', ORDER_LOSS_SAMPLE_SCRIPT);
+      if (url.pathname === '/' && ['pdf','paper','order-loss'].includes(url.searchParams.get('smoke'))) {
         const body = injectSmokeScript(indexHtml, url.searchParams.get('smoke'));
         return send(res, 200, 'text/html; charset=utf-8', body);
       }
@@ -141,7 +166,7 @@ function send(res, status, type, body) {
 }
 
 function buildUrls(base) {
-  return { root: base, pdf: `${base}/?smoke=pdf`, paper: `${base}/?smoke=paper` };
+  return { root: base, pdf: `${base}/?smoke=pdf`, paper: `${base}/?smoke=paper`, orderLoss: `${base}/?smoke=order-loss` };
 }
 export async function runSmoke(args) {
   const worktree = path.resolve(requireArg(args, 'worktree'));
@@ -176,9 +201,11 @@ async function main() {
     console.log(`WORKTREE_CLEAN=${String(!result.dirty)}`);
     console.log(`LOCAL_PDF_SMOKE=${result.localUrls.pdf}`);
     console.log(`LOCAL_PAPER_SMOKE=${result.localUrls.paper}`);
+    console.log(`LOCAL_ORDER_LOSS_SMOKE=${result.localUrls.orderLoss}`);
     if (result.publicUrls) {
       console.log(`PUBLIC_PDF_SMOKE=${result.publicUrls.pdf}`);
       console.log(`PUBLIC_PAPER_SMOKE=${result.publicUrls.paper}`);
+      console.log(`PUBLIC_ORDER_LOSS_SMOKE=${result.publicUrls.orderLoss}`);
       console.log(`EXACT_HEAD_GATE=${result.gate?.pass ? 'PASS' : 'FAIL'}`);
     }
     console.log('SYNTHETIC_DATA_ONLY=true');

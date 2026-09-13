@@ -396,6 +396,7 @@ document.getElementById('submit-btn').addEventListener('click', async () => {
 
   // このページ内の受注一覧へ反映（永続保存・外部送信はしない）
   state.orders.unshift(data);
+  if (typeof syncOrderLossGuard === 'function') syncOrderLossGuard();
   showToast('✅ このページの受注一覧へ反映しました');
   resetForm();
 });

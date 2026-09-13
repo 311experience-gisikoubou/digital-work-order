@@ -302,6 +302,14 @@ textarea { resize: vertical; min-height: 80px; }
 .summary-card.pending .s-num { color: #f0a040; }
 .summary-card.done .s-num { color: #6dc05a; }
 
+.order-loss-warning {
+  margin: 0 0 16px; padding: 11px 14px;
+  border: 1px solid rgba(224,120,32,0.38); border-radius: var(--radius-sm);
+  background: rgba(224,120,32,0.12); color: #a65400;
+  font-size: 12px; line-height: 1.6;
+}
+.order-loss-warning[hidden] { display: none; }
+
 .order-group { margin-bottom: 20px; }
 .order-group-date {
   font-size: 12px; font-weight: 700; color: var(--text-secondary);
