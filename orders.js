@@ -4,6 +4,34 @@
 var printSelection = [];
 
 // ============================================================
+//  一時受注の消失警告
+// ============================================================
+let orderLossBeforeUnloadAttached = false;
+
+function hasTemporaryOrders() {
+  return Array.isArray(state.orders) && state.orders.length > 0;
+}
+
+function handleOrderBeforeUnload(event) {
+  event.preventDefault();
+  event.returnValue = true;
+}
+
+function syncOrderLossGuard() {
+  const hasOrders = hasTemporaryOrders();
+  const warning = document.getElementById('order-loss-warning');
+  if (warning) warning.hidden = !hasOrders;
+
+  if (hasOrders && !orderLossBeforeUnloadAttached) {
+    window.addEventListener('beforeunload', handleOrderBeforeUnload);
+    orderLossBeforeUnloadAttached = true;
+  } else if (!hasOrders && orderLossBeforeUnloadAttached) {
+    window.removeEventListener('beforeunload', handleOrderBeforeUnload);
+    orderLossBeforeUnloadAttached = false;
+  }
+}
+
+// ============================================================
 //  受注サマリー
 // ============================================================
 function updateSummary(orders) {
@@ -25,6 +53,7 @@ function updateSummary(orders) {
 // ============================================================
 function renderOrders() {
   const container = document.getElementById('order-list');
+  syncOrderLossGuard();
 
   if (state.orders.length === 0) {
     container.innerHTML = `
