@@ -31,7 +31,7 @@ function renderOrders() {
       <div style="text-align:center;padding:48px;color:var(--text-muted)">
         <div style="font-size:32px;margin-bottom:12px">📋</div>
         <div>受注データがありません</div>
-        <div style="font-size:12px;margin-top:8px">Firebase接続後、医院側から送信すると表示されます</div>
+        <div style="font-size:12px;margin-top:8px">医院側入力から反映した、このページ内の受注データが表示されます</div>
       </div>`;
     updateSummary([]);
     return;
@@ -214,7 +214,6 @@ function acceptOrder(id) {
   const order = state.orders.find(o => o.id === id);
   if (order) {
     order.status = 'accepted';
-    // TODO: Firestore更新
     renderOrders();
     showToast('受付済みにしました');
   }
@@ -224,7 +223,6 @@ function cancelOrder(id) {
   const order = state.orders.find(o => o.id === id);
   if (order) {
     order.status = 'pending';
-    // TODO: Firestore更新
     renderOrders();
     showToast('受付を取り消しました');
   }

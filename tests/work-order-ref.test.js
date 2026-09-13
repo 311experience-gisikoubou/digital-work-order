@@ -8,7 +8,7 @@ const vm = require('node:vm');
 const root = path.join(__dirname, '..');
 const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 const stableStart = appSource.indexOf('//  連携用 stable workOrderRef');
-const submitStart = appSource.indexOf('//  送信処理', stableStart);
+const submitStart = appSource.indexOf('//  受注一覧反映処理', stableStart);
 assert.ok(stableStart >= 0 && submitStart > stableStart);
 
 const stableBlock = appSource.slice(
