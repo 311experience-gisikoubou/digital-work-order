@@ -5,7 +5,7 @@ const state = {
   selectedTeeth: new Set(),
   insuranceType: 'insurance',   // 'insurance' | 'jishi'
   priority: 'normal',
-  orders: []  // このページ内の受注一覧のみ
+  orders: []  // same-tab temporary order list; reload recovery is handled in orders.js
 };
 
 // ============================================================
@@ -394,8 +394,9 @@ document.getElementById('submit-btn').addEventListener('click', async () => {
     return;
   }
 
-  // このページ内の受注一覧へ反映（永続保存・外部送信はしない）
+  // Reflect to the page order list and same-tab session only; no external transmission.
   state.orders.unshift(data);
+  if (typeof syncTemporaryOrdersToSession === 'function') syncTemporaryOrdersToSession();
   if (typeof syncOrderLossGuard === 'function') syncOrderLossGuard();
   showToast('✅ このページの受注一覧へ反映しました');
   resetForm();

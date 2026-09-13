@@ -50,7 +50,8 @@ test('temporary order loss warning is visible only while page-memory orders exis
   assert.equal(removed, added);
 });
 
-test('clinic reflection activates the loss guard immediately without persistence', () => {
-  assert.match(app, /state\.orders\.unshift\(data\);\s*if \(typeof syncOrderLossGuard === 'function'\) syncOrderLossGuard\(\);/);
-  assert.doesNotMatch(orders, /localStorage|sessionStorage|indexedDB|caches\./i);
+test('clinic reflection syncs same-tab session recovery and keeps durable storage disabled', () => {
+  assert.match(app, /state\.orders\.unshift\(data\);\s*if \(typeof syncTemporaryOrdersToSession === 'function'\) syncTemporaryOrdersToSession\(\);\s*if \(typeof syncOrderLossGuard === 'function'\) syncOrderLossGuard\(\);/);
+  assert.match(orders, /sessionStorage/);
+  assert.doesNotMatch(orders, /localStorage|indexedDB|caches\./i);
 });
