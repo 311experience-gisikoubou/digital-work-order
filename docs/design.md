@@ -192,6 +192,9 @@ Issue #82で、受注の自動長期保存ではなく **`sessionStorage` を使
 ```
 
 - 保存キーは `dwo_session_orders_v1`。
+- 同一タブで最後に開いていた画面は、別キー `dwo_session_active_tab_v1` に `clinic` / `lab` の2値だけを保存する。患者・医院・受注内容はこのキーへ入れない。
+- active tab は allowlist 検証後だけ復元する。不正値・未知値・`sessionStorage` 利用不可時は `clinic` を既定表示とする。
+- `lab` を復元した場合は、Issue #82で復元済みの `state.orders` を既存 `renderOrders()` で表示する。
 
 - 保存は `state.orders` の追加・受付・受付取消など、受注配列の意味が変わる操作の直後に同期する。
 - `state.orders` が0件ならsession keyを削除する。

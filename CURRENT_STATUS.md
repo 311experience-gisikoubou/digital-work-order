@@ -4,10 +4,10 @@
 仕様書・履歴・議事録を複製せず、製品・主要タスクの安定した現在地だけを保ちます。
 
 - Status: `IDLE`
-- Current phase: `session-order reload recovery completed`
+- Current phase: `active-tab reload recovery completed`
 - Active product Issue: `NONE`
 - Active product PR: `NONE`
-- Last completed product work: `Issue #82: same-tab sessionStorage reload recovery implemented`
+- Last completed product work: `Issue #85: same-tab active view recovery implemented`
 - Current blocker: `NONE`
 - Next action: `identify the next product Issue`
 - PC-free work: `next Issue selection and planning`
@@ -19,6 +19,7 @@
 ## Optional short notes
 
 - `state.orders` is restored from same-tab `sessionStorage` only after strict validation; no long-term order persistence is added.
+- 同一タブ再読み込みでは最後に開いていた `clinic` / `lab` 画面もallowlist検証後に復元する。不正値やstorage利用不可時は `clinic` へ戻す。
 - 受注1件以上では画面内の一時受注警告を表示する。対応ブラウザでは `beforeunload` も有効化するが、iPad Safariでは標準ダイアログ表示を保証しない。
 - 紙指示書はブラウザ内ローカルOCRを補助機能として維持し、紙画像を見ながらの手入力を主経路とする。
 - OCR承認反映の4条件成立後だけ、一時画像を安全に自動破棄する。
