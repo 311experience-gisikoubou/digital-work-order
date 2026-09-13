@@ -66,6 +66,11 @@
 - PR、主要タスク、Blocker、merge状態、またはPC要否の分類が変わった時に更新する。
 - `CURRENT_STATUS.md`だけを根拠に「実装済み」「強制済み」「テスト済み」と断定しない。実装・gate・PR等の証拠と矛盾する場合は証拠を優先し、statusを修正する。
 - `Merge authorized: YES`は、有効な人間の明示merge承認が存在する場合だけ使用する。
+- ユーザー向けの進捗・完了報告では、冒頭に次の状態を必ず1つだけ明示する：`【次のアクション：マージ】` / `【次のアクション：確認後に次へ】` / `【次のアクション：AIが自動継続】` / `【状態：完了】`。直下に`あなたの操作：<具体的な1操作または不要>`を置く。
+- `【次のアクション：マージ】`は、必要なテスト・監査が完了し、merge承認だけが残る時だけ使う。すでに有効なmerge承認がある場合は再承認を求めず`AIが自動継続`としてmerge完了まで進める。
+- `【次のアクション：確認後に次へ】`はHuman Confirmation Pointが実際に残る時だけ使い、確認内容を1つに絞る。技術作業だけが残る場合は`【次のアクション：AIが自動継続】`とし、報告だけで停止しない。
+- 状態の整合は次で固定する：`MERGE` = `User action required: YES`かつ`Merge authorized: NO`かつ他のHuman Confirmation Pointなし、`CONFIRM_THEN_CONTINUE` = `User action required: YES`かつmerge承認以外のHuman Confirmation Pointあり、`AI_CONTINUES` = `User action required: NO`、`COMPLETE` = `Status: COMPLETE`かつ`User action required: NO`。`Merge authorized: YES`の進行中状態は`MERGE`に戻さず`AI_CONTINUES`とする。
+- merge-readyに見えても、仕様・価値判断・本番/破壊的操作・主観的実機確認などmerge承認とは別のHuman Confirmation Pointが1つでも残る場合は`CONFIRM_THEN_CONTINUE`を使う。その確認が解消した後、merge承認だけが残れば初めて`MERGE`へ移る。
 - Actual merge execution must use the exact-PR / exact-HEAD authorization receipt gate defined by `final-pr-audit` **and** prove the current base SHA still equals the base SHA covered by the latest PASS audit; a status flag or continuation instruction alone never authorizes merge execution.
 - When the target branch lacks verified server-side merge protection, PRs must stay Draft until the active conversation directly receives explicit merge authorization. Only that merge-coordinator flow may unlock Draft->Ready, immediately re-run the exact-HEAD + exact-audited-base gate, and merge. Direct writes, ref updates, or contents writes to `main` are prohibited as a bypass.
 - A merged PR with no valid pre-merge exact-PR/exact-HEAD authorization receipt is an `UNAUTHORIZED_MERGE_INCIDENT`; later approval is not retroactive, and subsequent merge operations enter MERGE FREEZE until the human resolves the incident.
