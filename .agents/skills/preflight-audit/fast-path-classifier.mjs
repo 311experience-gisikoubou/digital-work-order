@@ -26,9 +26,9 @@ const RUNTIME_REQUIREMENT_KEYS = new Set(['kind','subject','processName','comman
 const OPERATION_TYPES = new Set(['read-only-reference','branch-create','issue-create','pr-create','product-implementation','real-device','write']);
 const CHANGE_OPERATION_TYPES = new Set(['branch-create','issue-create','pr-create','product-implementation','real-device','write']);
 const RUNTIME_KINDS = new Set(['process','tunnel','preview-server','device-session']);
-const ROUTE_SELECTIONS = new Set(['known-good','alternate','new','not-applicable']);
+const ROUTE_SELECTIONS = new Set(['known-good','alternate','new','known-failed-under-test','not-applicable']);
 const REGISTRY_ROUTE_STATUSES = new Set(['known-good','candidate','known-failed']);
-const ALTERNATE_REASON_CODES = new Set(['purpose-mismatch','required-capability-missing','environment-incompatible','safety-boundary']);
+const ALTERNATE_REASON_CODES = new Set(['purpose-mismatch','required-capability-missing','environment-incompatible','safety-boundary','route-under-test']);
 const REPO_ID_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const PROJECT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{2,119}$/;
 const ROUTE_ID_RE = /^[a-z0-9][a-z0-9._-]{2,79}$/;
@@ -246,9 +246,15 @@ function validateRoute(route, applicableRoutes) {
   if (selectedPathId === undefined || alternateReason === undefined || alternateReasonCode === undefined) return 'ROUTE_EVIDENCE_INVALID';
   const knownGood = applicableRoutes.filter(item => item.status === 'known-good');
   const candidates = applicableRoutes.filter(item => item.status === 'candidate');
+  const knownFailed = applicableRoutes.filter(item => item.status === 'known-failed');
   const knownIds = new Set(knownGood.map(item => item.id));
   const candidateIds = new Set(candidates.map(item => item.id));
+  const knownFailedIds = new Set(knownFailed.map(item => item.id));
+  const recordedIds = new Set([...knownIds, ...candidateIds, ...knownFailedIds]);
   if (applicableRoutes.length === 0) return route.selection === 'not-applicable' && selectedPathId === null && alternateReason === null && alternateReasonCode === null ? null : 'ROUTE_SELECTION_CONFLICT';
+  if (selectedPathId && !recordedIds.has(selectedPathId)) return 'UNRECORDED_ROUTE_SELECTION';
+  if (selectedPathId && knownFailedIds.has(selectedPathId) && route.selection !== 'known-failed-under-test') return 'KNOWN_FAILED_ROUTE_BLOCKED';
+  if (route.selection === 'known-failed-under-test') return selectedPathId && knownFailedIds.has(selectedPathId) && alternateReasonCode === 'route-under-test' && alternateReason ? null : 'KNOWN_FAILED_ROUTE_UNDER_TEST_INVALID';
   if (knownGood.length > 0) {
     if (route.selection === 'known-good') return selectedPathId && knownIds.has(selectedPathId) && alternateReason === null && alternateReasonCode === null ? null : 'KNOWN_GOOD_PATH_REQUIRED';
     if (route.selection === 'alternate') return selectedPathId && candidateIds.has(selectedPathId) && alternateReasonCode && alternateReason ? null : 'ALTERNATE_ROUTE_JUSTIFICATION_REQUIRED';
