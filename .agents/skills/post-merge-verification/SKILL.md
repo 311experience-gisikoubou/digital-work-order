@@ -28,6 +28,14 @@ Use after a PR has already been merged on the remote host and the user asks to v
 - Authorization provenance: verify that a valid `MERGE_AUTHORIZATION_V1` receipt for the exact merged PR and exact pre-merge HEAD existed **before** `merged_at`; later approval is never retroactive authorization
 - Audited-base provenance: verify the merge executed against the exact base commit SHA covered by the latest pre-merge PASS audit (`AUDITED_BASE_SHA`)
 
+## Test Evidence Reuse / No Duplicate Post-Merge Rerun
+
+Post-merge verification is a Git/history/tree/provenance check. It does **not** re-run an already-passed test-gate merely because a merge occurred.
+
+Reuse the exact pre-merge PASS test evidence when all of the following are proven: the authorization receipt predates merge, the merge result is based on the exact `AUDITED_BASE_SHA`, the merged tree equals the exact audited pre-merge HEAD tree, and no repository-local rule defines a distinct post-merge/runtime property.
+
+Re-run tests only when prior evidence is no longer equivalent: base drift, tree mismatch, an unexpected merge transformation, changed generated/runtime inputs, or an explicit repository-local post-merge/deployment requirement. If equivalence is unknown, investigate it; do not blindly re-run everything and do not call the old evidence PASS until its assumptions are proven.
+
 ## Merge Method Verification
 
 - Confirm the number of parents on the post-merge commit before assuming it is a squash merge.

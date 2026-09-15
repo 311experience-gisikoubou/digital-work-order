@@ -8,6 +8,8 @@ function argValue(name, fallback = '') {
 }
 
 const manualVerification = argValue('--manual-verification').toLowerCase();
+const verificationBasis = argValue('--verification-basis').toLowerCase();
+const verificationOwner = argValue('--verification-owner').toLowerCase();
 const sampleData = argValue('--sample-data').toLowerCase();
 const sampleDataPrepared = argValue('--sample-data-prepared').toLowerCase();
 const sampleDataPreparer = argValue('--sample-data-preparer').toLowerCase();
@@ -27,8 +29,12 @@ const yesNo = new Set(['yes', 'no']);
 const preparers = new Set(['ai-workflow', 'system', 'provider', 'user', 'none', 'unknown']);
 const sources = new Set(['seed', 'fixture', 'dev-preload', 'existing-test-data', 'none', 'unknown']);
 const envStates = new Set(['yes', 'no', 'not-applicable', 'unknown']);
+const verificationBases = new Set(['objective', 'subjective', 'not-applicable']);
+const verificationOwners = new Set(['ai-workflow', 'system', 'provider', 'user', 'none', 'unknown']);
 
 if (!requiredNotRequired.has(manualVerification)) add('STOP', 'MANUAL_VERIFICATION_STATUS_REQUIRED');
+if (!verificationBases.has(verificationBasis)) add('STOP', 'VERIFICATION_BASIS_REQUIRED');
+if (!verificationOwners.has(verificationOwner)) add('STOP', 'VERIFICATION_OWNER_REQUIRED');
 if (!requiredNotRequired.has(sampleData)) add('STOP', 'SAMPLE_DATA_STATUS_REQUIRED');
 if (!yesNoNa.has(sampleDataPrepared)) add('STOP', 'SAMPLE_DATA_PREPARED_STATUS_REQUIRED');
 if (!preparers.has(sampleDataPreparer)) add('STOP', 'SAMPLE_DATA_PREPARER_REQUIRED');
@@ -46,6 +52,21 @@ if (manualRequired) {
     add('STOP', 'TEST_ENVIRONMENT_NOT_CONFIRMED', { approvedTestEnvironment });
   }
   if (uiPathVerified !== 'yes') add('STOP', 'UI_PATH_NOT_VERIFIED');
+}
+
+if (manualRequired) {
+  if (verificationBasis === 'not-applicable') add('STOP', 'VERIFICATION_BASIS_INCONSISTENT');
+  if (verificationOwner === 'none' || verificationOwner === 'unknown') {
+    add('STOP', 'VERIFICATION_OWNER_UNSAFE_OR_UNKNOWN', { verificationOwner });
+  }
+  if (verificationBasis === 'objective' && verificationOwner === 'user') {
+    add('STOP', 'UNNECESSARY_HUMAN_CONFIRMATION');
+  }
+  if (verificationBasis === 'subjective' && verificationOwner !== 'user') {
+    add('STOP', 'SUBJECTIVE_CONFIRMATION_REQUIRES_HUMAN');
+  }
+} else if (verificationBasis !== 'not-applicable' || verificationOwner !== 'none') {
+  add('STOP', 'VERIFICATION_NOT_REQUIRED_CONFLICT', { verificationBasis, verificationOwner });
 }
 
 if (sampleRequired) {
@@ -79,6 +100,8 @@ if (manualRequired && manualStarted === 'yes' && preparationIncomplete) {
 if (!findings.some((f) => f.status === 'STOP')) {
   add('READY', 'REAL_DEVICE_PREPARATION_READY', {
     manualRequired,
+    verificationBasis,
+    verificationOwner,
     sampleRequired,
     sampleDataPrepared,
     sampleDataPreparer,
@@ -94,6 +117,8 @@ const result = findings.some((f) => f.status === 'STOP') ? 'STOP' : 'PROCEED';
 const output = {
   result,
   manualVerification: manualVerification || '(missing)',
+  verificationBasis: verificationBasis || '(missing)',
+  verificationOwner: verificationOwner || '(missing)',
   sampleData: sampleData || '(missing)',
   sampleDataPrepared: sampleDataPrepared || '(missing)',
   sampleDataPreparer: sampleDataPreparer || '(missing)',

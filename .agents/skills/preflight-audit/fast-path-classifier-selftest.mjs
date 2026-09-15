@@ -135,7 +135,8 @@ const probeMarker = 'project-guard-live-selftest-' + process.pid;
 const liveRequirement = (kind,subject) => ({ kind, subject, processName:probeName, commandContains:[probeMarker] });
 const routeRegistry = { schemaVersion:1, routes:[
   { id:'quick-tunnel', operationType:'real-device', status:'known-good', runtimeRequirements:[liveRequirement('preview-server','dwo-preview'),liveRequirement('tunnel','dwo-tunnel'),liveRequirement('device-session','ipad-session')] },
-  { id:'lan-direct', operationType:'real-device', status:'candidate', runtimeRequirements:[liveRequirement('device-session','ipad-session')] },
+  { id:'lan-direct', operationType:'real-device', status:'known-failed', runtimeRequirements:[liveRequirement('device-session','ipad-session')] },
+  { id:'alternate-tunnel', operationType:'real-device', status:'candidate', runtimeRequirements:[liveRequirement('device-session','ipad-session')] },
   { id:'fresh-process', operationType:'write', status:'candidate', runtimeRequirements:[liveRequirement('process','preview-process')] },
 ] };
 function bindingMarker(obs) {
@@ -163,11 +164,24 @@ if (process.platform === 'win32') {
     assert(withAuthority(routedObs,()=>withRepo(routedRepo,()=>classifier.validateProjectGuard(knownGood)))==='RUNTIME_STATE_NOT_READY','duplicate conflicting project binding markers must fail closed');
     stopProbe(goodProbe); goodProbe=startProbe(bindingMarker(routedObs));
     const bypass=guardFor(routedObs,{operationType:'real-device',route:{selection:'new',selectedPathId:'lan-direct',alternateReasonCode:null,alternateReason:null}});
-    assert(withAuthority(routedObs,()=>withRepo(routedRepo,()=>classifier.validateProjectGuard(bypass)))==='KNOWN_GOOD_PATH_REQUIRED','known-good route must have priority');
-    const alternate=guardFor(routedObs,{operationType:'real-device',route:{selection:'alternate',selectedPathId:'lan-direct',alternateReasonCode:'purpose-mismatch',alternateReason:'Known-good route cannot exercise the required isolated LAN boundary.'}});
-    assert(withAuthority(routedObs,()=>withRepo(routedRepo,()=>classifier.validateProjectGuard(alternate)))===null,'committed alternate with reason should pass');
+    assert(withAuthority(routedObs,()=>withRepo(routedRepo,()=>classifier.validateProjectGuard(bypass)))==='KNOWN_FAILED_ROUTE_BLOCKED','known-failed route must stay blocked by default');
+    const alternate=guardFor(routedObs,{operationType:'real-device',route:{selection:'alternate',selectedPathId:'alternate-tunnel',alternateReasonCode:'purpose-mismatch',alternateReason:'Known-good route cannot exercise the required isolated LAN boundary.'}});
+    const alternateResult=withAuthority(routedObs,()=>withRepo(routedRepo,()=>classifier.validateProjectGuard(alternate)));
+    assert(alternateResult===null,'committed alternate with reason should pass; got '+alternateResult);
+    const failedUnderTest=guardFor(routedObs,{operationType:'real-device',route:{selection:'known-failed-under-test',selectedPathId:'lan-direct',alternateReasonCode:'route-under-test',alternateReason:'LAN-direct itself is the explicit behavior under test.'}});
+    assert(withAuthority(routedObs,()=>withRepo(routedRepo,()=>classifier.validateProjectGuard(failedUnderTest)))===null,'known-failed route may run only when that route itself is under test');
+    const underTestWrongRoute=guardFor(routedObs,{operationType:'real-device',route:{selection:'known-failed-under-test',selectedPathId:'quick-tunnel',alternateReasonCode:'route-under-test',alternateReason:'This is not actually the known-failed route.'}});
+    assert(withAuthority(routedObs,()=>withRepo(routedRepo,()=>classifier.validateProjectGuard(underTestWrongRoute)))==='KNOWN_FAILED_ROUTE_UNDER_TEST_INVALID','known-failed-under-test must target an actual known-failed route');
+    const underTestNoReason=guardFor(routedObs,{operationType:'real-device',route:{selection:'known-failed-under-test',selectedPathId:'lan-direct',alternateReasonCode:null,alternateReason:null}});
+    assert(withAuthority(routedObs,()=>withRepo(routedRepo,()=>classifier.validateProjectGuard(underTestNoReason)))==='KNOWN_FAILED_ROUTE_UNDER_TEST_INVALID','known-failed-under-test without reason code/text must fail closed');
+    const underTestWrongReason=guardFor(routedObs,{operationType:'real-device',route:{selection:'known-failed-under-test',selectedPathId:'lan-direct',alternateReasonCode:'purpose-mismatch',alternateReason:'LAN-direct is intentionally selected for this isolated test.'}});
+    assert(withAuthority(routedObs,()=>withRepo(routedRepo,()=>classifier.validateProjectGuard(underTestWrongReason)))==='KNOWN_FAILED_ROUTE_UNDER_TEST_INVALID','known-failed-under-test must require route-under-test reason code');
+    const unregisteredRoute=guardFor(routedObs,{operationType:'real-device',route:{selection:'new',selectedPathId:'never-committed-route',alternateReasonCode:null,alternateReason:null}});
+    assert(withAuthority(routedObs,()=>withRepo(routedRepo,()=>classifier.validateProjectGuard(unregisteredRoute)))==='UNRECORDED_ROUTE_SELECTION','a route id absent from the committed registry must not authorize work');
     const processGuard=guardFor(routedObs,{operationType:'write',route:{selection:'new',selectedPathId:'fresh-process',alternateReasonCode:null,alternateReason:null}});
     assert(withAuthority(routedObs,()=>withRepo(routedRepo,()=>classifier.validateProjectGuard(processGuard)))===null,'fresh project-bound process probe should pass');
+    const unregisteredProcessRoute=guardFor(routedObs,{operationType:'write',route:{selection:'new',selectedPathId:'never-committed-route',alternateReasonCode:null,alternateReason:null}});
+    assert(withAuthority(routedObs,()=>withRepo(routedRepo,()=>classifier.validateProjectGuard(unregisteredProcessRoute)))==='UNRECORDED_ROUTE_SELECTION','a route id absent from the committed registry must not authorize work even with only candidates present');
     const injected={...knownGood,runtimeEvidence:[{kind:'tunnel',subject:'dwo-tunnel',state:'running'}]}; assert(withAuthority(routedObs,()=>withRepo(routedRepo,()=>classifier.validateProjectGuard(injected)))==='PROJECT_GUARD_INVALID','caller runtime assertions must not be accepted');
   } finally { process.env.PATH=oldPath; stopProbe(wrongProbe); stopProbe(goodProbe); rmSync(shadowDir,{recursive:true,force:true}); rmSync(routedRepo,{recursive:true,force:true}); }
   const stoppedRegistry={schemaVersion:1,routes:[{id:'stopped-tunnel',operationType:'write',status:'candidate',runtimeRequirements:[{kind:'tunnel',subject:'stopped-tunnel',processName:probeName,commandContains:['definitely-not-running-project-guard-marker']}]}]};
@@ -191,6 +205,11 @@ assert(guardBlocked.workStartAllowed === false, 'read-only reference cannot auth
 const noProjectGuard = fixture(); delete noProjectGuard.projectGuard;
 guardBlocked = expectDecision(noProjectGuard, 'FULL_GATE', 'PROJECT_GUARD_REQUIRED');
 assert(guardBlocked.workStartAllowed === false, 'missing Project Guard evidence must block work start');
+const noRegistryChange = fixture();
+for (let i = 0; i < 3; i++) {
+  const repeated = expectDecision(noRegistryChange, 'FAST_PATH', 'ALL_FAST_PATH_CONDITIONS_MET');
+  assert(repeated.workStartAllowed === true, 'repeated no-registry route selection=not-applicable must not falsely block, run ' + i);
+}
 
 expectDecision(fixture({ changeClass: 'implementation' }), 'FAST_PATH');
 expectDecision(fixture({ changeClass: 'configuration' }), 'FAST_PATH');

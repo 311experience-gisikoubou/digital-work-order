@@ -6,7 +6,7 @@ import { parseInput, validateEvidence } from './fast-path-classifier.mjs';
 const CORE = ['merge-authorization','merge-execution','fast-path','security-preflight','full-gate-selector'];
 const ALL = [
   'merge-authorization','merge-execution','foundation-sync','foundation-bootstrap','foundation-update','foundation-remote-plan',
-  'project-context','ai-capacity','ai-provider-inventory','ai-task-router','claude-runner','fast-path','operation-preflight',
+  'project-context','live-base-ref','ai-capacity','ai-provider-inventory','ai-task-router','claude-runner','fast-path','operation-preflight','actions-cost',
   'provider-qualification','provider-readiness','security-history','security-preflight','stagnation','wip-observer','real-device',
   'full-gate-selector',
 ];
@@ -18,12 +18,14 @@ const COMMANDS = {
   'foundation-update':['node','.agents/skills/foundation-sync-audit/foundation-update-selftest.mjs','.agents/skills/foundation-sync-audit/foundation-update.mjs','.agents/skills/foundation-sync-audit/foundation-sync-audit.mjs'],
   'foundation-remote-plan':['node','.agents/skills/foundation-sync-audit/foundation-remote-update-plan-selftest.mjs','.agents/skills/foundation-sync-audit/foundation-remote-update-plan.mjs'],
   'project-context':['node','.agents/skills/handoff/project-context-guard-selftest.mjs','.agents/skills/handoff/project-context-guard.mjs'],
+  'live-base-ref':['node','.agents/skills/preflight-audit/live-base-ref-guard-selftest.mjs','.agents/skills/preflight-audit/live-base-ref-guard.mjs'],
   'ai-capacity':['node','.agents/skills/preflight-audit/ai-capacity-observer-selftest.mjs','.agents/skills/preflight-audit/ai-capacity-observer.mjs'],
   'ai-provider-inventory':['node','.agents/skills/preflight-audit/ai-provider-inventory-selftest.mjs','.agents/skills/preflight-audit/ai-provider-inventory.mjs','.agents/skills/preflight-audit/ai-task-router.mjs'],
   'ai-task-router':['node','.agents/skills/preflight-audit/ai-task-router-selftest.mjs','.agents/skills/preflight-audit/ai-task-router.mjs'],
   'claude-runner':['node','.agents/skills/preflight-audit/claude-subscription-runner-selftest.mjs','.agents/skills/preflight-audit/claude-subscription-runner.mjs'],
   'fast-path':['node','.agents/skills/preflight-audit/fast-path-classifier-selftest.mjs','.agents/skills/preflight-audit/fast-path-classifier.mjs'],
   'operation-preflight':['node','.agents/skills/preflight-audit/operation-preflight-selftest.mjs','.agents/skills/preflight-audit/operation-preflight.mjs'],
+  'actions-cost':['node','.agents/skills/preflight-audit/github-actions-cost-guard-selftest.mjs','.agents/skills/preflight-audit/github-actions-cost-guard.mjs'],
   'provider-qualification':['node','.agents/skills/preflight-audit/provider-adapter-qualification-selftest.mjs','.agents/skills/preflight-audit/provider-adapter-qualification.mjs','.agents/skills/preflight-audit/ai-task-router.mjs'],
   'provider-readiness':['node','.agents/skills/preflight-audit/provider-adapter-readiness-selftest.mjs','.agents/skills/preflight-audit/provider-adapter-readiness.mjs'],
   'security-history':['node','.agents/skills/preflight-audit/security-history-audit-selftest.mjs','.agents/skills/preflight-audit/security-history-audit.mjs'],
@@ -35,9 +37,11 @@ const COMMANDS = {
 };
 const GROUPS = {
   'operation-preflight':['operation-preflight'],
+  'actions-cost':['actions-cost'],
   'claude-runner':['claude-runner'],
   'stagnation':['stagnation'],
   'project-context':['project-context'],
+  'live-base-ref':['live-base-ref'],
   'security-history':['security-history'],
   'security-preflight':['security-preflight'],
   'wip-observer':['wip-observer'],
@@ -63,9 +67,11 @@ function familyFor(path) {
   const pre = '.agents/skills/preflight-audit';
   const foundation = '.agents/skills/foundation-sync-audit';
   if (pair(path,pre,'operation-preflight')) return 'operation-preflight';
+  if (pair(path,pre,'github-actions-cost-guard')) return 'actions-cost';
   if (pair(path,pre,'claude-subscription-runner')) return 'claude-runner';
   if (pair(path,pre,'stagnation-watch')) return 'stagnation';
   if (pair(path,'.agents/skills/handoff','project-context-guard')) return 'project-context';
+  if (pair(path,pre,'live-base-ref-guard')) return 'live-base-ref';
   if (pair(path,pre,'security-history-audit')) return 'security-history';
   if (pair(path,pre,'security-preflight')) return 'security-preflight';
   if (pair(path,pre,'wip-review-queue-observer')) return 'wip-observer';

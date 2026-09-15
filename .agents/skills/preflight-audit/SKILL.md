@@ -181,6 +181,12 @@ Before repository checks, identify where the proposed or audited change actually
 - The evidence path does not weaken safety checks. A property that cannot be proven from the actual execution location or an equivalent independent source is `UNKNOWN`/`NEEDS_CHECK`, not PASS.
 - Do not turn missing tool access into non-engineer relay work when another machine-readable route exists.
 
+### Live remote base guard
+
+Before a local audit or new worktree uses a remote-tracking base such as `origin/main`, run `node .agents/skills/preflight-audit/live-base-ref-guard.mjs --base <branch> --pretty`. The guard compares the local tracking ref with the live remote branch SHA using read-only Git operations. `PROCEED` means they match; any stale, missing, failed, or ambiguous evidence is `STOP` until AI refreshes the exact remote-tracking ref and reruns the guard. Do not ask a non-engineer user to diagnose or copy Git state.
+
+Guard self-test: `node .agents/skills/preflight-audit/live-base-ref-guard-selftest.mjs .agents/skills/preflight-audit/live-base-ref-guard.mjs`.
+
 ## Work Ownership / Duplicate-Implementation Check
 
 Before creating a new feature branch, Issue, PR, or product implementation, confirm the work owner and canonical current-state source.
@@ -241,7 +247,7 @@ Before invoking the heavy change/audit stack, classify the intended change with 
 - Change-evidence schema v3 requires both `wipReview: { decision, evidenceFetchedAt }` and a closed `projectGuard` envelope. Older schemas are intentionally rejected so Project Guard cannot be silently omitted. The envelope carries expected repository/project identity **plus the established Project Context fingerprint**, optional read-only/Issue/PR target repositories, operation type, and route selection; actual local identity and mutable runtime state are never accepted from this caller input. The expected triplet must also match the active-context authority supplied by the parent workflow through `AI_ACTIVE_TASK_REPOSITORY`, `AI_ACTIVE_PROJECT_CONTEXT_ID`, and `AI_ACTIVE_PROJECT_CONTEXT_FINGERPRINT`; changing all caller envelope fields to match the wrong checkout therefore does not redefine the active project.
 - `wipReview.decision` must be `CONTINUE` and `evidenceFetchedAt` must be canonical UTC milliseconds and no more than 5 minutes old. Missing, stale, future-dated, malformed, or `STOP_NEW_WORK` WIP evidence is a hard work-start stop, not a reason to continue through Full Gate.
 - Mutable runtime facts are not caller assertions or reusable receipts. A selected committed route declares exact `{ kind, subject, processName, commandContains[] }` requirements in `.agents/known-good-paths.json`, read from the captured Git HEAD. Foundation itself takes a fresh local Windows process snapshot through the absolute system Windows PowerShell path with a fixed read-only query. It derives one `ai-bind-<sha256>` marker from the independently observed repository ID plus Project Context fingerprint and requires exactly one matching marker in the process command line, in addition to the committed process name and route tokens. The marker may live inside any supported application argument such as a logfile/config path; no unknown third-party CLI option is required. No application-provided JavaScript, imported helper, subprocess recipe, network fetch, or runtime-state JSON is executed or trusted. Missing matching live state fails closed; non-Windows environments currently fail closed for runtime-bearing routes. REAL_DEVICE routes must declare at least one live runtime requirement; the existing REAL_DEVICE preparation gate remains authoritative for device-specific confirmation.
-- Repo-local route knowledge lives in optional `.agents/known-good-paths.json` and is read from **Git HEAD**, never from an uncommitted working copy. Registry routes are `known-good`, `candidate`, or `known-failed`. An available known-good route has priority; an alternate must be a committed candidate with an explicit closed reason code plus explanation. REAL_DEVICE fails closed when the registry is absent. Repeated-failure handling is not duplicated in Project Guard: the existing `operation-preflight` / `stagnation-watch` anti-loop remains authoritative, including the two-failure structural-review breakpoint.
+- Repo-local route knowledge lives in optional `.agents/known-good-paths.json` and is read from **Git HEAD**, never from an uncommitted working copy. Registry routes are `known-good`, `candidate`, or `known-failed`. An available known-good route has priority; an alternate must be a committed candidate with an explicit closed reason code plus explanation. Any non-null route choice must resolve to a route already recorded in that committed registry; an id absent from the registry cannot authorize work under any selection. This is stronger than waiting for a caller-reported second decision: actual route choices are mechanized from first use, so the 2+ reuse requirement never depends on session memory or a caller counter. A `known-failed` route is blocked by default and may run only with `selection=known-failed-under-test` when that exact route is itself the test subject, using reason code `route-under-test`. When no route applies to the operation type, `selection=not-applicable` with no selected path stays valid and does not accumulate state across repeated classifier runs. REAL_DEVICE fails closed when the registry is absent. Repeated-failure handling is not duplicated in Project Guard: the existing `operation-preflight` / `stagnation-watch` anti-loop remains authoritative, including the two-failure structural-review breakpoint.
 
 Minimal repo-local registry shape (the concrete route IDs/runtime requirements belong to each application repository, not Foundation):
 
@@ -314,6 +320,38 @@ Required planning inputs:
 - when `post-failure-action=retry-materially-changed`, `material-change-reviewed yes|no`;
 - after two same-class resolution-intervention failures, a third resolution intervention also requires `forced-reflection-reviewed yes`, `reflection-recorded yes`, and `reflection-basis` as `new-observation`, `new-hypothesis`, `new-route`, `materially-changed-condition`, or `insufficient-observation`.
 
+### GitHub Actions cost / route boundary
+
+Before pushing `.github/workflows/**` changes, or before selecting GitHub-hosted Actions as an execution/verification route, run `github-actions-cost-guard.mjs`. Local edit/commit may prepare the evidence first without consuming hosted minutes; PASS is required before push or hosted execution. This is part of existing preflight route selection, not a second approval system.
+
+- Private-repository hosted minutes are a scarce metered route. Prefer an already-approved local, connector, or self-hosted route when it can produce equivalent evidence with the same safety/quality boundary.
+- A temporary/one-shot private-repository hosted workflow is blocked when an equivalent safe local/connector route is available, and fails closed when that route review is unknown.
+- At `quota-percent >= 90`, non-required private hosted routes are blocked. A `required-independent` hosted gate may continue only when equivalent safe evidence is unavailable and the exact `--workflow-path` is present both in Git HEAD and the committed `.agents/github-actions-required-gates.json` registry. Working-tree-only registry edits do not authorize the route.
+- At exhausted included quota, private hosted use stops unless a separate Human Confirmation Point has explicitly authorized paid overage. This gate records that evidence but never creates cost authorization itself.
+- Persistent/required hosted workflows require explicit PASS reviews for trigger duplication, path/filter scope, concurrency/cancel behavior, and matrix/OS/runtime fan-out. A PASS review may document why a broad trigger or no-cancel behavior is required; it is not a demand to weaken a necessary gate.
+- When retrying Actions, use failed-job/failed-jobs-only rerun when the available GitHub route supports it. `--failed-only-rerun-available yes` must be backed by current `--rerun-capability-evidence github-api|connector`; otherwise the gate fails closed.
+- Treat a verification as a property, not a stage ritual. Use `--verification-phase pre-merge|post-merge-required|deployment` plus `--same-property-already-passed yes|no|unknown` when duplicate-proof evidence is relevant. A reusable `yes` must also carry machine-readable `--prior-pass-evidence-source local-receipt|github-api|connector` and `--prior-pass-head <exact current HEAD>`; missing/stale evidence fails closed. `unknown` fails closed instead of launching another hosted run by habit. Distinct `post-merge-required` or `deployment` properties still run.
+- For normal PR verification, prefer one pre-merge hosted run over feature-push plus merged-main duplication. A main/post-merge run is justified only for a distinct deployment/runtime property.
+- Public-repository standard hosted usage does not create the same private included-minute pressure, but normal simplicity and duplicate-work reviews still apply.
+- Do not remove merge authorization, final-pr-audit, test-gate, security checks, or required Windows/device/platform evidence merely to save minutes.
+
+Example under high quota pressure for an independently required Windows gate:
+
+```text
+node .agents/skills/preflight-audit/github-actions-cost-guard.mjs --repo-visibility private --route github-hosted --workflow-mode required-independent --workflow-path .github/workflows/windows-fixture-gate.yml --equivalent-safe-route unavailable --quota-percent 90.1 --trigger-review pass --path-filter-review pass --concurrency-review pass --matrix-review pass --retry-scope none --json
+```
+
+Required-independent registry shape (repo-local, committed before hosted execution):
+
+```json
+{"schemaVersion":1,"gates":[{"workflowPath":".github/workflows/windows-fixture-gate.yml","status":"required-independent","reason":"Independent clean Windows runner evidence."}]}
+```
+
+Gate self-test:
+
+```text
+node .agents/skills/preflight-audit/github-actions-cost-guard-selftest.mjs .agents/skills/preflight-audit/github-actions-cost-guard.mjs
+```
 ### Progress communication boundary
 
 For `single-step`, `--progress-update-event none` is allowed when no progress update is needed.
@@ -442,6 +480,11 @@ Escalation is fail-closed:
 - `work-state=incomplete --human-gate none --continuation-action report-only` stops with `SAFE_WORK_CONTINUATION_REQUIRED`;
 - `work-state=incomplete --human-gate none --continuation-action wait-human` stops with `UNNECESSARY_HUMAN_WAIT`;
 - genuine merge/production/destructive/value/ownership gates still use `human-gate=required` and may wait.
+- For an explicit “up to merge handoff” target, use `--completion-target pre-merge` plus `--test-gate-state`, `--commit-state`, `--push-state`, `--pr-state`, `--pr-draft`, `--final-audit-state`, and `--exact-pr-head-state`. `PRE_MERGE_READY_WAITING_MERGE_AUTH` is valid only after all technical stages are complete and `--human-gate-kind merge-authorization` is present.
+- Output `handoffClass` separates `AI_OWNED`, `HUMAN_REQUIRED`, `MERGE_AUTH_REQUIRED`, and `COMPLETE`. A technical gate STOP remains `AI_OWNED`; it blocks that unsafe attempt but returns control to diagnosis/repair/route reselection rather than becoming a human handoff.
+- `PRE_MERGE_CONTINUATION_REQUIRED` blocks report-only termination before the target is reached. A merge-authorization wait before the technical stages are complete is rejected with `PRE_MERGE_MERGE_GATE_PREMATURE`.
+- Immediately before a progress/status response would terminate the current turn, invoke the same gate with `--response-intent terminate`. Termination is allowed only when `terminalState` is `PRE_MERGE_READY`, `HUMAN_CONFIRMATION_REQUIRED`, `COMPLETE`, or safe-route-exhausted `BLOCKED`; `AI_CONTINUES` is rejected with `TERMINAL_RESPONSE_REJECTED_AI_CONTINUES`. A permitted terminate invocation emits fresh `turnCloseReceipt`; `AI_CONTINUES` never receives one.
+- If the ChatGPT/tool runtime itself forces a turn boundary while `terminalState=AI_CONTINUES`, use `--response-intent platform-turn-boundary`. The gate persists `continuationCheckpoint` plus `resumeCheckpointReceipt`, returns nonzero `STOP` with `PLATFORM_TURN_BOUNDARY_CHECKPOINT_SAVED`, and keeps `responseMayTerminate=false` and `handoffClass=AI_OWNED`. Resume is accepted only when the checkpoint receipt is valid and the exact branch/HEAD still match; stale HEAD returns `PLATFORM_TURN_BOUNDARY_CHECKPOINT_STALE_HEAD` for state re-evaluation. This path never authorizes a voluntary terminal response; only the platform-forced cutoff can end that turn. This does not claim repository code can remove platform runtime limits.
 
 Example:
 

@@ -290,3 +290,14 @@
 - classification: FULL_GATE; selftest selection: FULL_SUITE; verification: 21/21 PASS (20 hosted Ubuntu commands + unchanged Claude runner selftest on required hosted Windows job)
 - product/runtime/data changes: none; repository-local extras preserved; REAL_DEVICE not required
 - merge: Draft remains locked until fresh explicit human authorization is bound to the exact rollout PR/head
+
+
+## 2026-09-15 - ai-dev-foundation 1.0.0-dev.79
+- source commit: a12fbca987389b2fe76e19110216cbf05e9878a3
+- trusted effective previous foundation: 1.0.0-dev.71 (1937bcf26689bf3af7bbb616ccac7a7f4279023b); exact pre-update foundation-sync-audit PASS
+- target branch: chore/sync-ai-foundation-dev79
+- method: fail-closed foundation-update.mjs 1.0.0-dev.71 -> 1.0.0-dev.79
+- update: 16 managed files; official dry-run, apply, and automatic post-update sync audit PASS
+- verification placement: deterministic Foundation sync evidence reused; no product/runtime full-suite rerun because no product/runtime property changed
+- scope: shared Foundation governance/control files plus sync metadata only; repository-local extras and application/data/dependency paths preserved
+- merge: Draft remains locked until fresh explicit human authorization is bound to the exact rollout PR/head
