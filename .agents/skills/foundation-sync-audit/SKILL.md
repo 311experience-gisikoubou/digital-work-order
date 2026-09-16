@@ -172,7 +172,8 @@ The updater is deliberately fail-closed:
 - when Claude native skills are configured, the same old-match/new-update rules apply to foundation wrapper templates;
 - target-only `.agents/skills/` and `.claude/skills/` entries remain untouched;
 - `AGENTS.local.md`, repository-local specifications, application code, secrets, runtime data, and any path outside the foundation surfaces are never part of the update plan;
-- after applying the plan, the updater automatically runs `foundation-sync-audit` against the new source; if the audit fails or an apply step errors, changed foundation files are restored on a best-effort rollback;
+- after applying the plan, the updater automatically runs `foundation-sync-audit` against the new source and then runs the targeted selftest for any changed Foundation family it knows how to verify; if the audit, targeted selftest, or an apply step fails, changed foundation files are restored on a best-effort rollback;
+- for `operation-preflight` changes, the updater invokes the committed `operation-preflight-selftest.mjs` with the exact updated gate path, so callers do not need to guess or reconstruct that verification command;
 - it creates no commit, push, PR, merge, network service, daemon, external dependency, or new permission.
 
 Important STOP results include:
@@ -180,7 +181,8 @@ Important STOP results include:
 - `FOUNDATION_UPDATE_TARGET_DRIFT`: a target shared file no longer matches the trusted old foundation and must not be overwritten;
 - `FOUNDATION_UPDATE_TARGET_MISSING_OLD`: an old canonical/wrapper path is unexpectedly missing;
 - `FOUNDATION_UPDATE_NEW_PATH_CONFLICT`: a new foundation path collides with repository-owned content;
-- `FOUNDATION_UPDATE_POST_AUDIT_FAILED`: the new full-current audit failed after apply and rollback was attempted.
+- `FOUNDATION_UPDATE_POST_AUDIT_FAILED`: the new full-current audit failed after apply and rollback was attempted;
+- `FOUNDATION_UPDATE_TARGET_SELFTEST_FAILED`: an updater-owned targeted selftest failed after apply and rollback was attempted.
 
 Update self-test:
 
@@ -190,7 +192,7 @@ node .agents/skills/foundation-sync-audit/foundation-update-selftest.mjs \
   .agents/skills/foundation-sync-audit/foundation-sync-audit.mjs
 ```
 
-The self-test covers dry-run/apply behavior, additions, replacements, removals, Claude configured/not-configured behavior, `AGENTS.local.md` and target-only skill preservation, protected-branch rejection, dirty-tree rejection, drift/missing/collision rejection, and rollback after post-update audit failure.
+The self-test covers dry-run/apply behavior, additions, replacements, removals, Claude configured/not-configured behavior, `AGENTS.local.md` and target-only skill preservation, protected-branch rejection, dirty-tree rejection, drift/missing/collision rejection, updater-owned `operation-preflight` targeted selftest execution, and rollback after post-update audit or targeted-selftest failure.
 
 ## Remote-Only Equivalent
 
