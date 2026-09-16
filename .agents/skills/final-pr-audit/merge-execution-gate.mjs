@@ -10,22 +10,24 @@ const MAX_EVIDENCE_AGE_MS = 5 * 60 * 1000;
 const MAX_EVIDENCE_FUTURE_SKEW_MS = 2 * 60 * 1000;
 const MAX_EVIDENCE_BYTES = 64 * 1024;
 const FETCH_TIMEOUT_MS = 10 * 1000;
-const CLI_ARGUMENTS = new Set(['repo', 'pr', 'base', 'base-sha', 'author', 'evidence-file']);
+const CLI_VALUE_ARGUMENTS = new Set(['repo', 'pr', 'base', 'base-sha', 'author', 'evidence-file']);
+const CLI_FLAG_ARGUMENTS = new Set(['evidence-stdin']);
 const RECEIPT_SOURCES = new Set(['EXPLICIT_HUMAN', 'PERSISTED_AFTER_AUDIT']);
 const NO_EVIDENCE = Symbol('NO_EVIDENCE');
 
 export function parseArgs(argv) {
   const out = {};
-  for (let i = 0; i < argv.length; i += 2) {
+  for (let i = 0; i < argv.length;) {
     const key = argv[i];
-    const value = argv[i + 1];
-    if (!key?.startsWith('--') || value === undefined || value === '') {
-      throw new Error(`Invalid arguments near: ${key ?? '<end>'}`);
-    }
+    if (!key?.startsWith('--')) throw new Error(`Invalid arguments near: ${key ?? '<end>'}`);
     const name = key.slice(2);
-    if (!CLI_ARGUMENTS.has(name)) throw new Error(`Unknown argument: --${name}`);
     if (Object.hasOwn(out, name)) throw new Error(`Duplicate argument: --${name}`);
+    if (CLI_FLAG_ARGUMENTS.has(name)) { out[name] = true; i += 1; continue; }
+    if (!CLI_VALUE_ARGUMENTS.has(name)) throw new Error(`Unknown argument: --${name}`);
+    const value = argv[i + 1];
+    if (value === undefined || value === '' || value.startsWith('--')) throw new Error(`Invalid arguments near: ${key}`);
     out[name] = value;
+    i += 2;
   }
   return out;
 }
@@ -87,6 +89,20 @@ export function parseEvidenceJson(raw) {
   return parsed;
 }
 
+export async function readBoundedEvidenceInput(stream = process.stdin) {
+  if (stream?.isTTY === true) throw new Error('Evidence stdin must be piped');
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of stream) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), 'utf8');
+    bytes += buffer.length;
+    if (bytes > MAX_EVIDENCE_BYTES) throw new Error('Evidence input too large');
+    chunks.push(buffer);
+  }
+  if (!chunks.length) throw new Error('Evidence stdin is empty');
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 export function validateMergeEvidence(evidence, { repo, prNumber, nowMs }) {
   if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
   if (evidence.schemaVersion !== 3) return { ok: false, code: 'EVIDENCE_SCHEMA_UNSUPPORTED' };
@@ -109,6 +125,19 @@ export function validateMergeEvidence(evidence, { repo, prNumber, nowMs }) {
     if (typeof comment.created_at !== 'string' || !comment.user || typeof comment.user.login !== 'string') return { ok: false, code: 'EVIDENCE_SHAPE_INVALID' };
   }
   return { ok: true, pr: evidence.pr, liveBase: evidence.liveBase, comments: evidence.authorizationComments };
+}
+
+export async function loadEvidenceFromCli(args, { readFileImpl = readFile, stdin = process.stdin } = {}) {
+  const hasFile = Object.hasOwn(args, 'evidence-file');
+  const hasStdin = args['evidence-stdin'] === true;
+  if (hasFile && hasStdin) throw new Error('Use only one of --evidence-file or --evidence-stdin');
+  if (hasFile) {
+    const raw = await readFileImpl(args['evidence-file'], 'utf8');
+    if (Buffer.byteLength(raw, 'utf8') > MAX_EVIDENCE_BYTES) throw new Error('Evidence file too large');
+    return parseEvidenceJson(raw);
+  }
+  if (hasStdin) return parseEvidenceJson(await readBoundedEvidenceInput(stdin));
+  return NO_EVIDENCE;
 }
 
 export async function fetchJson(url, fetchImpl, timeoutMs = FETCH_TIMEOUT_MS) {
@@ -246,12 +275,7 @@ function classifyAndBuild({ pr, liveBase, comments, author, prNumber, baseBranch
 async function main() {
   try {
     const args = parseArgs(process.argv.slice(2));
-    let evidence = NO_EVIDENCE;
-    if (Object.hasOwn(args, 'evidence-file')) {
-      const raw = await readFile(args['evidence-file'], 'utf8');
-      if (Buffer.byteLength(raw, 'utf8') > MAX_EVIDENCE_BYTES) throw new Error('Evidence file too large');
-      evidence = parseEvidenceJson(raw);
-    }
+    const evidence = await loadEvidenceFromCli(args);
     const result = await runMergeExecutionGate({
       repo: requireArg(args, 'repo'),
       prNumber: Number(requireArg(args, 'pr')),

@@ -32,7 +32,6 @@ expectStop(['--repo-visibility','private','--route','github-hosted','--workflow-
 expectProceed(['--repo-visibility','private','--route','github-hosted','--workflow-mode','persistent','--equivalent-safe-route','unavailable','--quota-percent','70','--workflow-path',workflowPath,...persistentReviews]);
 expectStop(['--repo-visibility','private','--route','github-hosted','--workflow-mode','persistent','--equivalent-safe-route','available','--quota-percent','70','--workflow-path',workflowPath,...persistentReviews], 'ACTIONS_PRIVATE_HOSTED_SAFE_ROUTE_AVAILABLE');
 expectStop(['--repo-visibility','private','--route','github-hosted','--workflow-mode','persistent','--equivalent-safe-route','unavailable','--quota-percent','90.1','--workflow-path',workflowPath,...persistentReviews], 'ACTIONS_QUOTA_PRESSURE_NONREQUIRED_HOSTED_ROUTE_BLOCKED');
-expectStop(['--repo-visibility','private','--route','github-hosted','--workflow-mode','required-independent','--equivalent-safe-route','unavailable','--quota-percent','90.1','--workflow-path',workflowPath,...persistentReviews], 'ACTIONS_REQUIRED_GATE_REGISTRY_MISSING');
 const tempRoot = mkdtempSync(join(tmpdir(), 'actions-cost-guard-'));
 function git(cwd, gitArgs) {
   const r = spawnSync('git', gitArgs, { cwd, encoding:'utf8', windowsHide:true });
@@ -40,16 +39,20 @@ function git(cwd, gitArgs) {
 }
 try {
   mkdirSync(join(tempRoot, '.github', 'workflows'), { recursive:true });
-  mkdirSync(join(tempRoot, '.agents'), { recursive:true });
   writeFileSync(join(tempRoot, '.github', 'workflows', 'windows-fixture-gate.yml'), 'name: Windows fixture gate\non: pull_request\njobs: {}\n');
-  writeFileSync(join(tempRoot, '.agents', 'github-actions-required-gates.json'), JSON.stringify({ schemaVersion:1, gates:[{ workflowPath, status:'required-independent', reason:'Independent clean Windows runner evidence.' }] }, null, 2));
   git(tempRoot, ['init','-b','main']);
   git(tempRoot, ['config','user.email','selftest@example.invalid']);
   git(tempRoot, ['config','user.name','Foundation Selftest']);
   git(tempRoot, ['add','.']);
-  git(tempRoot, ['commit','-m','fixture']);
+  git(tempRoot, ['commit','-m','fixture without registry']);
 
   const requiredBase = ['--repo-visibility','private','--route','github-hosted','--workflow-mode','required-independent','--equivalent-safe-route','unavailable','--quota-percent','90.1','--workflow-path',workflowPath,...persistentReviews];
+  expectStop(requiredBase, 'ACTIONS_REQUIRED_GATE_REGISTRY_MISSING', tempRoot);
+
+  mkdirSync(join(tempRoot, '.agents'), { recursive:true });
+  writeFileSync(join(tempRoot, '.agents', 'github-actions-required-gates.json'), JSON.stringify({ schemaVersion:1, gates:[{ workflowPath, status:'required-independent', reason:'Independent clean Windows runner evidence.' }] }, null, 2));
+  git(tempRoot, ['add','.agents/github-actions-required-gates.json']);
+  git(tempRoot, ['commit','-m','register required gate']);
   expectProceed(requiredBase, 'ACTIONS_QUOTA_PRESSURE_REQUIRED_GATE_PRESERVED', tempRoot);
   expectStop([...requiredBase,'--equivalent-safe-route','available'], 'ACTIONS_REQUIRED_GATE_EQUIVALENT_ROUTE_NOT_EXCLUDED', tempRoot);
   expectStop([...requiredBase,'--quota-percent','100'], 'ACTIONS_INCLUDED_QUOTA_EXHAUSTED', tempRoot);
