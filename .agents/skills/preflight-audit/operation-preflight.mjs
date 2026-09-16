@@ -46,6 +46,11 @@ const materialChangeReviewed = argValue('--material-change-reviewed').toLowerCas
 const forcedReflectionReviewed = argValue('--forced-reflection-reviewed').toLowerCase();
 const reflectionRecorded = argValue('--reflection-recorded').toLowerCase();
 const reflectionBasis = argValue('--reflection-basis').toLowerCase();
+const executionOutcome = argValue('--execution-outcome', 'not-applicable').toLowerCase();
+const timedOutProcessState = argValue('--timed-out-process-state', 'not-applicable').toLowerCase();
+const recoveryScope = argValue('--recovery-scope', 'not-applicable').toLowerCase();
+const completedEvidencePresent = argValue('--completed-evidence-present', 'not-applicable').toLowerCase();
+const sameCommandTimeoutCountRaw = argValue('--same-command-timeout-count', '0');
 const jsonOnly = args.includes('--json');
 
 const findings = [];
@@ -80,6 +85,10 @@ const allowedReflectionBases = new Set([
   'materially-changed-condition',
   'insufficient-observation',
 ]);
+const allowedExecutionOutcomes = new Set(['not-applicable', 'running', 'success', 'failure', 'timeout']);
+const allowedTimedOutProcessStates = new Set(['not-applicable', 'running', 'exited', 'unknown']);
+const allowedRecoveryScopes = new Set(['not-applicable', 'poll-existing', 'failed-only', 'split-command', 'whole-phase', 'root-cause-analysis', 'route-reselection']);
+const allowedCompletedEvidence = new Set(['not-applicable', 'yes', 'no']);
 const allowedChangeClasses = new Set([
   'routine',
   'configuration',
@@ -109,6 +118,7 @@ const estimatedUserMinutes = hasMinutes ? Number(minutesRaw) : Number.NaN;
 const estimatedUserSteps = hasSteps ? Number(stepsRaw) : Number.NaN;
 const hasSameClassFailureCount = sameClassFailureCountRaw.trim() !== '';
 const sameClassFailureCount = hasSameClassFailureCount ? Number(sameClassFailureCountRaw) : Number.NaN;
+const sameCommandTimeoutCount = Number(sameCommandTimeoutCountRaw);
 
 if (!hasMinutes || !Number.isFinite(estimatedUserMinutes) || estimatedUserMinutes < 0) {
   add('STOP', 'USER_TIME_ESTIMATE_REQUIRED');
@@ -137,12 +147,46 @@ if (!hasSameClassFailureCount || !Number.isInteger(sameClassFailureCount) || sam
   add('STOP', 'SAME_CLASS_FAILURE_COUNT_REQUIRED');
 }
 if (!allowedPostFailureActions.has(postFailureAction)) add('STOP', 'POST_FAILURE_ACTION_REQUIRED');
+if (!allowedExecutionOutcomes.has(executionOutcome)) add('STOP', 'EXECUTION_OUTCOME_INVALID');
+if (!allowedTimedOutProcessStates.has(timedOutProcessState)) add('STOP', 'TIMED_OUT_PROCESS_STATE_INVALID');
+if (!allowedRecoveryScopes.has(recoveryScope)) add('STOP', 'RECOVERY_SCOPE_INVALID');
+if (!allowedCompletedEvidence.has(completedEvidencePresent)) add('STOP', 'COMPLETED_EVIDENCE_STATUS_INVALID');
+if (!Number.isInteger(sameCommandTimeoutCount) || sameCommandTimeoutCount < 0) add('STOP', 'SAME_COMMAND_TIMEOUT_COUNT_INVALID');
 
 if (aiOnly) {
   const humanFieldsPresent = [humanProfile, humanRole, technicalJudgmentOwner, instructionMode].some(Boolean);
   if (humanFieldsPresent || estimatedUserMinutes !== 0 || estimatedUserSteps !== 0 || workImpact !== 'none' || scheduledWindow !== 'no' || scope !== 'local-dev') {
     add('STOP', 'AI_ONLY_HUMAN_OPERATION_CONFLICT');
   }
+}
+
+if (executionOutcome === 'timeout') {
+  if (timedOutProcessState === 'not-applicable') add('STOP', 'TIMED_OUT_PROCESS_STATE_REQUIRED');
+  if (recoveryScope === 'not-applicable') add('STOP', 'TIMEOUT_RECOVERY_SCOPE_REQUIRED');
+  if (completedEvidencePresent === 'not-applicable') add('STOP', 'TIMEOUT_COMPLETED_EVIDENCE_STATUS_REQUIRED');
+  if (sameCommandTimeoutCount < 1) add('STOP', 'TIMEOUT_COUNT_REQUIRED');
+
+  if (timedOutProcessState === 'unknown') {
+    add('STOP', 'TIMEOUT_PROCESS_STATE_UNKNOWN_INSPECT_REQUIRED');
+  }
+  if (timedOutProcessState === 'running' && recoveryScope !== 'poll-existing') {
+    add('STOP', 'TIMEOUT_PROCESS_STILL_RUNNING_POLL_REQUIRED', { recoveryScope });
+  }
+  if (timedOutProcessState === 'exited' && recoveryScope === 'poll-existing') {
+    add('STOP', 'TIMEOUT_POLL_REQUIRES_RUNNING_PROCESS');
+  }
+  if (timedOutProcessState === 'exited' && completedEvidencePresent === 'yes' && recoveryScope === 'whole-phase') {
+    add('STOP', 'TIMEOUT_COMPLETED_EVIDENCE_REUSE_REQUIRED');
+  }
+  if (sameCommandTimeoutCount >= 2 && timedOutProcessState === 'exited' && !['split-command', 'root-cause-analysis', 'route-reselection'].includes(recoveryScope)) {
+    add('STOP', 'TIMEOUT_REPEATED_RETRY_REQUIRES_SPLIT_OR_ROUTE_CHANGE', { sameCommandTimeoutCount, recoveryScope });
+  }
+} else {
+  const timeoutRecoveryFieldsPresent = timedOutProcessState !== 'not-applicable'
+    || recoveryScope !== 'not-applicable'
+    || completedEvidencePresent !== 'not-applicable'
+    || sameCommandTimeoutCount !== 0;
+  if (timeoutRecoveryFieldsPresent) add('STOP', 'TIMEOUT_RECOVERY_FIELDS_WITHOUT_TIMEOUT');
 }
 
 if (Number.isInteger(sameClassFailureCount) && sameClassFailureCount >= 0) {
@@ -313,6 +357,11 @@ if (!findings.some((f) => f.status === 'STOP')) {
     forcedReflectionReviewed: sameClassFailureCount >= 2 && postFailureAction === 'retry-materially-changed' ? forcedReflectionReviewed : null,
     reflectionRecorded: sameClassFailureCount >= 2 && postFailureAction === 'retry-materially-changed' ? reflectionRecorded : null,
     reflectionBasis: sameClassFailureCount >= 2 && postFailureAction === 'retry-materially-changed' ? reflectionBasis : null,
+    executionOutcome,
+    timedOutProcessState: executionOutcome === 'timeout' ? timedOutProcessState : null,
+    recoveryScope: executionOutcome === 'timeout' ? recoveryScope : null,
+    completedEvidencePresent: executionOutcome === 'timeout' ? completedEvidencePresent : null,
+    sameCommandTimeoutCount: executionOutcome === 'timeout' ? sameCommandTimeoutCount : 0,
     maintenanceOwner: lifecycleImpact === 'yes' ? maintenanceOwner : null,
     recoveryOwner: lifecycleImpact === 'yes' ? recoveryOwner : null,
     removalOwner: lifecycleImpact === 'yes' ? removalOwner : null,
@@ -345,6 +394,11 @@ const output = {
   forcedReflectionReviewed: forcedReflectionReviewed || null,
   reflectionRecorded: reflectionRecorded || null,
   reflectionBasis: reflectionBasis || null,
+  executionOutcome,
+  timedOutProcessState,
+  recoveryScope,
+  completedEvidencePresent,
+  sameCommandTimeoutCount,
   findings,
 };
 console.log(JSON.stringify(output, null, jsonOnly ? 0 : 2));

@@ -108,6 +108,26 @@ expectStop([...aiOnlyBase, '--progress-update-complete', 'yes'], 'PROGRESS_ATTES
 expectStop([...routineBase, '--progress-update-complete', 'yes'], 'COMPACT_PROGRESS_ATTESTATION_AI_ONLY');
 
 
+
+const timeoutBase = [
+  ...aiOnlyBase,
+  '--same-class-failure-count', '1',
+  '--post-failure-action', 'retry-same',
+  '--execution-outcome', 'timeout',
+  '--same-command-timeout-count', '1',
+];
+expectProceed([...timeoutBase, '--timed-out-process-state', 'running', '--recovery-scope', 'poll-existing', '--completed-evidence-present', 'yes']);
+expectStop([...timeoutBase, '--timed-out-process-state', 'running', '--recovery-scope', 'whole-phase', '--completed-evidence-present', 'yes'], 'TIMEOUT_PROCESS_STILL_RUNNING_POLL_REQUIRED');
+expectStop([...timeoutBase, '--same-command-timeout-count', '0', '--timed-out-process-state', 'exited', '--recovery-scope', 'failed-only', '--completed-evidence-present', 'no'], 'TIMEOUT_COUNT_REQUIRED');
+expectStop([...timeoutBase, '--timed-out-process-state', 'exited', '--recovery-scope', 'poll-existing', '--completed-evidence-present', 'no'], 'TIMEOUT_POLL_REQUIRES_RUNNING_PROCESS');
+expectStop([...timeoutBase, '--timed-out-process-state', 'unknown', '--recovery-scope', 'root-cause-analysis', '--completed-evidence-present', 'no'], 'TIMEOUT_PROCESS_STATE_UNKNOWN_INSPECT_REQUIRED');
+expectStop([...timeoutBase, '--timed-out-process-state', 'exited', '--recovery-scope', 'whole-phase', '--completed-evidence-present', 'yes'], 'TIMEOUT_COMPLETED_EVIDENCE_REUSE_REQUIRED');
+expectProceed([...timeoutBase, '--timed-out-process-state', 'exited', '--recovery-scope', 'failed-only', '--completed-evidence-present', 'yes']);
+expectProceed([...timeoutBase, '--timed-out-process-state', 'exited', '--recovery-scope', 'whole-phase', '--completed-evidence-present', 'no']);
+expectStop([...timeoutBase, '--same-command-timeout-count', '2', '--timed-out-process-state', 'exited', '--recovery-scope', 'failed-only', '--completed-evidence-present', 'yes'], 'TIMEOUT_REPEATED_RETRY_REQUIRES_SPLIT_OR_ROUTE_CHANGE');
+expectProceed([...timeoutBase, '--same-command-timeout-count', '2', '--timed-out-process-state', 'exited', '--recovery-scope', 'split-command', '--completed-evidence-present', 'yes']);
+expectStop([...aiOnlyBase, '--timed-out-process-state', 'exited'], 'TIMEOUT_RECOVERY_FIELDS_WITHOUT_TIMEOUT');
+
 expectStop([
   '--scope', 'network',
 ], 'USER_TIME_ESTIMATE_REQUIRED');
