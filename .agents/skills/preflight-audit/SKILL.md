@@ -319,6 +319,23 @@ Required planning inputs:
 - `post-failure-action` as `not-applicable`, `retry-same`, `retry-materially-changed`, `root-cause-analysis`, `hypothesis-reselection`, `route-reselection`, `independent-review`, or `stop`;
 - when `post-failure-action=retry-materially-changed`, `material-change-reviewed yes|no`;
 - after two same-class resolution-intervention failures, a third resolution intervention also requires `forced-reflection-reviewed yes`, `reflection-recorded yes`, and `reflection-basis` as `new-observation`, `new-hypothesis`, `new-route`, `materially-changed-condition`, or `insufficient-observation`.
+- when recovering from an execution timeout, `execution-outcome=timeout`, `timed-out-process-state running|exited|unknown`, `recovery-scope poll-existing|failed-only|split-command|whole-phase|root-cause-analysis|route-reselection`, `completed-evidence-present yes|no`, and `same-command-timeout-count` are required.
+
+### Timeout recovery boundary
+
+Treat a tool/command timeout as an execution-state problem, not permission to blindly restart the whole phase.
+
+- If the timed-out process is still running, inspect/poll that existing process; a duplicate launch is blocked with `TIMEOUT_PROCESS_STILL_RUNNING_POLL_REQUIRED`.
+- If process state is unknown, stop the retry and inspect it first (`TIMEOUT_PROCESS_STATE_UNKNOWN_INSPECT_REQUIRED`).
+- If the process exited but exact current-work PASS evidence already exists, a whole-phase restart is blocked; resume the missing/failed portion instead (`TIMEOUT_COMPLETED_EVIDENCE_REUSE_REQUIRED`).
+- After the same command has timed out twice, another exited-process retry must split the command, perform root-cause analysis, or reselect the route. An unchanged failed-only/whole-phase retry is blocked.
+- These rules complement existing exact-evidence reuse and Forced Reflection. They do not convert failed checks into PASS and do not relax repository-local required verification.
+
+Example after a timed-out command is confirmed exited while earlier checks remain valid:
+
+```text
+node .agents/skills/preflight-audit/operation-preflight.mjs --operation-kind ai-only --alternatives-reviewed yes --simplest-safe yes --safe-stop yes --change-class implementation --lifecycle-impact no --repeated-manual-pattern no --same-class-failure-count 1 --post-failure-action retry-same --ai-work-structure single-step --progress-update-event none --execution-outcome timeout --timed-out-process-state exited --recovery-scope failed-only --completed-evidence-present yes --same-command-timeout-count 1 --json
+```
 
 ### GitHub Actions cost / route boundary
 
