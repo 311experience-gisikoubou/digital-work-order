@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { fetchJson, parseArgs, parseEvidenceJson, runMergeExecutionGate } from './merge-execution-gate.mjs';
+import { Readable } from 'node:stream';
+import { fetchJson, loadEvidenceFromCli, parseArgs, parseEvidenceJson, runMergeExecutionGate } from './merge-execution-gate.mjs';
 
 const HEAD_A = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const HEAD_B = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
@@ -226,11 +227,23 @@ assert.deepEqual(
 assert.throws(() => parseArgs(['--repo', 'a/b', '--repo', 'c/d']), /Duplicate argument/);
 assert.throws(() => parseArgs(['--reop', 'a/b']), /Unknown argument/);
 assert.throws(() => parseArgs(['--evidence-file', '']), /Invalid arguments/);
+assert.equal(parseArgs(['--evidence-stdin'])['evidence-stdin'], true, 'stdin evidence flag parses without a value');
+assert.throws(() => parseArgs(['--evidence-stdin', '--evidence-stdin']), /Duplicate argument/);
 
 const bomEvidence = makeEvidence();
 assert.deepEqual(parseEvidenceJson(`\uFEFF${JSON.stringify(bomEvidence)}`), bomEvidence, 'BOM evidence parsing');
 assert.throws(() => parseEvidenceJson('not-json'), /Invalid evidence JSON/);
 assert.throws(() => parseEvidenceJson('null'), /Invalid evidence JSON/);
+
+const evidenceJson = JSON.stringify(makeEvidence());
+const stdinLoaded = await loadEvidenceFromCli({ 'evidence-stdin': true }, { stdin: Readable.from([evidenceJson]) });
+const fileLoaded = await loadEvidenceFromCli({ 'evidence-file': 'fixture.json' }, { readFileImpl: async () => evidenceJson });
+assert.deepEqual(stdinLoaded, fileLoaded, 'stdin and file evidence parse to the same schema-v3 object');
+assert.deepEqual(await runEvidence(stdinLoaded), await runEvidence(fileLoaded), 'equivalent stdin/file evidence yields identical gate decision');
+await assert.rejects(loadEvidenceFromCli({ 'evidence-stdin': true }, { stdin: Readable.from(['not-json']) }), /Invalid evidence JSON/);
+await assert.rejects(loadEvidenceFromCli({ 'evidence-file': 'fixture.json', 'evidence-stdin': true }, { stdin: Readable.from([evidenceJson]), readFileImpl: async () => evidenceJson }), /only one/);
+await assert.rejects(loadEvidenceFromCli({ 'evidence-stdin': true }, { stdin: Readable.from([]) }), /empty/);
+await assert.rejects(loadEvidenceFromCli({ 'evidence-stdin': true }, { stdin: Readable.from(['x'.repeat(64 * 1024 + 1)]) }), /too large/);
 
 let delayedClock = Date.parse('2026-09-08T10:20:00Z');
 const delayedFetchBase = fakeFetch(makePr(), [comment(receipt(), { createdAt: '2026-09-08T10:00:00Z' })]);
