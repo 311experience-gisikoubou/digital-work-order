@@ -26,6 +26,9 @@ function canonical(name, description = `${name} description`, body = '') {
 function wrapper(name, description = `${name} description`) {
   return `---\nname: ${name}\ndescription: ${description}\n---\n\n../../../.agents/skills/${name}/SKILL.md\n`;
 }
+function operationSelftest(expected) {
+  return `#!/usr/bin/env node\nimport { readFileSync } from 'node:fs';\nconst gate = process.argv[2];\nif (!gate || !readFileSync(gate, 'utf8').includes('${expected}')) process.exit(2);\nconsole.log('operation-preflight selftest: PASS');\n`;
+}
 async function writeSkill(source, name, description, body = '') {
   await mkdir(join(source, '.agents', 'skills', name), { recursive: true });
   await writeFile(join(source, '.agents', 'skills', name, 'SKILL.md'), canonical(name, description, body));
@@ -41,6 +44,10 @@ async function initSource(kind) {
   await writeSkill(source, 'foundation-sync-audit', 'sync audit description');
   await copyFile(auditGate, join(source, '.agents', 'skills', 'foundation-sync-audit', 'foundation-sync-audit.mjs'));
   await writeSkill(source, 'preflight-audit', 'preflight description', kind === 'old' ? 'old\n' : 'new\n');
+  const preflightDir = join(source, '.agents', 'skills', 'preflight-audit');
+  const operationMarker = kind === 'old' ? 'old-operation-gate' : 'new-operation-gate';
+  await writeFile(join(preflightDir, 'operation-preflight.mjs'), `export const marker = '${operationMarker}';\n`);
+  await writeFile(join(preflightDir, 'operation-preflight-selftest.mjs'), operationSelftest(operationMarker));
   if (kind === 'old') await writeSkill(source, 'obsolete-skill', 'obsolete description', 'old only\n');
   else await writeSkill(source, 'new-skill', 'new description', 'new only\n');
   git(root, 'init', '-b', kind, source);
@@ -177,6 +184,18 @@ try {
   if (await readFile(join(rollbackTarget, 'AGENTS.md'), 'utf8') !== '# agents old\n') throw new Error('rollback did not restore AGENTS.md');
   if (!(await readFile(join(rollbackTarget, '.agents', 'skills', 'preflight-audit', 'SKILL.md'), 'utf8')).includes('old\n')) throw new Error('rollback did not restore skill');
   if (await readFile(join(rollbackTarget, 'AGENTS.local.md'), 'utf8') !== '# local survives\n') throw new Error('rollback changed local rules');
+
+  await copyFile(auditGate, auditPath);
+  git(newSource, 'add', '.');
+  git(newSource, 'commit', '-m', 'restore audit before targeted selftest failure');
+  const targetedFailureTarget = await initTarget(oldSource);
+  const newTargetedSelftest = join(newSource, '.agents', 'skills', 'preflight-audit', 'operation-preflight-selftest.mjs');
+  await writeFile(newTargetedSelftest, '#!/usr/bin/env node\nprocess.exit(2);\n');
+  git(newSource, 'add', '.');
+  git(newSource, 'commit', '-m', 'make targeted selftest fail');
+  expectStop(oldSource, newSource, targetedFailureTarget, 'FOUNDATION_UPDATE_TARGET_SELFTEST_FAILED', ['--apply']);
+  if (await readFile(join(targetedFailureTarget, 'AGENTS.md'), 'utf8') !== '# agents old\n') throw new Error('targeted selftest rollback did not restore AGENTS.md');
+  if (!(await readFile(join(targetedFailureTarget, '.agents', 'skills', 'preflight-audit', 'operation-preflight.mjs'), 'utf8')).includes('old-operation-gate')) throw new Error('targeted selftest rollback did not restore operation gate');
 
   console.log('foundation-update selftest: PASS');
 } finally {

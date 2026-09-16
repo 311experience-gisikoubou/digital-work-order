@@ -321,3 +321,12 @@
 - verification placement: proportional governance-only scope; targeted Foundation selftests only, no application/full runtime/REAL_DEVICE rerun
 - scope: shared Foundation governance/control files plus sync metadata only; repository-local rules and product/data/dependency paths preserved
 - merge: Draft remains locked until fresh explicit human authorization is bound to the exact rollout PR/head
+
+## 2026-09-17 - ai-dev-foundation 1.0.0-dev.85
+- source commit: 23dd1234e425e0dc4cedfc5fd7dedcf50d0b8130
+- trusted previous foundation: 1.0.0-dev.84 (4c87745ef18025f8fec5f0516ddd97ea1aaaf6f9)
+- target branch: chore/sync-ai-foundation-dev85
+- method: fail-closed foundation-update.mjs; 3 managed files replaced; dry-run/apply + automatic post-update sync audit PASS
+- verification: exact source updater selftest PASS reused after target byte-identity sync proof; no duplicate app/full/REAL_DEVICE tests
+- scope: Foundation governance/control + sync metadata only; repository-local product/data/dependency behavior unchanged
+- merge: Draft remains locked until fresh explicit human authorization for exact PR/head

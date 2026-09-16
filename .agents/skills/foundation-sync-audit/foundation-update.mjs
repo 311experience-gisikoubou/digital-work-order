@@ -90,6 +90,19 @@ async function collectWrappers(root) {
   }
   return result;
 }
+function targetedSelftestsForPlan(entries, root) {
+  const changed = new Set(entries.map(entry => entry.relative));
+  const checks = [];
+  const operationGate = '.agents/skills/preflight-audit/operation-preflight.mjs';
+  const operationSelftest = '.agents/skills/preflight-audit/operation-preflight-selftest.mjs';
+  if (changed.has(operationGate) || changed.has(operationSelftest)) {
+    checks.push({
+      id: 'operation-preflight',
+      argv: [resolve(root, operationSelftest), resolve(root, operationGate)],
+    });
+  }
+  return checks;
+}
 async function validateSource(root, prefix) {
   if (!(await isDirectory(root))) {
     stop(`${prefix}_ROOT_NOT_FOUND`);
@@ -120,6 +133,8 @@ let createdCount = 0;
 let replacedCount = 0;
 let deletedCount = 0;
 let unchangedCount = 0;
+let targetedSelftestCount = 0;
+const targetedSelftestIds = [];
 const plan = [];
 
 if (!findings.some((f) => f.status === 'STOP')) {
@@ -298,19 +313,45 @@ if (!findings.some((f) => f.status === 'STOP')) {
           auditResult: audit.stdout.trim().slice(0, 4000),
         });
       } else {
-        add('PASS', 'FOUNDATION_UPDATE_APPLIED', {
-          fromVersion,
-          sourceVersion,
-          fromCommit,
-          sourceCommit,
-          targetBranch,
-          updatedFiles: plan.length,
-          create: createdCount,
-          replace: replacedCount,
-          delete: deletedCount,
-          unchanged: unchangedCount,
-          claudeAdapter: claudeAdapterConfigured ? 'CURRENT' : 'NOT_CONFIGURED',
-        });
+        const targetedChecks = targetedSelftestsForPlan(plan, targetRoot);
+        let targetedFailure = null;
+        for (const check of targetedChecks) {
+          targetedSelftestCount += 1;
+          targetedSelftestIds.push(check.id);
+          const selftest = spawnSync(process.execPath, check.argv, { cwd: targetRoot, encoding: 'utf8' });
+          if (selftest.status !== 0) {
+            targetedFailure = {
+              id: check.id,
+              selftestExit: selftest.status,
+              selftestResult: `${selftest.stdout ?? ''}${selftest.stderr ?? ''}`.trim().slice(0, 4000),
+              selftestError: selftest.error ? selftest.error.message : null,
+            };
+            break;
+          }
+        }
+        if (targetedFailure) {
+          await rollback(applied);
+          stop('FOUNDATION_UPDATE_TARGET_SELFTEST_FAILED', targetedFailure);
+        } else {
+          if (targetedChecks.length > 0) {
+            add('PASS', 'FOUNDATION_UPDATE_TARGET_SELFTESTS_PASS', {
+              targetedSelftests: targetedChecks.map(check => check.id),
+            });
+          }
+          add('PASS', 'FOUNDATION_UPDATE_APPLIED', {
+            fromVersion,
+            sourceVersion,
+            fromCommit,
+            sourceCommit,
+            targetBranch,
+            updatedFiles: plan.length,
+            create: createdCount,
+            replace: replacedCount,
+            delete: deletedCount,
+            unchanged: unchangedCount,
+            claudeAdapter: claudeAdapterConfigured ? 'CURRENT' : 'NOT_CONFIGURED',
+          });
+        }
       }
     } catch (error) {
       await rollback(applied);
@@ -338,6 +379,8 @@ console.log(JSON.stringify({
   replacedCount,
   deletedCount,
   unchangedCount,
+  targetedSelftestCount,
+  targetedSelftestIds,
   findings,
 }, null, jsonOnly ? 0 : 2));
 process.exit(result === 'PASS' ? 0 : 2);
