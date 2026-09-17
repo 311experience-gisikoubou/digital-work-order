@@ -353,3 +353,12 @@
 - verification: post-update `foundation-sync-audit` PASS; missing/stale 0/0; exact Foundation dev.94 source Full Suite evidence reused
 - scope: Foundation governance/control + sync metadata only; product/runtime/data/dependency paths unchanged
 - merge: fresh explicit authorization required for exact PR/head
+
+## 2026-09-18 - ai-dev-foundation 1.0.0-dev.95
+- source commit: 6da4926579cde6b7a11d87a9f6bca97fcde191f2
+- trusted previous foundation: 1.0.0-dev.94 (f64e962a39dd7c5b183da7ffe8b032dbde53be64)
+- target branch: chore/foundation-dev95-sync
+- method: fail-closed foundation-update.mjs dev.94 -> dev.95
+- verification: exact dev.94 pre-sync audit PASS; post-update foundation-sync-audit PASS; missing/stale 0/0; Foundation dev.95 Full Suite source evidence PASS (27/27)
+- scope: Foundation governance/read-only merge-readiness tooling + sync/version metadata only; product/runtime/data/dependency behavior unchanged
+- merge authorization remains an explicit human gate

@@ -7,7 +7,7 @@ const CORE = ['merge-authorization','merge-execution','fast-path','security-pref
 const ALL = [
   'merge-authorization','merge-execution','foundation-sync','foundation-bootstrap','foundation-update','foundation-remote-plan','foundation-batch-rollout',
   'project-context','live-base-ref','ai-capacity','ai-provider-inventory','ai-task-router','claude-runner','fast-path','operation-preflight','actions-cost',
-  'provider-qualification','provider-readiness','security-history','security-preflight','stagnation','wip-observer','portfolio-health','long-task-wait','real-device',
+  'provider-qualification','provider-readiness','security-history','security-preflight','stagnation','wip-observer','portfolio-health','long-task-wait','merge-readiness','real-device',
   'full-gate-selector',
 ];
 const COMMANDS = {
@@ -35,6 +35,7 @@ const COMMANDS = {
   'wip-observer':['node','.agents/skills/preflight-audit/wip-review-queue-observer-selftest.mjs','.agents/skills/preflight-audit/wip-review-queue-observer.mjs'],
   'portfolio-health':['node','.agents/skills/preflight-audit/portfolio-health-observer-selftest.mjs'],
   'long-task-wait':['node','.agents/skills/long-task-wait/long-task-wait-selftest.mjs'],
+  'merge-readiness':['node','.agents/skills/preflight-audit/cross-repo-merge-readiness-selftest.mjs'],
   'real-device':['node','.agents/skills/test-gate/real-device-preparation-gate-selftest.mjs','.agents/skills/test-gate/real-device-preparation-gate.mjs'],
   'full-gate-selector':['node','.agents/skills/preflight-audit/full-gate-selftest-selector-selftest.mjs','.agents/skills/preflight-audit/full-gate-selftest-selector.mjs'],
 };
@@ -50,6 +51,7 @@ const GROUPS = {
   'wip-observer':['wip-observer'],
   'portfolio-health':['portfolio-health'],
   'long-task-wait':['long-task-wait','stagnation'],
+  'merge-readiness':['merge-readiness'],
   'real-device':['real-device'],
   'ai-capacity':['ai-capacity'],
   'ai-routing':['ai-provider-inventory','ai-task-router','provider-qualification','provider-readiness'],
@@ -83,6 +85,7 @@ function familyFor(path) {
   if (pair(path,pre,'portfolio-health-observer')) return 'portfolio-health';
   if (['bounded-task-wait','turn-wait-budget'].some(stem => pair(path,'.agents/skills/long-task-wait',stem))) return 'long-task-wait';
   if (pair(path,'.agents/skills/long-task-wait','long-task-wait')) return 'long-task-wait';
+  if (pair(path,pre,'cross-repo-merge-readiness')) return 'merge-readiness';
   if (pair(path,'.agents/skills/test-gate','real-device-preparation-gate')) return 'real-device';
   if (pair(path,pre,'ai-capacity-observer')) return 'ai-capacity';
   if (['ai-provider-inventory','ai-task-router','provider-adapter-qualification','provider-adapter-readiness'].some(stem => pair(path,pre,stem))) return 'ai-routing';
