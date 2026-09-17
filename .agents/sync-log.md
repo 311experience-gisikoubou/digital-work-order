@@ -344,3 +344,12 @@
 - source commit: `51073be35f94741dfc1a476e7341cea31ec7e4cb`
 - scope: canonical shared Foundation surface only; application/runtime/data unchanged
 - verification: real 45,330-byte batch manifest PASS; post-write full sync audit PASS
+
+## 2026-09-17 - ai-dev-foundation 1.0.0-dev.94
+- previous foundation: `1.0.0-dev.93` @ `51073be35f94741dfc1a476e7341cea31ec7e4cb`
+- source commit: `f64e962a39dd7c5b183da7ffe8b032dbde53be64`
+- branch: `chore/foundation-dev94-sync`
+- method: fail-closed `foundation-update.mjs`; 8 managed files (3 create, 5 replace)
+- verification: post-update `foundation-sync-audit` PASS; missing/stale 0/0; exact Foundation dev.94 source Full Suite evidence reused
+- scope: Foundation governance/control + sync metadata only; product/runtime/data/dependency paths unchanged
+- merge: fresh explicit authorization required for exact PR/head

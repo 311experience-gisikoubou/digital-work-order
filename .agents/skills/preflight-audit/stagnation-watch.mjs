@@ -34,7 +34,13 @@ function receiptMatches(value, expected) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const actualKeys = Object.keys(value); const expectedKeys = Object.keys(expected);
   return actualKeys.length === expectedKeys.length
-    && expectedKeys.every((key) => value[key] === expected[key]);
+    && expectedKeys.every((key) => {
+      if (value[key] === expected[key]) return true;
+      if (value[key] && expected[key] && typeof value[key] === 'object' && typeof expected[key] === 'object') {
+        return JSON.stringify(value[key]) === JSON.stringify(expected[key]);
+      }
+      return false;
+    });
 }
 function normalizePath(value) { return value.replaceAll('\\', '/'); }
 function isGovernancePath(path) {
@@ -54,6 +60,11 @@ const blockerSignature = argValue('--blocker-signature', '').trim();
 const failureSignature = argValue('--failure-signature', '').trim();
 const observationSignature = argValue('--observation-signature', '').trim();
 const routeSignature = argValue('--route-signature', '').trim();
+const continuationTaskId = argValue('--continuation-task-id', '').trim();
+const continuationProcessId = argValue('--continuation-process-id', '').trim();
+const continuationStage = argValue('--continuation-stage', '').trim();
+const continuationLogPointer = argValue('--continuation-log-pointer', '').trim();
+const continuationNextAction = argValue('--continuation-next-action', '').trim();
 const prState = argValue('--pr-state', 'unknown').trim().toLowerCase();
 const workflowStatus = argValue('--workflow-status', 'unknown').trim().toLowerCase();
 const workState = argValue('--work-state').trim().toLowerCase();
@@ -74,6 +85,14 @@ const intervalMinutesRaw = argValue('--interval-minutes', '60').trim();
 const nowRaw = argValue('--now', '').trim();
 const inputStateJson = argValue('--state-json', '').trim();
 const noWrite = hasFlag('--no-write');
+const continuationContextSupplied = Boolean(continuationTaskId || continuationProcessId || continuationStage || continuationLogPointer || continuationNextAction);
+if (continuationContextSupplied && (!continuationTaskId || !continuationStage || !continuationNextAction)) {
+  stop('platform continuation context requires task id, stage, and next action');
+}
+for (const [value, max, code] of [[continuationTaskId,256,'continuation task id too long'],[continuationProcessId,128,'continuation process id too long'],[continuationStage,256,'continuation stage too long'],[continuationLogPointer,1024,'continuation log pointer too long'],[continuationNextAction,256,'continuation next action too long']]) {
+  if (value.length > max) stop(code);
+}
+const continuationContext = continuationContextSupplied ? { taskId: continuationTaskId, processId: continuationProcessId || null, stage: continuationStage, logPointer: continuationLogPointer || null, nextAction: continuationNextAction } : null;
 
 if (!workId) stop('--work-id is required');
 if (!['complete', 'incomplete'].includes(workState)) stop('--work-state must be complete|incomplete');
@@ -211,6 +230,7 @@ const previousPlatformCheckpoint = previous?.level === 'PLATFORM_TURN_BOUNDARY' 
 const expectedPlatformCheckpointReceipt = previousPlatformCheckpoint ? receipt('platform-turn-boundary', {
   workId: previous?.workId, branch: previousPlatformCheckpoint.branch, headSha: previousPlatformCheckpoint.headSha,
   fingerprint: previous?.fingerprint, createdAt: previousPlatformCheckpoint.createdAt,
+  continuation: previousPlatformCheckpoint.continuation ?? null,
 }) : null;
 const platformCheckpointIntegrityValid = Boolean(previousPlatformCheckpoint)
   && previous?.schema === 'ai-stagnation-state-v1' && previous?.workId === workId
@@ -295,7 +315,7 @@ if (workState === 'complete') {
     requiredAction: previousPlatformCheckpoint.requiredAction ?? 'continue',
     continuationCheckpoint: null,
   };
-  detail = { resumedFromCheckpoint: true, resumeCheckpointReceipt: previousPlatformCheckpoint.receipt };
+  detail = { resumedFromCheckpoint: true, resumeCheckpointReceipt: previousPlatformCheckpoint.receipt, resumeContinuation: previousPlatformCheckpoint.continuation ?? null };
 } else if (workflowStatus === 'in-progress') {
   result = 'PROCEED';
   code = 'ACTIVE_EXECUTION_IN_PROGRESS';
@@ -369,7 +389,7 @@ if (responseIntent === 'terminate' && !responseMayTerminate) {
 } else if (responseIntent === 'platform-turn-boundary' && !responseMayTerminate) {
   const checkpointRequiredAction = nextState?.requiredAction ?? 'continue';
   const checkpointLevel = nextState?.level ?? 'CLEAR';
-  resumeCheckpointReceipt = receipt('platform-turn-boundary', { workId, branch, headSha, fingerprint, createdAt: isoNow });
+  resumeCheckpointReceipt = receipt('platform-turn-boundary', { workId, branch, headSha, fingerprint, createdAt: isoNow, continuation: continuationContext });
   detail = { ...detail, terminalResponseUnderlyingCode: code };
   result = 'STOP';
   code = 'PLATFORM_TURN_BOUNDARY_CHECKPOINT_SAVED';
@@ -382,6 +402,7 @@ if (responseIntent === 'terminate' && !responseMayTerminate) {
     continuationCheckpoint: {
       branch, headSha, gatePhase, workflowStatus, blockerSignature, failureSignature,
       observationSignature, routeSignature, completionTarget, preMergeStages,
+      continuation: continuationContext,
       level: checkpointLevel, requiredAction: checkpointRequiredAction, createdAt: isoNow, receipt: resumeCheckpointReceipt,
     },
   };

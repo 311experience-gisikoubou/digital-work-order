@@ -190,6 +190,9 @@ const turn = spawnSync(process.execPath, [
   '--work-state', 'incomplete', '--human-gate', 'none', '--continuation-action', 'resume',
   '--workflow-status', 'failed', '--pr-state', 'none', '--failure-signature', 'technical-fail',
   '--route-signature', 'route-b', '--interval-minutes', '60', '--now', '2026-09-03T20:20:00Z',
+  '--continuation-task-id', 'task-144', '--continuation-process-id', 'pid-4242',
+  '--continuation-stage', 'full-suite', '--continuation-log-pointer', 'C:/tmp/full-suite.log',
+  '--continuation-next-action', 'observe-existing-process',
   '--response-intent', 'platform-turn-boundary',
 ], { encoding:'utf8' });
 if (turn.status !== 2) throw new Error(turn.stdout + turn.stderr);
@@ -207,6 +210,7 @@ const turnReportOut = JSON.parse(turnReportOnly.stdout);
 if (turnReportOut.code !== 'PLATFORM_TURN_BOUNDARY_CHECKPOINT_SAVED' || turnReportOut.result !== 'STOP' || turnReportOut.responseMayTerminate !== false || turnReportOut.terminalResponseUnderlyingCode !== 'SAFE_WORK_CONTINUATION_REQUIRED') throw new Error(JSON.stringify(turnReportOut));
 const turnPersisted = JSON.parse(await readFile(turnStatePath, 'utf8'));
 if (turnPersisted.level !== 'PLATFORM_TURN_BOUNDARY' || turnPersisted.requiredAction !== 'resume-from-checkpoint' || turnPersisted.continuationCheckpoint?.headSha !== cmd('git',['rev-parse','HEAD']) || !sameReceipt(turnPersisted.continuationCheckpoint?.receipt, turnOut.resumeCheckpointReceipt)) throw new Error(JSON.stringify(turnPersisted));
+if (turnPersisted.continuationCheckpoint?.continuation?.taskId !== 'task-144' || turnPersisted.continuationCheckpoint?.continuation?.processId !== 'pid-4242' || turnPersisted.continuationCheckpoint?.continuation?.stage !== 'full-suite' || turnPersisted.continuationCheckpoint?.continuation?.nextAction !== 'observe-existing-process') throw new Error(JSON.stringify(turnPersisted));
 const tamperedState = JSON.parse(JSON.stringify(turnPersisted));
 tamperedState.continuationCheckpoint.receipt.id = '0'.repeat(64);
 const tamperedResume = spawnSync(process.execPath, [
@@ -219,6 +223,16 @@ const tamperedResume = spawnSync(process.execPath, [
 if (tamperedResume.status !== 2) throw new Error(tamperedResume.stdout + tamperedResume.stderr);
 const tamperedOut = JSON.parse(tamperedResume.stdout);
 if (tamperedOut.code !== 'PLATFORM_TURN_BOUNDARY_CHECKPOINT_INVALID' || tamperedOut.handoffClass !== 'AI_OWNED') throw new Error(JSON.stringify(tamperedOut));
+const metadataTamperedState = JSON.parse(JSON.stringify(turnPersisted));
+metadataTamperedState.continuationCheckpoint.continuation.processId = 'pid-9999';
+const metadataTamperedResume = spawnSync(process.execPath, [
+  watcher, '--target-root', root, '--work-id', turnWorkId, '--gate-phase', 'audit',
+  '--work-state', 'incomplete', '--human-gate', 'none', '--continuation-action', 'resume',
+  '--workflow-status', 'failed', '--pr-state', 'none', '--failure-signature', 'technical-fail',
+  '--route-signature', 'route-b', '--interval-minutes', '60', '--now', '2026-09-03T20:20:50Z',
+  '--state-json', JSON.stringify(metadataTamperedState), '--no-write',
+], { encoding:'utf8' });
+if (metadataTamperedResume.status !== 2 || JSON.parse(metadataTamperedResume.stdout).code !== 'PLATFORM_TURN_BOUNDARY_CHECKPOINT_INVALID') throw new Error(metadataTamperedResume.stdout + metadataTamperedResume.stderr);
 const resumed = spawnSync(process.execPath, [
   watcher, '--target-root', root, '--work-id', turnWorkId, '--gate-phase', 'audit',
   '--work-state', 'incomplete', '--human-gate', 'none', '--continuation-action', 'resume',
@@ -228,6 +242,7 @@ const resumed = spawnSync(process.execPath, [
 if (resumed.status !== 0) throw new Error(resumed.stdout + resumed.stderr);
 const resumedOut = JSON.parse(resumed.stdout);
 if (resumedOut.code !== 'PLATFORM_TURN_BOUNDARY_RESUMED' || resumedOut.handoffClass !== 'AI_OWNED' || resumedOut.resumeRequired || !sameReceipt(resumedOut.resumeCheckpointReceipt, turnOut.resumeCheckpointReceipt)) throw new Error(JSON.stringify(resumedOut));
+if (resumedOut.resumeContinuation?.taskId !== 'task-144' || resumedOut.resumeContinuation?.processId !== 'pid-4242' || resumedOut.resumeContinuation?.stage !== 'full-suite' || resumedOut.resumeContinuation?.nextAction !== 'observe-existing-process') throw new Error(JSON.stringify(resumedOut));
 
 // A saved platform checkpoint is bound to the exact branch/HEAD and cannot silently resume after repo movement.
 const staleWorkId = 'turn-boundary-stale-head';
