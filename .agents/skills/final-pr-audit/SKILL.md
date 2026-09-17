@@ -29,12 +29,25 @@ Before checking merge readiness, identify where the audited change was actually 
 - Consistency with the repository's design documentation (its "Source of Truth")
 - Consistency with the implementation report already given to the user
 - Diff hygiene: use `git diff --check` when the audited head exists in the local execution workspace; for remote-only work, inspect the canonical PR/compare diff with an equivalent whitespace/conflict-marker check and record that it is an equivalent remote diff-hygiene check rather than claiming the literal local command ran
-- The repository's format, lint, type-check, build, and selftest verification, as defined in `AGENTS.local.md`
-- The results already recorded by `test-gate` for this change
+- The repository's required format, lint, type-check, build, selftest, and other verification **only for properties not already covered by a valid `VERIFICATION_EVIDENCE_V1` receipt for the exact current base/head/scope**
+- The results already recorded by `test-gate` for this change, preferring machine-verified receipt reuse over re-running or recollecting the same evidence
 - Security-relevant changes (see "Security Review" below)
 - Consistency between the PR description and the actual change (see "PR Description Audit" below)
 - Real-device or manual confirmation status
 - Blockers
+
+## Verification Evidence Reuse Gate
+
+Before running any verification that `test-gate` already completed, check for a `VERIFICATION_EVIDENCE_V1` receipt produced by `.agents/skills/test-gate/verification-evidence-receipt.mjs`.
+
+- Verify it with current `baseSha`, current exact `headSha`, and the canonical current changed-file set.
+- `VERIFICATION_EVIDENCE_RECEIPT=REUSE` means the receipt-covered machine-observed results are identity-bound to this exact audited source and scope. Record them as reused; **do not execute the same checks again merely for final-audit ceremony**.
+- Continue final audit with properties the receipt does not prove: current PR metadata/state, merge-base/current live base as applicable, scope-outside changes, security review, PR-description consistency, Draft Lock, review/required-CI state, real-device status when distinct, and blockers.
+- If the receipt fails because base/head/changed files drifted, invalidate only the affected verification evidence and return to `test-gate` for the minimum newly applicable checks. Do not automatically restart the whole suite.
+- If no receipt exists because the earlier verification was not bound to the exact committed HEAD, use the existing equivalence rules. Do not fabricate a receipt and do not claim reuse without machine-verifiable identity.
+- A receipt does not replace security review, merge authorization, Draft Lock, merge execution receipt, or repository-required independent platform/device checks that prove a distinct property.
+
+This gate makes `test-gate` the owner of verification execution and `final-pr-audit` the owner of **verification provenance plus PR/merge-readiness facts**, avoiding two stages independently proving the same property.
 
 ## Security Review
 

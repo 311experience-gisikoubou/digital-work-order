@@ -134,6 +134,34 @@ Use repository commands that actually exist. Do not invent commands.
 - A PR CI gate normally provides its independent evidence before merge. A second post-merge run is justified only for an explicitly post-merge/deployment/runtime property, not unchanged source behavior.
 - Evidence reuse never converts unavailable or unknown evidence into PASS.
 
+### Machine-readable verification evidence receipt
+
+When all planned checks completed successfully **on an exact committed HEAD**, issue one reusable receipt instead of making later stages recollect or rerun the same verification properties:
+
+```text
+<receipt-issue-json> | node .agents/skills/test-gate/verification-evidence-receipt.mjs
+```
+
+The issue payload uses `schemaVersion: 1`, `mode: "issue"`, and binds the successful verification to `baseSha`, `headSha`, the exact `changedFiles`, `profile`, `scopeDecision`, `plannedChecks`, and one successful result/evidence source for every planned check. The gate rejects `UNKNOWN` scope, accepts only closed-vocabulary PASS evidence, and emits `VERIFICATION_EVIDENCE_V1` plus a tamper-evident `receiptId`. The receipt preserves and binds machine-observed results; it does not independently execute the underlying tests, so it may be issued only from results already observed by the active `test-gate` workflow.
+
+Before `final-pr-audit` reuses that evidence, verify the receipt against the current exact base/head/changed-file set:
+
+```text
+<receipt-verify-json> | node .agents/skills/test-gate/verification-evidence-receipt.mjs
+```
+
+- `REUSE`: the receipt is intact and the current base SHA, HEAD SHA, and changed-file set are identical. The listed verification checks are already proven and **must not be rerun or recollected merely because the workflow moved to another stage**.
+- `STOP`: receipt tamper, base drift, HEAD drift, changed-file drift, incomplete results, or invalid evidence. Return only the invalidated properties to `test-gate`; do not restart unrelated checks that still have valid evidence.
+- A caller statement such as "tests already passed" is not a receipt. Evidence source is restricted to `local`, `remote`, `github-api`, `connector`, `device`, or `provider`.
+- If verification ran before the final commit and exact-HEAD equivalence has not been mechanically proven, **do not mint a receipt for that later HEAD**. Keep the earlier result as ordinary evidence and perform only the minimum exact-head verification needed by repository policy.
+- Repository-required independent OS/device/platform evidence remains separate when it proves a distinct property.
+
+Self-test:
+
+```text
+node .agents/skills/test-gate/verification-evidence-receipt-selftest.mjs
+```
+
 ## Real-Device Preparation Gate
 
 Before assigning real-device or other manual verification, classify its basis and owner.

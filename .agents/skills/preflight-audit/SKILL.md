@@ -294,6 +294,23 @@ Selector self-test:
 node .agents/skills/preflight-audit/full-gate-selftest-selector-selftest.mjs .agents/skills/preflight-audit/full-gate-selftest-selector.mjs
 ```
 
+## Cross-Project Portfolio Health Observer
+
+Use `portfolio-health-observer.mjs` when a cross-project view is needed for WIP pressure, stagnation state, and Foundation rollout/currentness.
+
+```text
+node .agents/skills/preflight-audit/portfolio-health-observer.mjs --manifest <portfolio-manifest.json>
+```
+
+The observer is read-only and does not create a new classifier. Its input contains fresh machine-readable outputs from the existing WIP observer, stagnation watch, and Foundation rollout/sync evidence for each repository. It validates repository identity and snapshot freshness, then aggregates those existing decisions into one report.
+
+- Existing `STOP_NEW_WORK`, stagnation `STOP/BLOCKED/WAIT_HUMAN`, and Foundation `UPDATE/PARTIAL_RESUME/STOP` states are surfaced unchanged.
+- Missing or invalid WIP/Foundation evidence is shown as `UNKNOWN`, never silently healthy.
+- Merge authority, product priority, and repository-local gates remain separate.
+- Do not run application tests or add hosted schedules/services merely to produce the portfolio view.
+
+Self-test: `node .agents/skills/preflight-audit/portfolio-health-observer-selftest.mjs`
+
 ## Interactive / AI Work Operation Gate
 
 Before asking a human to perform real-device, network, production, installation, service-adoption, or other interactive setup, run `operation-preflight.mjs`.

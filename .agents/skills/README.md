@@ -34,3 +34,4 @@
 - repository固有の`.agents/skills/`や`.claude/skills/`はtarget-only extraとして共存してよく、foundation側の同名共有pathを上書きしません。
 - 未導入repositoryの初回導入には`foundation-bootstrap.mjs`、既導入repositoryのFoundation更新には`foundation-update.mjs`を使い分けます。updateは旧正本との一致を証明できない共有pathを上書きしません。
 - 完全同期・最新版・適用済みと表現する前に`foundation-sync-audit`または同等の固定SHA間remote比較をPASSさせます。Claude adapterが設定済みならwrapper一致も完全同期条件です。部分同期は完全同期と表現しません。
+- `portfolio-health-observer`：既存のWIP・stagnation・Foundation判定を横断集約するread-only observer。新しい優先順位判定や安全閾値は持たない。
