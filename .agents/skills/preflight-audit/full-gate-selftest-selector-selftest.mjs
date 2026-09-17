@@ -65,9 +65,15 @@ for (const id of ['ai-provider-inventory','ai-task-router','provider-qualificati
   assert(routing.selectedTests.includes(id), `routing group missing ${id}`);
 }
 const foundation = select(['.agents/skills/foundation-sync-audit/foundation-update.mjs']);
-for (const id of ['foundation-sync','foundation-bootstrap','foundation-update','foundation-remote-plan']) {
+for (const id of ['foundation-sync','foundation-bootstrap','foundation-update','foundation-remote-plan','foundation-batch-rollout']) {
   assert(foundation.selectedTests.includes(id), `foundation group missing ${id}`);
 }
+const batchRollout = select(['.agents/skills/foundation-sync-audit/foundation-batch-rollout-plan.mjs']);
+assert(batchRollout.selection === 'IMPACT_SCOPED', 'batch rollout planner should be impact scoped');
+for (const id of ['merge-authorization','merge-execution','fast-path','security-preflight','full-gate-selector','foundation-sync','foundation-bootstrap','foundation-update','foundation-remote-plan','foundation-batch-rollout']) {
+  assert(batchRollout.selectedTests.includes(id), `batch rollout selection missing ${id}`);
+}
+assert(!batchRollout.selectedTests.includes('claude-runner'), 'batch rollout selection should not include unrelated claude-runner');
 const mixedHandoffDoc = select([
   '.agents/skills/preflight-audit/operation-preflight.mjs',
   '.agents/skills/handoff/SKILL.md',
@@ -98,7 +104,7 @@ assert(unknown.selection === 'FULL_SUITE', 'unknown governance path must use ful
 assert(unknown.reasons.includes('UNMAPPED_CHANGED_PATH_REQUIRES_FULL_SUITE'), 'unknown path reason missing');
 const highCoupling = select(['.agents/skills/preflight-audit/fast-path-classifier.mjs']);
 assert(highCoupling.selection === 'FULL_SUITE', 'fast-path classifier change must use full suite');
-assert(highCoupling.selectedTests.length === 24 && highCoupling.commands.length === 24, 'full suite must include all 24 selftests');
+assert(highCoupling.selectedTests.length === 25 && highCoupling.commands.length === 25, 'full suite must include all 25 selftests');
 assert(highCoupling.reasons.includes('HIGH_COUPLING_PATH_REQUIRES_FULL_SUITE'), 'high coupling reason missing');
 
 const docsOnly = select(['CHANGELOG.md','VERSION']);
