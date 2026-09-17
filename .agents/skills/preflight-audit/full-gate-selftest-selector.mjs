@@ -5,7 +5,7 @@ import { parseInput, validateEvidence } from './fast-path-classifier.mjs';
 
 const CORE = ['merge-authorization','merge-execution','fast-path','security-preflight','full-gate-selector'];
 const ALL = [
-  'merge-authorization','merge-execution','foundation-sync','foundation-bootstrap','foundation-update','foundation-remote-plan',
+  'merge-authorization','merge-execution','foundation-sync','foundation-bootstrap','foundation-update','foundation-remote-plan','foundation-batch-rollout',
   'project-context','live-base-ref','ai-capacity','ai-provider-inventory','ai-task-router','claude-runner','fast-path','operation-preflight','actions-cost',
   'provider-qualification','provider-readiness','security-history','security-preflight','stagnation','wip-observer','portfolio-health','real-device',
   'full-gate-selector',
@@ -17,6 +17,7 @@ const COMMANDS = {
   'foundation-bootstrap':['node','.agents/skills/foundation-sync-audit/foundation-bootstrap-selftest.mjs','.agents/skills/foundation-sync-audit/foundation-bootstrap.mjs','.agents/skills/foundation-sync-audit/foundation-sync-audit.mjs'],
   'foundation-update':['node','.agents/skills/foundation-sync-audit/foundation-update-selftest.mjs','.agents/skills/foundation-sync-audit/foundation-update.mjs','.agents/skills/foundation-sync-audit/foundation-sync-audit.mjs'],
   'foundation-remote-plan':['node','.agents/skills/foundation-sync-audit/foundation-remote-update-plan-selftest.mjs','.agents/skills/foundation-sync-audit/foundation-remote-update-plan.mjs'],
+  'foundation-batch-rollout':['node','.agents/skills/foundation-sync-audit/foundation-batch-rollout-plan-selftest.mjs'],
   'project-context':['node','.agents/skills/handoff/project-context-guard-selftest.mjs','.agents/skills/handoff/project-context-guard.mjs'],
   'live-base-ref':['node','.agents/skills/preflight-audit/live-base-ref-guard-selftest.mjs','.agents/skills/preflight-audit/live-base-ref-guard.mjs'],
   'ai-capacity':['node','.agents/skills/preflight-audit/ai-capacity-observer-selftest.mjs','.agents/skills/preflight-audit/ai-capacity-observer.mjs'],
@@ -50,7 +51,7 @@ const GROUPS = {
   'real-device':['real-device'],
   'ai-capacity':['ai-capacity'],
   'ai-routing':['ai-provider-inventory','ai-task-router','provider-qualification','provider-readiness'],
-  'foundation-sync':['foundation-sync','foundation-bootstrap','foundation-update','foundation-remote-plan'],
+  'foundation-sync':['foundation-sync','foundation-bootstrap','foundation-update','foundation-remote-plan','foundation-batch-rollout'],
 };
 function pair(path, dir, stem) {
   return path === `${dir}/${stem}.mjs` || path === `${dir}/${stem}-selftest.mjs`;
@@ -81,7 +82,7 @@ function familyFor(path) {
   if (pair(path,'.agents/skills/test-gate','real-device-preparation-gate')) return 'real-device';
   if (pair(path,pre,'ai-capacity-observer')) return 'ai-capacity';
   if (['ai-provider-inventory','ai-task-router','provider-adapter-qualification','provider-adapter-readiness'].some(stem => pair(path,pre,stem))) return 'ai-routing';
-  if (['foundation-sync-audit','foundation-bootstrap','foundation-update','foundation-remote-update-plan'].some(stem => pair(path,foundation,stem))) return 'foundation-sync';
+  if (['foundation-sync-audit','foundation-bootstrap','foundation-update','foundation-remote-update-plan','foundation-batch-rollout-plan'].some(stem => pair(path,foundation,stem))) return 'foundation-sync';
   return null;
 }
 function ordered(ids) {

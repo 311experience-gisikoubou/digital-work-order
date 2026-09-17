@@ -337,3 +337,10 @@
 - method: fail-closed `foundation-update.mjs` to merged Foundation dev.90 (`ab2d90542be49349c92a0eb5f65645f895fd3e24`)
 - verification: post-update `foundation-sync-audit` PASS; portfolio health reports Foundation CURRENT; `git diff --check` PASS
 - scope: Foundation governance/control plus sync metadata only; application/runtime/data/dependency paths unchanged
+
+
+## 2026-09-17 - ai-dev-foundation 1.0.0-dev.93
+- method: fail-closed `foundation-update.mjs` after one 3-repo batch rollout plan
+- source commit: `51073be35f94741dfc1a476e7341cea31ec7e4cb`
+- scope: canonical shared Foundation surface only; application/runtime/data unchanged
+- verification: real 45,330-byte batch manifest PASS; post-write full sync audit PASS

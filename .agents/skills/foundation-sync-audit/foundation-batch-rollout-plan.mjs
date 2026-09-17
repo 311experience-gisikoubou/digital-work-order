@@ -37,6 +37,7 @@ function normalizeBranch(value) {
   return value.trim().replace(/^refs\/heads\//, '');
 }
 function isRepository(value) { return typeof value === 'string' && /^[^/\s]+\/[^/\s]+$/.test(value); }
+function isBaselineId(value) { return typeof value === 'string' && /^[A-Za-z0-9._-]{1,64}$/.test(value); }
 function parseSinglePlannerOutput(run, repository) {
   let parsed;
   try { parsed = JSON.parse(run.stdout || '{}'); }
@@ -68,40 +69,80 @@ try { manifest = JSON.parse(raw); }
 catch { stop('FOUNDATION_BATCH_MANIFEST_INVALID_JSON'); }
 
 const { schemaVersion, release, targets } = manifest ?? {};
-if (schemaVersion !== 1) stop('FOUNDATION_BATCH_SCHEMA_UNSUPPORTED', { schemaVersion: schemaVersion ?? null });
-const { fromVersion, sourceVersion, fromCommit, sourceCommit, entries } = release ?? {};
-if (typeof fromVersion !== 'string' || !fromVersion.trim()) stop('FOUNDATION_BATCH_FROM_VERSION_REQUIRED');
-if (typeof sourceVersion !== 'string' || !sourceVersion.trim()) stop('FOUNDATION_BATCH_SOURCE_VERSION_REQUIRED');
-if (fromVersion === sourceVersion) stop('FOUNDATION_BATCH_VERSION_NOT_ADVANCED', { version: sourceVersion });
-if (!isSha(fromCommit)) stop('FOUNDATION_BATCH_FROM_COMMIT_INVALID');
-if (!isSha(sourceCommit)) stop('FOUNDATION_BATCH_SOURCE_COMMIT_INVALID');
-if (fromCommit === sourceCommit) stop('FOUNDATION_BATCH_SOURCE_COMMIT_NOT_ADVANCED');
-if (!Array.isArray(entries) || entries.length === 0) stop('FOUNDATION_BATCH_RELEASE_ENTRIES_REQUIRED');
-if (entries.length > 1000) stop('FOUNDATION_BATCH_RELEASE_ENTRIES_TOO_MANY', { count: entries.length });
+if (![1, 2].includes(schemaVersion)) stop('FOUNDATION_BATCH_SCHEMA_UNSUPPORTED', { schemaVersion: schemaVersion ?? null });
 if (!Array.isArray(targets) || targets.length === 0) stop('FOUNDATION_BATCH_TARGETS_REQUIRED');
 if (targets.length > 100) stop('FOUNDATION_BATCH_TARGETS_TOO_MANY', { count: targets.length });
 
-const releasePaths = new Set();
-const releaseEntries = entries.map((entry) => {
-  const path = normalizePath(entry?.path);
-  if (!path || !isCanonicalPath(path) || path === 'AGENTS.local.md') stop('FOUNDATION_BATCH_PATH_OUTSIDE_SHARED_SURFACE', { path: entry?.path ?? null });
-  if (releasePaths.has(path)) stop('FOUNDATION_BATCH_DUPLICATE_RELEASE_PATH', { path });
-  releasePaths.add(path);
-  const oldSha = entry?.oldSha ?? null;
-  const newSha = entry?.newSha ?? null;
-  for (const [field, value] of [['oldSha', oldSha], ['newSha', newSha]]) {
-    if (value !== null && !isSha(value)) stop('FOUNDATION_BATCH_RELEASE_SHA_INVALID', { path, field });
+function parseReleaseEntries(entries, context = {}) {
+  if (!Array.isArray(entries) || entries.length === 0) stop('FOUNDATION_BATCH_RELEASE_ENTRIES_REQUIRED', context);
+  if (entries.length > 1000) stop('FOUNDATION_BATCH_RELEASE_ENTRIES_TOO_MANY', { ...context, count: entries.length });
+  const releasePaths = new Set();
+  return entries.map((entry) => {
+    const path = normalizePath(entry?.path);
+    if (!path || !isCanonicalPath(path) || path === 'AGENTS.local.md') stop('FOUNDATION_BATCH_PATH_OUTSIDE_SHARED_SURFACE', { ...context, path: entry?.path ?? null });
+    if (releasePaths.has(path)) stop('FOUNDATION_BATCH_DUPLICATE_RELEASE_PATH', { ...context, path });
+    releasePaths.add(path);
+    const oldSha = entry?.oldSha ?? null;
+    const newSha = entry?.newSha ?? null;
+    for (const [field, value] of [['oldSha', oldSha], ['newSha', newSha]]) {
+      if (value !== null && !isSha(value)) stop('FOUNDATION_BATCH_RELEASE_SHA_INVALID', { ...context, path, field });
+    }
+    if (oldSha === null && newSha === null) stop('FOUNDATION_BATCH_EMPTY_RELEASE_ENTRY', { ...context, path });
+    if (oldSha === newSha) stop('FOUNDATION_BATCH_UNCHANGED_RELEASE_ENTRY', { ...context, path });
+    const hasNewContent = Object.prototype.hasOwnProperty.call(entry ?? {}, 'newContent');
+    if (hasNewContent) {
+      if (newSha === null || typeof entry.newContent !== 'string') stop('FOUNDATION_BATCH_SOURCE_CONTENT_INVALID', { ...context, path });
+      const calculatedSha = gitBlobSha(entry.newContent);
+      if (calculatedSha !== newSha) stop('FOUNDATION_BATCH_SOURCE_CONTENT_SHA_MISMATCH', { ...context, path, expectedNewSha: newSha, calculatedSha });
+    }
+    return { path, oldSha, newSha, ...(hasNewContent ? { newContent: entry.newContent } : {}) };
+  });
+}
+
+let sourceVersion = null;
+let sourceCommit = null;
+const baselineMap = new Map();
+
+if (schemaVersion === 1) {
+  const { fromVersion, sourceVersion: v1SourceVersion, fromCommit, sourceCommit: v1SourceCommit, entries } = release ?? {};
+  if (typeof fromVersion !== 'string' || !fromVersion.trim()) stop('FOUNDATION_BATCH_FROM_VERSION_REQUIRED');
+  if (typeof v1SourceVersion !== 'string' || !v1SourceVersion.trim()) stop('FOUNDATION_BATCH_SOURCE_VERSION_REQUIRED');
+  if (fromVersion === v1SourceVersion) stop('FOUNDATION_BATCH_VERSION_NOT_ADVANCED', { version: v1SourceVersion });
+  if (!isSha(fromCommit)) stop('FOUNDATION_BATCH_FROM_COMMIT_INVALID');
+  if (!isSha(v1SourceCommit)) stop('FOUNDATION_BATCH_SOURCE_COMMIT_INVALID');
+  if (fromCommit === v1SourceCommit) stop('FOUNDATION_BATCH_SOURCE_COMMIT_NOT_ADVANCED');
+  sourceVersion = v1SourceVersion;
+  sourceCommit = v1SourceCommit;
+  baselineMap.set('default', { id: 'default', fromVersion, fromCommit, entries: parseReleaseEntries(entries) });
+} else {
+  const baselines = release?.baselines;
+  sourceVersion = release?.sourceVersion;
+  sourceCommit = release?.sourceCommit;
+  if (typeof sourceVersion !== 'string' || !sourceVersion.trim()) stop('FOUNDATION_BATCH_SOURCE_VERSION_REQUIRED');
+  if (!isSha(sourceCommit)) stop('FOUNDATION_BATCH_SOURCE_COMMIT_INVALID');
+  if (!Array.isArray(baselines) || baselines.length === 0) stop('FOUNDATION_BATCH_BASELINES_REQUIRED');
+  if (baselines.length > 100) stop('FOUNDATION_BATCH_BASELINES_TOO_MANY', { count: baselines.length });
+  const finalShas = new Map();
+  for (const baseline of baselines) {
+    const id = baseline?.id;
+    const fromVersion = baseline?.fromVersion;
+    const fromCommit = baseline?.fromCommit;
+    if (!isBaselineId(id)) stop('FOUNDATION_BATCH_BASELINE_ID_INVALID', { baselineId: id ?? null });
+    if (baselineMap.has(id)) stop('FOUNDATION_BATCH_DUPLICATE_BASELINE_ID', { baselineId: id });
+    if (typeof fromVersion !== 'string' || !fromVersion.trim()) stop('FOUNDATION_BATCH_FROM_VERSION_REQUIRED', { baselineId: id });
+    if (fromVersion === sourceVersion) stop('FOUNDATION_BATCH_VERSION_NOT_ADVANCED', { baselineId: id, version: sourceVersion });
+    if (!isSha(fromCommit)) stop('FOUNDATION_BATCH_FROM_COMMIT_INVALID', { baselineId: id });
+    if (fromCommit === sourceCommit) stop('FOUNDATION_BATCH_SOURCE_COMMIT_NOT_ADVANCED', { baselineId: id });
+    const entries = parseReleaseEntries(baseline?.entries, { baselineId: id });
+    for (const entry of entries) {
+      if (finalShas.has(entry.path) && finalShas.get(entry.path) !== entry.newSha) {
+        stop('FOUNDATION_BATCH_BASELINE_SOURCE_MISMATCH', { baselineId: id, path: entry.path, expectedNewSha: finalShas.get(entry.path), newSha: entry.newSha });
+      }
+      finalShas.set(entry.path, entry.newSha);
+    }
+    baselineMap.set(id, { id, fromVersion, fromCommit, entries });
   }
-  if (oldSha === null && newSha === null) stop('FOUNDATION_BATCH_EMPTY_RELEASE_ENTRY', { path });
-  if (oldSha === newSha) stop('FOUNDATION_BATCH_UNCHANGED_RELEASE_ENTRY', { path });
-  const hasNewContent = Object.prototype.hasOwnProperty.call(entry ?? {}, 'newContent');
-  if (hasNewContent) {
-    if (newSha === null || typeof entry.newContent !== 'string') stop('FOUNDATION_BATCH_SOURCE_CONTENT_INVALID', { path });
-    const calculatedSha = gitBlobSha(entry.newContent);
-    if (calculatedSha !== newSha) stop('FOUNDATION_BATCH_SOURCE_CONTENT_SHA_MISMATCH', { path, expectedNewSha: newSha, calculatedSha });
-  }
-  return { path, oldSha, newSha, ...(hasNewContent ? { newContent: entry.newContent } : {}) };
-});
+}
 
 const seenTargets = new Set();
 const plannedTargets = [];
@@ -126,6 +167,19 @@ for (const target of targets) {
   if (seenTargets.has(targetKey)) stop('FOUNDATION_BATCH_DUPLICATE_TARGET', { repository, branch });
   seenTargets.add(targetKey);
 
+  let baseline;
+  let baselineOutput = {};
+  if (schemaVersion === 1) {
+    baseline = baselineMap.get('default');
+  } else {
+    const baselineId = target?.baselineId;
+    if (!isBaselineId(baselineId)) stop('FOUNDATION_BATCH_TARGET_BASELINE_REQUIRED', { repository, baselineId: baselineId ?? null });
+    baseline = baselineMap.get(baselineId);
+    if (!baseline) stop('FOUNDATION_BATCH_TARGET_BASELINE_UNKNOWN', { repository, baselineId });
+    baselineOutput = { baseline: { id: baseline.id, fromVersion: baseline.fromVersion, fromCommit: baseline.fromCommit } };
+  }
+  const { fromVersion, fromCommit, entries: releaseEntries } = baseline;
+
   const pendingEntries = [];
   const currentPaths = [];
   for (const entry of releaseEntries) {
@@ -148,7 +202,7 @@ for (const target of targets) {
   if (pendingEntries.length === 0) {
     currentCount += 1;
     plannedTargets.push({
-      repository, branch, head, baseTree, state: 'CURRENT', action: 'NONE',
+      repository, branch, head, baseTree, ...baselineOutput, state: 'CURRENT', action: 'NONE',
       counts: { releaseEntries: releaseEntries.length, current: currentPaths.length, pending: 0 },
     });
     continue;
@@ -162,7 +216,7 @@ for (const target of targets) {
   if (protectedBranch) {
     branchRequiredCount += 1;
     plannedTargets.push({
-      repository, branch, head, baseTree, state, action: 'CREATE_FEATURE_BRANCH', branchFromSha: head,
+      repository, branch, head, baseTree, ...baselineOutput, state, action: 'CREATE_FEATURE_BRANCH', branchFromSha: head,
       counts: { releaseEntries: releaseEntries.length, current: currentPaths.length, pending: pendingEntries.length },
       pendingPaths: pendingEntries.map((entry) => entry.path),
     });
@@ -174,14 +228,14 @@ for (const target of targets) {
     targetRepository: repository, targetBranch: branch, targetHead: head, targetBaseTree: baseTree,
     entries: pendingEntries,
   };
-  const run = spawnSync(process.execPath, [singlePlanner, '--manifest-json', JSON.stringify(singleManifest)], {
-    encoding: 'utf8', maxBuffer: 4 * 1024 * 1024,
+  const run = spawnSync(process.execPath, [singlePlanner], {
+    input: JSON.stringify(singleManifest), encoding: 'utf8', maxBuffer: 4 * 1024 * 1024,
   });
   if (run.error) stop('FOUNDATION_BATCH_SINGLE_PLAN_EXEC_FAILED', { repository, message: String(run.error?.message || run.error) });
   const remotePlan = parseSinglePlannerOutput(run, repository);
   readyPlanCount += 1;
   plannedTargets.push({
-    repository, branch, head, baseTree, state, action: 'APPLY_REMOTE_PLAN',
+    repository, branch, head, baseTree, ...baselineOutput, state, action: 'APPLY_REMOTE_PLAN',
     counts: { releaseEntries: releaseEntries.length, current: currentPaths.length, pending: pendingEntries.length },
     pendingPaths: pendingEntries.map((entry) => entry.path), remotePlan,
   });
@@ -190,7 +244,14 @@ for (const target of targets) {
 const output = {
   result: 'PASS',
   code: 'FOUNDATION_BATCH_ROLLOUT_PLAN_READY',
-  release: { fromVersion, sourceVersion, fromCommit, sourceCommit, changedPaths: releaseEntries.length },
+  release: schemaVersion === 1
+    ? { fromVersion: baselineMap.get('default').fromVersion, sourceVersion, fromCommit: baselineMap.get('default').fromCommit, sourceCommit, changedPaths: baselineMap.get('default').entries.length }
+    : {
+        sourceVersion, sourceCommit, baselineCount: baselineMap.size,
+        baselines: [...baselineMap.values()].map((baseline) => ({
+          id: baseline.id, fromVersion: baseline.fromVersion, fromCommit: baseline.fromCommit, changedPaths: baseline.entries.length,
+        })),
+      },
   counts: {
     targets: targets.length, current: currentCount, update: updateCount, partialResume: partialCount,
     branchRequired: branchRequiredCount, readyPlans: readyPlanCount,
