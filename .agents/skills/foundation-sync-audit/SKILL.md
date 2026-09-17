@@ -248,6 +248,35 @@ node .agents/skills/foundation-sync-audit/foundation-remote-update-plan-selftest
 
 This direct route adds no token, cross-repository secret, service, daemon, or recurring workflow. If exact Git Data operations are unavailable, fall back to another already-approved safe route; do not weaken old-state identity checks merely to avoid a tooling limitation.
 
+### Batch Rollout Planning
+
+When one Foundation release must be propagated across multiple application repositories, do not rebuild the same old/new Foundation delta independently for every repository. Build that exact release delta once, collect exact target blob identities for only those changed Foundation-owned paths, then run:
+
+```text
+node .agents/skills/foundation-sync-audit/foundation-batch-rollout-plan.mjs --manifest <batch-manifest.json>
+```
+
+The batch planner is read-only and provider-neutral. Its schema-v1 manifest contains one `release` (`fromVersion`, `sourceVersion`, exact old/new Foundation commits, and changed canonical entries) plus multiple target snapshots (`repository`, branch, exact head/base tree, and exact target blob SHA or `null` for every release path). It never trusts a target version label by itself.
+
+For each target it compares every release path against the exact old and exact new blob states:
+
+- all paths already equal the new state -> `CURRENT / NONE`; do not create a branch, rewrite files, rerun application verification, or open a rollout PR;
+- pending paths all equal the old state -> `UPDATE`;
+- some paths equal exact-new while the remaining paths equal exact-old -> `PARTIAL_RESUME`; only the exact-old remainder is planned, so a safe interrupted rollout can resume without rewriting completed paths;
+- any path is neither exact-old nor exact-new, or exact target evidence is missing -> `STOP`; investigate drift rather than overwriting it.
+
+If an `UPDATE`/`PARTIAL_RESUME` target snapshot is on `main` or `master`, the planner returns `CREATE_FEATURE_BRANCH` from that exact head and no write plan. After the AI creates the feature branch, rerun the same planner against that branch; the unchanged exact blob evidence then produces `APPLY_REMOTE_PLAN`. For non-protected feature branches, the batch planner delegates the remaining entries to the existing `foundation-remote-update-plan.mjs` and returns that planner's fail-closed write contract. It does not introduce a second update algorithm.
+
+The Foundation release delta is validated once for duplicate/out-of-surface paths, invalid SHA/content pairs, and unchanged entries. Targets are bounded, deduplicated by repository+branch, and must provide exact head/base-tree identity. No application/runtime/data/credential path is eligible.
+
+Batch planner self-test:
+
+```text
+node .agents/skills/foundation-sync-audit/foundation-batch-rollout-plan-selftest.mjs
+```
+
+After any actual target write, the existing full `foundation-sync-audit` remains mandatory before claiming `FULL_CURRENT`. Each application repository still uses its own feature branch / Draft PR / final audit / explicit human merge authorization. Batch planning reduces repeated discovery and writes; it does not combine application merge authority.
+
 ## Partial Sync Handling
 
 Partial synchronization is allowed only when explicitly scoped and recorded as partial. It must not be described as a full/current foundation sync.

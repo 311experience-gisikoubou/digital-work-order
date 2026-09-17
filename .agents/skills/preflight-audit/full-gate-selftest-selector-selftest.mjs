@@ -57,6 +57,9 @@ assert(liveBase.selectedTests.includes('live-base-ref'), 'live-base guard selfte
 const actionsCost = select(['.agents/skills/preflight-audit/github-actions-cost-guard.mjs']);
 assert(actionsCost.selection === 'IMPACT_SCOPED', 'Actions cost guard change should be impact scoped');
 assert(actionsCost.selectedTests.includes('actions-cost'), 'Actions cost guard selftest missing');
+const portfolio = select(['.agents/skills/preflight-audit/portfolio-health-observer.mjs']);
+assert(portfolio.selection === 'IMPACT_SCOPED', 'portfolio observer should be impact scoped');
+assert(portfolio.selectedTests.includes('portfolio-health'), 'portfolio observer selftest missing');
 const routing = select(['.agents/skills/preflight-audit/ai-task-router.mjs']);
 for (const id of ['ai-provider-inventory','ai-task-router','provider-qualification','provider-readiness']) {
   assert(routing.selectedTests.includes(id), `routing group missing ${id}`);
@@ -95,7 +98,7 @@ assert(unknown.selection === 'FULL_SUITE', 'unknown governance path must use ful
 assert(unknown.reasons.includes('UNMAPPED_CHANGED_PATH_REQUIRES_FULL_SUITE'), 'unknown path reason missing');
 const highCoupling = select(['.agents/skills/preflight-audit/fast-path-classifier.mjs']);
 assert(highCoupling.selection === 'FULL_SUITE', 'fast-path classifier change must use full suite');
-assert(highCoupling.selectedTests.length === 23 && highCoupling.commands.length === 23, 'full suite must include all 23 selftests');
+assert(highCoupling.selectedTests.length === 24 && highCoupling.commands.length === 24, 'full suite must include all 24 selftests');
 assert(highCoupling.reasons.includes('HIGH_COUPLING_PATH_REQUIRES_FULL_SUITE'), 'high coupling reason missing');
 
 const docsOnly = select(['CHANGELOG.md','VERSION']);

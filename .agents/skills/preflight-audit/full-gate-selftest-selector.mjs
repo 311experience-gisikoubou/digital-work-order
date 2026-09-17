@@ -7,7 +7,7 @@ const CORE = ['merge-authorization','merge-execution','fast-path','security-pref
 const ALL = [
   'merge-authorization','merge-execution','foundation-sync','foundation-bootstrap','foundation-update','foundation-remote-plan',
   'project-context','live-base-ref','ai-capacity','ai-provider-inventory','ai-task-router','claude-runner','fast-path','operation-preflight','actions-cost',
-  'provider-qualification','provider-readiness','security-history','security-preflight','stagnation','wip-observer','real-device',
+  'provider-qualification','provider-readiness','security-history','security-preflight','stagnation','wip-observer','portfolio-health','real-device',
   'full-gate-selector',
 ];
 const COMMANDS = {
@@ -32,6 +32,7 @@ const COMMANDS = {
   'security-preflight':['node','.agents/skills/preflight-audit/security-preflight-selftest.mjs','.agents/skills/preflight-audit/security-preflight.mjs'],
   'stagnation':['node','.agents/skills/preflight-audit/stagnation-watch-selftest.mjs','.agents/skills/preflight-audit/stagnation-watch.mjs'],
   'wip-observer':['node','.agents/skills/preflight-audit/wip-review-queue-observer-selftest.mjs','.agents/skills/preflight-audit/wip-review-queue-observer.mjs'],
+  'portfolio-health':['node','.agents/skills/preflight-audit/portfolio-health-observer-selftest.mjs'],
   'real-device':['node','.agents/skills/test-gate/real-device-preparation-gate-selftest.mjs','.agents/skills/test-gate/real-device-preparation-gate.mjs'],
   'full-gate-selector':['node','.agents/skills/preflight-audit/full-gate-selftest-selector-selftest.mjs','.agents/skills/preflight-audit/full-gate-selftest-selector.mjs'],
 };
@@ -45,6 +46,7 @@ const GROUPS = {
   'security-history':['security-history'],
   'security-preflight':['security-preflight'],
   'wip-observer':['wip-observer'],
+  'portfolio-health':['portfolio-health'],
   'real-device':['real-device'],
   'ai-capacity':['ai-capacity'],
   'ai-routing':['ai-provider-inventory','ai-task-router','provider-qualification','provider-readiness'],
@@ -75,6 +77,7 @@ function familyFor(path) {
   if (pair(path,pre,'security-history-audit')) return 'security-history';
   if (pair(path,pre,'security-preflight')) return 'security-preflight';
   if (pair(path,pre,'wip-review-queue-observer')) return 'wip-observer';
+  if (pair(path,pre,'portfolio-health-observer')) return 'portfolio-health';
   if (pair(path,'.agents/skills/test-gate','real-device-preparation-gate')) return 'real-device';
   if (pair(path,pre,'ai-capacity-observer')) return 'ai-capacity';
   if (['ai-provider-inventory','ai-task-router','provider-adapter-qualification','provider-adapter-readiness'].some(stem => pair(path,pre,stem))) return 'ai-routing';

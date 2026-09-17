@@ -34,6 +34,8 @@ Post-merge verification is a Git/history/tree/provenance check. It does **not** 
 
 Reuse the exact pre-merge PASS test evidence when all of the following are proven: the authorization receipt predates merge, the merge result is based on the exact `AUDITED_BASE_SHA`, the merged tree equals the exact audited pre-merge HEAD tree, and no repository-local rule defines a distinct post-merge/runtime property.
 
+When a valid `VERIFICATION_EVIDENCE_V1` receipt was verified by `final-pr-audit`, carry its receipt ID forward as the test-evidence provenance. Once the merged tree/base provenance above is proven, do not fetch or execute those receipt-covered checks again. The post-merge stage proves merge/history/tree/provenance, not the already-proven source behavior.
+
 Re-run tests only when prior evidence is no longer equivalent: base drift, tree mismatch, an unexpected merge transformation, changed generated/runtime inputs, or an explicit repository-local post-merge/deployment requirement. If equivalence is unknown, investigate it; do not blindly re-run everything and do not call the old evidence PASS until its assumptions are proven.
 
 ## Merge Method Verification

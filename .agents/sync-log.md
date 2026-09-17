@@ -330,3 +330,10 @@
 - verification: exact source updater selftest PASS reused after target byte-identity sync proof; no duplicate app/full/REAL_DEVICE tests
 - scope: Foundation governance/control + sync metadata only; repository-local product/data/dependency behavior unchanged
 - merge: Draft remains locked until fresh explicit human authorization for exact PR/head
+
+## 2026-09-17 - ai-dev-foundation 1.0.0-dev.90
+- trusted previous foundation: 1.0.0-dev.85
+- target branch: `chore/foundation-dev90-sync`
+- method: fail-closed `foundation-update.mjs` to merged Foundation dev.90 (`ab2d90542be49349c92a0eb5f65645f895fd3e24`)
+- verification: post-update `foundation-sync-audit` PASS; portfolio health reports Foundation CURRENT; `git diff --check` PASS
+- scope: Foundation governance/control plus sync metadata only; application/runtime/data/dependency paths unchanged
