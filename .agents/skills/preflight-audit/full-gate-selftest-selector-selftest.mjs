@@ -69,6 +69,10 @@ assert(mergeReadiness.selectedTests.includes('merge-readiness'), 'merge-readines
 const mergeExecutionBatch = select(['.agents/skills/final-pr-audit/cross-repo-merge-execution-gate.mjs']);
 assert(mergeExecutionBatch.selection === 'IMPACT_SCOPED', 'batch merge-execution gate should be impact scoped');
 for (const id of ['merge-execution','merge-execution-batch']) assert(mergeExecutionBatch.selectedTests.includes(id), `batch merge-execution selection missing ${id}`);
+const mergeExecutor = select(['.agents/skills/final-pr-audit/cross-repo-merge-executor.mjs']);
+assert(mergeExecutor.selection === 'FULL_SUITE', 'merge executor is merge-authority high coupling and must use full suite');
+assert(mergeExecutor.selectedTests.includes('merge-executor'), 'merge executor selftest missing');
+assert(mergeExecutor.reasons.includes('HIGH_COUPLING_PATH_REQUIRES_FULL_SUITE'), 'merge executor high-coupling reason missing');
 const routing = select(['.agents/skills/preflight-audit/ai-task-router.mjs']);
 for (const id of ['ai-provider-inventory','ai-task-router','provider-qualification','provider-readiness']) {
   assert(routing.selectedTests.includes(id), `routing group missing ${id}`);
@@ -113,7 +117,7 @@ assert(unknown.selection === 'FULL_SUITE', 'unknown governance path must use ful
 assert(unknown.reasons.includes('UNMAPPED_CHANGED_PATH_REQUIRES_FULL_SUITE'), 'unknown path reason missing');
 const highCoupling = select(['.agents/skills/preflight-audit/fast-path-classifier.mjs']);
 assert(highCoupling.selection === 'FULL_SUITE', 'fast-path classifier change must use full suite');
-assert(highCoupling.selectedTests.length === 28 && highCoupling.commands.length === 28, 'full suite must include all 28 selftests');
+assert(highCoupling.selectedTests.length === 29 && highCoupling.commands.length === 29, 'full suite must include all 29 selftests');
 assert(highCoupling.reasons.includes('HIGH_COUPLING_PATH_REQUIRES_FULL_SUITE'), 'high coupling reason missing');
 
 const docsOnly = select(['CHANGELOG.md','VERSION']);

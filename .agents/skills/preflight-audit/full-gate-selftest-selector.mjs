@@ -5,7 +5,7 @@ import { parseInput, validateEvidence } from './fast-path-classifier.mjs';
 
 const CORE = ['merge-authorization','merge-execution','fast-path','security-preflight','full-gate-selector'];
 const ALL = [
-  'merge-authorization','merge-execution','merge-execution-batch','foundation-sync','foundation-bootstrap','foundation-update','foundation-remote-plan','foundation-batch-rollout',
+  'merge-authorization','merge-execution','merge-execution-batch','merge-executor','foundation-sync','foundation-bootstrap','foundation-update','foundation-remote-plan','foundation-batch-rollout',
   'project-context','live-base-ref','ai-capacity','ai-provider-inventory','ai-task-router','claude-runner','fast-path','operation-preflight','actions-cost',
   'provider-qualification','provider-readiness','security-history','security-preflight','stagnation','wip-observer','portfolio-health','long-task-wait','merge-readiness','real-device',
   'full-gate-selector',
@@ -14,6 +14,7 @@ const COMMANDS = {
   'merge-authorization':['node','.agents/skills/final-pr-audit/merge-authorization-gate-selftest.mjs','.agents/skills/final-pr-audit/merge-authorization-gate.mjs'],
   'merge-execution':['node','.agents/skills/final-pr-audit/merge-execution-gate-selftest.mjs'],
   'merge-execution-batch':['node','.agents/skills/final-pr-audit/cross-repo-merge-execution-gate-selftest.mjs'],
+  'merge-executor':['node','.agents/skills/final-pr-audit/cross-repo-merge-executor-selftest.mjs'],
   'foundation-sync':['node','.agents/skills/foundation-sync-audit/foundation-sync-audit-selftest.mjs','.agents/skills/foundation-sync-audit/foundation-sync-audit.mjs'],
   'foundation-bootstrap':['node','.agents/skills/foundation-sync-audit/foundation-bootstrap-selftest.mjs','.agents/skills/foundation-sync-audit/foundation-bootstrap.mjs','.agents/skills/foundation-sync-audit/foundation-sync-audit.mjs'],
   'foundation-update':['node','.agents/skills/foundation-sync-audit/foundation-update-selftest.mjs','.agents/skills/foundation-sync-audit/foundation-update.mjs','.agents/skills/foundation-sync-audit/foundation-sync-audit.mjs'],
@@ -70,7 +71,8 @@ function isHighCoupling(path) {
   return pair(path,'.agents/skills/preflight-audit','full-gate-selftest-selector') ||
     pair(path,'.agents/skills/preflight-audit','fast-path-classifier') ||
     pair(path,'.agents/skills/final-pr-audit','merge-authorization-gate') ||
-    pair(path,'.agents/skills/final-pr-audit','merge-execution-gate');
+    pair(path,'.agents/skills/final-pr-audit','merge-execution-gate') ||
+    pair(path,'.agents/skills/final-pr-audit','cross-repo-merge-executor');
 }
 function familyFor(path) {
   const pre = '.agents/skills/preflight-audit';

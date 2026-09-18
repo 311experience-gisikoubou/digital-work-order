@@ -217,6 +217,21 @@ node .agents/skills/final-pr-audit/cross-repo-merge-execution-gate.mjs --collect
 ```
 
 A batch PASS may supply exact expected base/head values for subsequent merge API calls. The wrapper does **not** post authorization receipts, change Draft/Ready state, merge a PR, write a branch, or replace final-pr-audit. Any target failure makes the batch fail closed; do not merge a subset unless each remaining target is independently re-evaluated.
+
+### Cross-repository merge executor
+
+After the human has explicitly authorized the exact PR/HEAD targets and durable `MERGE_AUTHORIZATION_V1` receipts already exist on GitHub, use the local executor to remove repeated Ready/merge/post-merge orchestration:
+
+```text
+node .agents/skills/final-pr-audit/cross-repo-merge-executor.mjs --config <config.json>
+node .agents/skills/final-pr-audit/cross-repo-merge-executor.mjs --config <config.json> --execute
+```
+
+Without `--execute`, the executor is read-only and returns only a plan. With `--execute`, it still must first prove a valid pre-existing exact-PR/exact-HEAD human authorization receipt for every open target; the executor must never create, synthesize, or infer authorization from a CLI flag, AI state, or config field.
+
+The executor performs a read-only preflight for all targets before any mutation, marks only exact authorized Draft targets Ready, reuses the batch merge-execution gate, squash-merges with the exact audited HEAD precondition, and immediately verifies merged PR state, live `main`, merged tree equality, and single-parent equality to the audited base. On pre-merge failure it restores only PRs it changed from Draft to Ready. On partial merge/interruption it never replays a target already proven merged; remaining targets are restored to Draft when safe and may resume from durable GitHub state.
+
+A previously merged target counts as resumable only when the exact audited HEAD still matches the PR, the merge commit tree matches the audited tree, the first/only parent equals the audited base, live `main` still points at that merge commit, and an exact authorization receipt existed **before** `merged_at`. Later approval is never retroactive authorization.
 ### `PREPARED_FOR_MERGE` criteria
 
 Report `PREPARED_FOR_MERGE=yes` only when all applicable conditions are proven:
