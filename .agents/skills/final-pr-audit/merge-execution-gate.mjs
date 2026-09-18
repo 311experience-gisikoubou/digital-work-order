@@ -203,6 +203,10 @@ function classifyReceipt(comments, { author, prNumber, headSha, nowMs }) {
   return { code: 'AUTHORIZATION_RECEIPT_VALID', item: fresh[0] };
 }
 
+export function classifyAuthorizationReceipt(comments, options) {
+  return classifyReceipt(comments, options);
+}
+
 export async function runMergeExecutionGate({ repo, prNumber, baseBranch, expectedBaseSha, author, nowMs = null, nowFn = Date.now, fetchImpl = fetch, evidence = NO_EVIDENCE }) {
   const { owner, repo: repoName } = parseRepo(repo);
   if (!Number.isInteger(prNumber) || prNumber <= 0) throw new Error('Invalid PR number');
