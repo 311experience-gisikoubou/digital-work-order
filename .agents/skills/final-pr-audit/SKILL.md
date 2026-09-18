@@ -207,6 +207,16 @@ Execution-gate self-test:
 ```text
 node .agents/skills/final-pr-audit/merge-execution-gate-selftest.mjs
 ```
+
+### Cross-repository merge-execution gate
+
+For several already-audited PRs that each have a valid exact-HEAD merge authorization receipt, use the read-only batch wrapper to collect comments first, PR state second, and the live base ref last, then reuse the single-PR merge-execution gate for every target:
+
+```text
+node .agents/skills/final-pr-audit/cross-repo-merge-execution-gate.mjs --collect-config <config.json>
+```
+
+A batch PASS may supply exact expected base/head values for subsequent merge API calls. The wrapper does **not** post authorization receipts, change Draft/Ready state, merge a PR, write a branch, or replace final-pr-audit. Any target failure makes the batch fail closed; do not merge a subset unless each remaining target is independently re-evaluated.
 ### `PREPARED_FOR_MERGE` criteria
 
 Report `PREPARED_FOR_MERGE=yes` only when all applicable conditions are proven:
