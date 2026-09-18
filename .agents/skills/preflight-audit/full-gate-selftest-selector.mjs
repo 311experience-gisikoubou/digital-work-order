@@ -5,7 +5,7 @@ import { parseInput, validateEvidence } from './fast-path-classifier.mjs';
 
 const CORE = ['merge-authorization','merge-execution','fast-path','security-preflight','full-gate-selector'];
 const ALL = [
-  'merge-authorization','merge-execution','foundation-sync','foundation-bootstrap','foundation-update','foundation-remote-plan','foundation-batch-rollout',
+  'merge-authorization','merge-execution','merge-execution-batch','foundation-sync','foundation-bootstrap','foundation-update','foundation-remote-plan','foundation-batch-rollout',
   'project-context','live-base-ref','ai-capacity','ai-provider-inventory','ai-task-router','claude-runner','fast-path','operation-preflight','actions-cost',
   'provider-qualification','provider-readiness','security-history','security-preflight','stagnation','wip-observer','portfolio-health','long-task-wait','merge-readiness','real-device',
   'full-gate-selector',
@@ -13,6 +13,7 @@ const ALL = [
 const COMMANDS = {
   'merge-authorization':['node','.agents/skills/final-pr-audit/merge-authorization-gate-selftest.mjs','.agents/skills/final-pr-audit/merge-authorization-gate.mjs'],
   'merge-execution':['node','.agents/skills/final-pr-audit/merge-execution-gate-selftest.mjs'],
+  'merge-execution-batch':['node','.agents/skills/final-pr-audit/cross-repo-merge-execution-gate-selftest.mjs'],
   'foundation-sync':['node','.agents/skills/foundation-sync-audit/foundation-sync-audit-selftest.mjs','.agents/skills/foundation-sync-audit/foundation-sync-audit.mjs'],
   'foundation-bootstrap':['node','.agents/skills/foundation-sync-audit/foundation-bootstrap-selftest.mjs','.agents/skills/foundation-sync-audit/foundation-bootstrap.mjs','.agents/skills/foundation-sync-audit/foundation-sync-audit.mjs'],
   'foundation-update':['node','.agents/skills/foundation-sync-audit/foundation-update-selftest.mjs','.agents/skills/foundation-sync-audit/foundation-update.mjs','.agents/skills/foundation-sync-audit/foundation-sync-audit.mjs'],
@@ -52,6 +53,7 @@ const GROUPS = {
   'portfolio-health':['portfolio-health'],
   'long-task-wait':['long-task-wait','stagnation'],
   'merge-readiness':['merge-readiness'],
+  'merge-execution-batch':['merge-execution-batch'],
   'real-device':['real-device'],
   'ai-capacity':['ai-capacity'],
   'ai-routing':['ai-provider-inventory','ai-task-router','provider-qualification','provider-readiness'],
@@ -86,6 +88,7 @@ function familyFor(path) {
   if (['bounded-task-wait','turn-wait-budget'].some(stem => pair(path,'.agents/skills/long-task-wait',stem))) return 'long-task-wait';
   if (pair(path,'.agents/skills/long-task-wait','long-task-wait')) return 'long-task-wait';
   if (pair(path,pre,'cross-repo-merge-readiness')) return 'merge-readiness';
+  if (pair(path,'.agents/skills/final-pr-audit','cross-repo-merge-execution-gate')) return 'merge-execution-batch';
   if (pair(path,'.agents/skills/test-gate','real-device-preparation-gate')) return 'real-device';
   if (pair(path,pre,'ai-capacity-observer')) return 'ai-capacity';
   if (['ai-provider-inventory','ai-task-router','provider-adapter-qualification','provider-adapter-readiness'].some(stem => pair(path,pre,stem))) return 'ai-routing';

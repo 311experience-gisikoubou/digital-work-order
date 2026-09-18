@@ -362,3 +362,12 @@
 - verification: exact dev.94 pre-sync audit PASS; post-update foundation-sync-audit PASS; missing/stale 0/0; Foundation dev.95 Full Suite source evidence PASS (27/27)
 - scope: Foundation governance/read-only merge-readiness tooling + sync/version metadata only; product/runtime/data/dependency behavior unchanged
 - merge authorization remains an explicit human gate
+
+## 2026-09-18 - ai-dev-foundation 1.0.0-dev.96
+- source commit: dc3e89158a7186b11685091ee1d5dd38f808afcb
+- trusted previous foundation: 1.0.0-dev.95 (6da4926579cde6b7a11d87a9f6bca97fcde191f2)
+- target branch: chore/foundation-dev96-sync
+- method: fail-closed foundation-update.mjs dev.95 -> dev.96
+- verification: dev.95 pre-sync audit PASS; dev.96 post-sync audit PASS; missing/stale 0/0; Foundation dev.96 Full Suite source evidence PASS (28/28)
+- scope: shared read-only batch merge-execution gate + selector/docs/version metadata only; product/runtime/data/dependency behavior unchanged
+- merge authorization remains explicit and exact-HEAD bound
