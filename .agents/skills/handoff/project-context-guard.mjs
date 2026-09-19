@@ -38,6 +38,10 @@ function cleanContextId(value) {
   const id = cleanText(value, 120);
   return id && CONTEXT_ID_RE.test(id) ? id : null;
 }
+function cleanFingerprint(value) {
+  const fingerprintValue = cleanText(value, 64);
+  return fingerprintValue && /^[a-f0-9]{64}$/.test(fingerprintValue) ? fingerprintValue : null;
+}
 function stop(code, message, detail = {}) {
   return { result: 'STOP', contextHealth: 'SEVERE_DRIFT', severity: 'SEVERE', code, message, ...detail };
 }
@@ -298,6 +302,51 @@ export function validateProjectContext(manifestInput, stateInput) {
   };
 }
 
+export function validateTurnContinuation(manifestInput, stateInput) {
+  const normalized = normalizeManifest(manifestInput);
+  if (normalized.error) return normalized.error;
+  const m = normalized.value;
+  if (m.repositoryRole !== 'ROOT') return stop('PROJECT_CONTEXT_CANONICAL_ROOT_REQUIRED', 'Turn-start continuation must use the canonical PROJECT_CONTEXT.json from the active Project Root repository.');
+
+  const state = stateInput && typeof stateInput === 'object' && !Array.isArray(stateInput) ? stateInput : null;
+  const allowedKeys = ['schemaVersion','activeProjectContextId','activeContextFingerprint','candidateProjectContextId','candidateContextFingerprint','continuationMode'];
+  if (!state || state.schemaVersion !== 1 || Object.keys(state).some((key) => !allowedKeys.includes(key)) || Object.keys(state).length !== allowedKeys.length) {
+    return stop('TURN_CONTEXT_STATE_INVALID', 'Turn-start continuation state must use the closed schemaVersion=1 shape.');
+  }
+  if (state.continuationMode !== 'IMPLICIT') return stop('TURN_CONTEXT_MODE_INVALID', 'Turn-start guard only validates implicit continuation. Explicit project changes remain a separate human/project-context decision.');
+
+  const activeProjectContextId = cleanContextId(state.activeProjectContextId);
+  const activeContextFingerprint = cleanFingerprint(state.activeContextFingerprint);
+  const candidateProjectContextId = cleanContextId(state.candidateProjectContextId);
+  const candidateContextFingerprint = cleanFingerprint(state.candidateContextFingerprint);
+  if (!activeProjectContextId || !activeContextFingerprint) return stop('TURN_CONTEXT_ACTIVE_EVIDENCE_REQUIRED', 'Active Project Context ID and fingerprint are required.');
+  if (!candidateProjectContextId || !candidateContextFingerprint) return stop('TURN_CONTEXT_CANDIDATE_EVIDENCE_REQUIRED', 'Implicit continuation requires retained candidate Project Context identity; do not guess it from recent repository activity.');
+
+  const canonicalFingerprint = fingerprint(m);
+  if (activeProjectContextId !== m.projectContextId || activeContextFingerprint !== canonicalFingerprint) {
+    return stop('PROJECT_CONTEXT_TRANSITION_MISMATCH', 'Active project identity conflicts with the canonical Project Root manifest.');
+  }
+  if (candidateProjectContextId !== activeProjectContextId || candidateContextFingerprint !== activeContextFingerprint) {
+    return stop('CROSS_PROJECT_CONTINUATION_BLOCKED', 'Implicit continuation candidate belongs to a different Project Context. Re-select work from the active Project Root instead of continuing stale cross-project context.', {
+      activeProjectContextId,
+      candidateProjectContextId,
+      projectRootRepository: m.rootRepo,
+      nextAction: 'RESELECT_FROM_ACTIVE_PROJECT',
+    });
+  }
+
+  return {
+    result: 'PROCEED',
+    contextHealth: 'CLEAR',
+    severity: 'NONE',
+    code: 'TURN_CONTEXT_ALIGNED',
+    projectContextId: m.projectContextId,
+    projectRootRepository: m.rootRepo,
+    contextFingerprint: canonicalFingerprint,
+    nextAction: 'CONTINUE_WITHIN_ACTIVE_PROJECT',
+  };
+}
+
 export function renderHandoffSkeleton(manifestInput, stateInput) {
   const v = validateProjectContext(manifestInput, stateInput);
   if (v.result === 'STOP') return v;
@@ -399,7 +448,7 @@ function parseArgs(argv) {
   const valued = new Map(); const flags = new Set();
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
-    if (a === '--pretty' || a === '--render') { if (flags.has(a)) return { error: 'duplicate' }; flags.add(a); continue; }
+    if (a === '--pretty' || a === '--render' || a === '--turn-start') { if (flags.has(a)) return { error: 'duplicate' }; flags.add(a); continue; }
     if (!['--context-file', '--state-file', '--state-json', '--handoff-file'].includes(a) || i + 1 >= argv.length || argv[i + 1].startsWith('--')) return { error: 'invalid' };
     if (valued.has(a)) return { error: 'duplicate' };
     valued.set(a, argv[++i]);
@@ -428,12 +477,13 @@ async function main() {
   if ((!stateFile && !stateJson) || (stateFile && stateJson)) { process.stdout.write(`${JSON.stringify(stop('PROJECT_CONTEXT_ARGUMENT_INVALID', 'Use exactly one of --state-file or --state-json.'))}\n`); process.exitCode = 2; return; }
   let state; try { state = stateFile ? await readStrictJsonFile(stateFile) : parseJsonStrict(stateJson); } catch { process.stdout.write(`${JSON.stringify(stop('HANDOFF_STATE_INVALID', 'Handoff state JSON is missing, ambiguous, or unreadable.'))}\n`); process.exitCode = 2; return; }
   if (handoffFile) {
-    if (parsed.flags.has('--render')) { process.stdout.write(`${JSON.stringify(stop('PROJECT_CONTEXT_ARGUMENT_INVALID', 'Artifact validation cannot be combined with --render.'))}\n`); process.exitCode = 2; return; }
+    if (parsed.flags.has('--render') || parsed.flags.has('--turn-start')) { process.stdout.write(`${JSON.stringify(stop('PROJECT_CONTEXT_ARGUMENT_INVALID', 'Artifact validation cannot be combined with --render or --turn-start.'))}\n`); process.exitCode = 2; return; }
     let markdown; try { markdown = await readUtf8FileFatal(handoffFile); } catch { markdown = null; }
     const result = validateHandoffArtifact(manifest, markdown, state);
     process.stdout.write(`${JSON.stringify(result, null, parsed.flags.has('--pretty') ? 2 : 0)}\n`); if (result.result === 'STOP') process.exitCode = 2; return;
   }
-  const result = parsed.flags.has('--render') ? renderHandoffSkeleton(manifest, state) : validateProjectContext(manifest, state);
+  if (parsed.flags.has('--render') && parsed.flags.has('--turn-start')) { process.stdout.write(`${JSON.stringify(stop('PROJECT_CONTEXT_ARGUMENT_INVALID', '--render and --turn-start are mutually exclusive.'))}\n`); process.exitCode = 2; return; }
+  const result = parsed.flags.has('--turn-start') ? validateTurnContinuation(manifest, state) : (parsed.flags.has('--render') ? renderHandoffSkeleton(manifest, state) : validateProjectContext(manifest, state));
   if (parsed.flags.has('--render') && result.result !== 'STOP') process.stdout.write(result.markdown);
   else process.stdout.write(`${JSON.stringify(result, null, parsed.flags.has('--pretty') ? 2 : 0)}\n`);
   if (result.result === 'STOP') process.exitCode = 2;

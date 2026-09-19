@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: Use when moving work to a new chat, Claude Code, Codex, another AI, or another session, or when the user asks for handoff, 引き継ぎ, session transfer, context summary, or continuation notes. Produce paste-ready Markdown rooted in the established Project Context, never the most recently touched repository.
+description: Use when moving work to a new chat, Claude Code, Codex, another AI, or another session, or when the user asks for handoff, 引き継ぎ, session transfer, context summary, or continuation notes. Also use its turn-start guard when a short implicit continuation cue could resume stale work from another Project Context. Keep the active Project Root authoritative, never the most recently touched repository.
 ---
 
 # Handoff (Native Skill Wrapper)
