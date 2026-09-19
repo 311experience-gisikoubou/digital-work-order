@@ -1,11 +1,29 @@
 ---
 name: handoff
-description: Use when moving work to a new chat, Claude Code, Codex, another AI, or another session, or when the user asks for handoff, 引き継ぎ, session transfer, context summary, or continuation notes. Produce paste-ready Markdown rooted in the established Project Context, never the most recently touched repository.
+description: Use when moving work to a new chat, Claude Code, Codex, another AI, or another session, or when the user asks for handoff, 引き継ぎ, session transfer, context summary, or continuation notes. Also use its turn-start guard when a short implicit continuation cue could resume stale work from another Project Context. Keep the active Project Root authoritative, never the most recently touched repository.
 ---
 
 # Handoff
 
 Use when the next agent or session needs enough context to continue safely.
+
+## Ordinary-Turn Continuation Alignment
+
+Before interpreting a short continuation-only cue such as `次`, `続けて`, or `進めて`, resolve the active Project Context before selecting the Current Task. Recent repository activity, the last PR discussed, or the most recently touched project never overrides the active Project Root.
+
+When the execution environment independently retains both active and candidate Project Context identity, run the existing guard in turn-start mode:
+
+```text
+node .agents/skills/handoff/project-context-guard.mjs --context-file <active-project-root>/PROJECT_CONTEXT.json --state-json <turn-state-json> --turn-start --pretty
+```
+
+The turn state is a closed `schemaVersion: 1` object containing exactly `activeProjectContextId`, `activeContextFingerprint`, `candidateProjectContextId`, `candidateContextFingerprint`, and `continuationMode: "IMPLICIT"`. The active identity must match the canonical Project Root manifest. The candidate identity must match the active identity exactly before implicit continuation is allowed.
+
+- Same active/candidate identity returns `TURN_CONTEXT_ALIGNED`.
+- Different ID or fingerprint returns `CROSS_PROJECT_CONTINUATION_BLOCKED` and `RESELECT_FROM_ACTIVE_PROJECT`.
+- Missing candidate identity fails closed; do not infer it from the latest repository, PR, or task.
+- `--turn-start` never authorizes an explicit Project change. A user request that explicitly names another Project/repository proceeds through the normal scope/ownership/context decision path instead of being treated as implicit continuation.
+- Browser ChatGPT or another environment that cannot independently retain candidate identity and mechanically invoke the CLI follows the same active-project-first rule operationally, but that protection is `OPERATIONAL`, not `ENFORCED`.
 
 ## Canonical Project Context
 

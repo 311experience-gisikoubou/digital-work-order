@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url';
 const guardArg = process.argv[2];
 if (!guardArg) throw new Error('guard path required');
 const guardPath = resolve(guardArg);
-const { validateProjectContext, renderHandoffSkeleton, validateHandoffArtifact, parseJsonStrict, observeProjectContextEvidence } = await import(pathToFileURL(guardPath).href);
+const { validateProjectContext, validateTurnContinuation, renderHandoffSkeleton, validateHandoffArtifact, parseJsonStrict, observeProjectContextEvidence } = await import(pathToFileURL(guardPath).href);
 
 function assert(condition, message) { if (!condition) throw new Error(`FAIL: ${message}`); }
 function complete(markdown) { return markdown; }
@@ -27,6 +27,30 @@ function manifest(overrides = {}) {
   };
 }
 const BASE_FINGERPRINT = createHash('sha256').update(JSON.stringify(['delivery-billing-v1','Delivery Billing','311experience-gisikoubou/dental-delivery-billing','Safely manage delivery and billing workflow.'])).digest('hex');
+function foundationManifest(overrides = {}) {
+  return {
+    schemaVersion: 1,
+    projectContextId: 'ai-common-platform-v1',
+    projectName: 'AI Common Platform',
+    projectRootRepository: '311experience-gisikoubou/ai-dev-foundation',
+    finalObjective: 'Provide a safe reusable AI foundation.',
+    thisRepository: '311experience-gisikoubou/ai-dev-foundation',
+    repositoryRole: 'ROOT',
+    ...overrides,
+  };
+}
+const FOUNDATION_FINGERPRINT = createHash('sha256').update(JSON.stringify(['ai-common-platform-v1','AI Common Platform','311experience-gisikoubou/ai-dev-foundation','Provide a safe reusable AI foundation.'])).digest('hex');
+function turnState(overrides = {}) {
+  return {
+    schemaVersion: 1,
+    activeProjectContextId: 'ai-common-platform-v1',
+    activeContextFingerprint: FOUNDATION_FINGERPRINT,
+    candidateProjectContextId: 'ai-common-platform-v1',
+    candidateContextFingerprint: FOUNDATION_FINGERPRINT,
+    continuationMode: 'IMPLICIT',
+    ...overrides,
+  };
+}
 function state(overrides = {}) {
   return {
     establishedProjectContextId: 'delivery-billing-v1',
@@ -44,6 +68,29 @@ function state(overrides = {}) {
     },
     ...overrides,
   };
+}
+
+{
+  const result = validateTurnContinuation(foundationManifest(), turnState());
+  assert(result.code === 'TURN_CONTEXT_ALIGNED' && result.nextAction === 'CONTINUE_WITHIN_ACTIVE_PROJECT', 'same-project implicit continuation should pass');
+}
+{
+  const result = validateTurnContinuation(foundationManifest(), turnState({ candidateProjectContextId: 'delivery-billing-v1', candidateContextFingerprint: BASE_FINGERPRINT }));
+  assert(result.code === 'CROSS_PROJECT_CONTINUATION_BLOCKED', 'active AI foundation must block stale delivery-billing continuation');
+  assert(result.projectRootRepository === '311experience-gisikoubou/ai-dev-foundation', 'active Project Root must remain authoritative');
+  assert(result.nextAction === 'RESELECT_FROM_ACTIVE_PROJECT', 'blocked cross-project continuation must reselect from active project');
+}
+{
+  const sameIdDrift = validateTurnContinuation(foundationManifest(), turnState({ candidateContextFingerprint: '0'.repeat(64) }));
+  assert(sameIdDrift.code === 'CROSS_PROJECT_CONTINUATION_BLOCKED', 'same context id with different candidate fingerprint must block');
+  const missingCandidate = validateTurnContinuation(foundationManifest(), turnState({ candidateProjectContextId: undefined }));
+  assert(missingCandidate.code === 'TURN_CONTEXT_CANDIDATE_EVIDENCE_REQUIRED', 'missing candidate identity must fail closed');
+  const activeDrift = validateTurnContinuation(foundationManifest(), turnState({ activeContextFingerprint: '0'.repeat(64) }));
+  assert(activeDrift.code === 'PROJECT_CONTEXT_TRANSITION_MISMATCH', 'active project drift must stop');
+  const explicitSwitch = validateTurnContinuation(foundationManifest(), turnState({ continuationMode: 'EXPLICIT' }));
+  assert(explicitSwitch.code === 'TURN_CONTEXT_MODE_INVALID', 'explicit project switch is outside implicit turn guard authority');
+  const extra = validateTurnContinuation(foundationManifest(), { ...turnState(), recentRepository: '311experience-gisikoubou/dental-delivery-billing' });
+  assert(extra.code === 'TURN_CONTEXT_STATE_INVALID', 'turn-start state must reject untrusted extra continuation hints');
 }
 
 {
@@ -297,6 +344,14 @@ try {
   assert(commitContext.status === 0, 'context fixture commit should pass');
   const liveObservation = observeProjectContextEvidence(manifestPath);
   assert(liveObservation.result === 'PROCEED' && liveObservation.actualRepository === '311experience-gisikoubou/dental-delivery-billing' && /^[a-f0-9]{40}$/.test(liveObservation.headSha), 'live Project Context observation must bind committed identity to Git');
+  const turnStatePath = join(temp, 'turn-state.json');
+  const alignedTurnState = { schemaVersion:1, activeProjectContextId:'delivery-billing-v1', activeContextFingerprint:BASE_FINGERPRINT, candidateProjectContextId:'delivery-billing-v1', candidateContextFingerprint:BASE_FINGERPRINT, continuationMode:'IMPLICIT' };
+  await writeFile(turnStatePath, JSON.stringify(alignedTurnState), 'utf8');
+  const alignedTurnCli = spawnSync(process.execPath, [guardPath, '--context-file', manifestPath, '--state-file', turnStatePath, '--turn-start'], { encoding:'utf8' });
+  assert(alignedTurnCli.status === 0 && JSON.parse(alignedTurnCli.stdout).code === 'TURN_CONTEXT_ALIGNED', 'CLI turn-start should allow same-project implicit continuation');
+  await writeFile(turnStatePath, JSON.stringify({ ...alignedTurnState, candidateProjectContextId:'ai-common-platform-v1', candidateContextFingerprint:FOUNDATION_FINGERPRINT }), 'utf8');
+  const blockedTurnCli = spawnSync(process.execPath, [guardPath, '--context-file', manifestPath, '--state-file', turnStatePath, '--turn-start'], { encoding:'utf8' });
+  assert(blockedTurnCli.status === 2 && JSON.parse(blockedTurnCli.stdout).code === 'CROSS_PROJECT_CONTINUATION_BLOCKED', 'CLI turn-start must block stale cross-project continuation');
   await writeFile(manifestPath, JSON.stringify(manifest({ projectName:'Drifted Working Identity' })), 'utf8');
   assert(observeProjectContextEvidence(manifestPath).code === 'PROJECT_CONTEXT_WORKTREE_DRIFT', 'working Project Context drift from HEAD must stop');
   await writeFile(manifestPath, JSON.stringify(manifest()), 'utf8');

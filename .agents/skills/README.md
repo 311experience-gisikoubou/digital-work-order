@@ -12,7 +12,7 @@
 - **`foundation-sync-audit`**：application repositoryへ同期した`AGENTS.md`とfoundation側`.agents/skills/`の全共有ファイルを実ファイル同一性で確認し、さらにClaude native skillが設定されたrepositoryでは`templates/.claude/skills/`とapplication側`.claude/skills/`のwrapperも確認する強制監査。未導入repository向けには、feature branch・clean tree・競合なしを必須にしてcanonical/wrapperをコピーし、直後に同監査を実行する`foundation-bootstrap.mjs`を持つ。既導入repository向けには、旧正本と対象がbyte一致する共有pathだけを新正本へ更新し、追加・削除・Claude wrapperも同じ基準で扱い、drift・欠落・新path衝突では上書きせずSTOPする`foundation-update.mjs`を持つ。どちらも`AGENTS.local.md`・repository固有Skill・業務コードを変更しない。version表記・sync log・canonical本文一致だけで「実効的に完全同期済み」と判定しない。
 - **`preflight-audit`**：実装・修正・リファクタリング前のGit状態・仕様・既存コード・テストの確認と、想定外差分・仕様矛盾・データ損失リスク・追加費用リスクでの停止。
 - **`post-merge-verification`**：GitHub上でPRがマージされた後の、マージ方式（squash／merge commit／rebase merge）確認、tree一致確認、local `main`のfast-forward同期、branch削除の安全判断。
-- **`handoff`**：作業を別のチャット・別のAI・別のセッションへ引き継ぐための、paste-ready Markdown形式での状況整理。
+- **`handoff`**：作業を別のチャット・別のAI・別のセッションへ引き継ぐためのProject Context固定と、通常ターンの短い暗黙継続が別Projectへ流れないためのturn-start整合確認。handoff artifactはpaste-ready Markdown、turn-startはactive/candidate identityの機械判定を使う。
 
 ## 共通本体＋アプリ側設定（B分類・技術スタック固有部分を分離）
 
