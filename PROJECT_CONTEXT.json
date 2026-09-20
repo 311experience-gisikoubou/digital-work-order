@@ -1,9 +1,50 @@
 {
-  "schemaVersion": 1,
-  "projectContextId": "digital-work-order-v1",
-  "projectName": "デジタル歯科技工指示書",
-  "projectRootRepository": "311experience-gisikoubou/digital-work-order",
-  "finalObjective": "iPad Safari と Apple Pencil を主利用環境として、歯科技工指示書の入力、手書き、PDFと印刷、安全な後続受注連携を一貫して扱う。",
-  "thisRepository": "311experience-gisikoubou/digital-work-order",
-  "repositoryRole": "ROOT"
+    "schemaVersion":  1,
+    "projectContextId":  "digital-work-order-v1",
+    "projectName":  "デジタル歯科技工指示書",
+    "projectRootRepository":  "311experience-gisikoubou/digital-work-order",
+    "finalObjective":  "iPad Safari と Apple Pencil を主利用環境として、歯科技工指示書の入力、手書き、PDFと印刷、安全な後続受注連携を一貫して扱う。",
+    "thisRepository":  "311experience-gisikoubou/digital-work-order",
+    "repositoryRole":  "ROOT",
+    "canonicalContract":  {
+                              "schemaVersion":  1,
+                              "contractId":  "digital-work-order-contract",
+                              "contractVersion":  "1",
+                              "approved":  true,
+                              "artifacts":  [
+                                                {
+                                                    "id":  "digital-work-order-project-v1",
+                                                    "kind":  "PROJECT",
+                                                    "slot":  "project-baseline",
+                                                    "status":  "CURRENT",
+                                                    "sources":  [
+                                                                    "PROJECT_CONTEXT.json"
+                                                                ]
+                                                },
+                                                {
+                                                    "id":  "digital-work-order-workflow-v1",
+                                                    "kind":  "WORKFLOW",
+                                                    "slot":  "workflow-rules",
+                                                    "status":  "CURRENT",
+                                                    "sources":  [
+                                                                    "AGENTS.md"
+                                                                ]
+                                                },
+                                                {
+                                                    "id":  "digital-work-order-security-v1",
+                                                    "kind":  "SECURITY",
+                                                    "slot":  "security-rules",
+                                                    "status":  "CURRENT",
+                                                    "sources":  [
+                                                                    "AGENTS.local.md"
+                                                                ]
+                                                }
+                                            ],
+                              "protectedDecisions":  [
+
+                                                     ],
+                              "requiredValidation":  [
+                                                         "canonical-contract-gate"
+                                                     ]
+                          }
 }
