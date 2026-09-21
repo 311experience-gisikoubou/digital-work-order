@@ -1,6 +1,6 @@
 ---
 name: test-gate
-description: Use after implementation, fixes, refactoring, UI changes, backend changes, or migration changes, including Japanese requests such as 実装後の検証, 修正後のテスト, 必要テストの選択, 型チェック相当, selftest, build, migration test, 実機確認, 未実施確認, or テストゲート. Select and run only verification that is proportionate to the actual changed scope, require machine-readable scope planning before heavy checks, preserve exact-head evidence, and never treat unrun or unavailable checks as passing.
+description: Use during and after implementation, fixes, refactoring, UI changes, backend changes, migration changes, generated-artifact work, or configuration changes, including EARLY / MILESTONE / FINAL REALITY checks and Japanese requests such as 実装途中の確認, 実装後の検証, 修正後のテスト, 必要テストの選択, selftest, build, migration test, 実機確認, 未実施確認, or テストゲート. Select proportionate objective evidence, fail closed on target/state mismatch, preserve exact-state evidence, and never treat unrun or unavailable checks as passing.
 ---
 
 # Test Gate (Native Skill Wrapper)
