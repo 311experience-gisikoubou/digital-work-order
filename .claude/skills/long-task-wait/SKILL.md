@@ -1,6 +1,6 @@
 ---
 name: long-task-wait
-description: Use for local long-running tasks that expose a stable task ID and read-only status function. Replace repeated short-interval status polling with a bounded local wait while preserving fail-closed task identity, timeout recovery, and no-duplicate-start rules.
+description: Use for local long-running tasks and long-running Claude implementation jobs. Prefer asynchronous job launch plus read-only status for Claude work, and bounded local waits for existing stable task IDs, while preserving fail-closed identity, timeout recovery, and no-duplicate-start rules.
 ---
 
 # Long Task Wait (Native Skill Wrapper)
