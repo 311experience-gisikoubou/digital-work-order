@@ -400,14 +400,3 @@
 - Human Decision Sync adoption: enabled with no automatic backfill of project-specific mutable decisions; current canonicalContract remains authority until future explicit human decisions are synced
 - scope: Foundation governance/control + PROJECT_CONTEXT governance metadata only; application/runtime/data/dependency behavior unchanged
 - merge: Draft remains locked until fresh explicit human authorization for exact PR/head
-
-## 2026-09-22 - ai-dev-foundation 1.0.0-dev.113
-- source commit:  ac0a884c99fd7eb93e455207d46e28b5c7a76e0
-- trusted previous foundation: 1.0.0-dev.108 (ce6432288d9bdeadaaa1aaa505e66223c0067361)
-- target branch: chore/foundation-dev113-layered-sync
-- method: fail-closed oundation-update.mjs; Layered V1 migration
-- verification: post-update oundation-sync-audit PASS; 135/135 managed files current; missing/stale 0/0
-- local-source preservation: AGENTS.local.md, repository PROJECT_COMPLETION.md state, and repository-owned root CLAUDE.md unchanged
-- native entrypoints present: Codex=AGENTS.md, Claude=.claude/CLAUDE.md, Gemini=GEMINI.md, Antigravity=.agents/rules/ai-foundation.md
-- runtime note: Claude live prompt is currently blocked by session limit; Codex/Gemini CLI are not installed on this PC; Antigravity 1.107.0 is installed. Four-tool runtime PASS is not claimed.
-- scope: Foundation governance/entrypoint files only; application source/runtime/DB/schema/dependency/data paths unchanged
