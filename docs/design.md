@@ -218,7 +218,7 @@ Issue #82で、受注の自動長期保存ではなく **`sessionStorage` を使
 - 別画像への差し替え時とページ離脱時も、使用中のObject URLを解放する。
 - Phase 1では画像を `localStorage` / IndexedDB / Cache Storage / `state.orders` に保存しない。
 - Phase 1では取り込んだ画像を外部API・Firebase等へ送信しない。
-- 医院側の既存 `ref-media` とは独立した技工所側機能として扱う。
+- 医院側の「参考資料メディア添付UI」とは独立した技工所側機能（紙画像の取り込み）として扱う。
 - Phase 1ではOCR・AI解析・項目自動入力・データ化は行わない。
 - iPad Safari実機で、表示・カメラ起動・プレビュー・差し替え・破棄・医院側/受注管理切替を確認済み。
 - 将来のOCR/データ化は、次節のPhase 2設計に従う。OCR・フォーム反映・画像自動破棄の実装は別Issueで扱う。
