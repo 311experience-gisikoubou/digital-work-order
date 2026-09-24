@@ -19,9 +19,9 @@
 - Issue #117 Phase 1として、参考資料をiPadメディアUIへ置き換えた（`media.js` 新規、`index.html` / `style.css` 最小変更、`app.js` 変更なし）。
 - 写真・動画のcapture入力、音声録音（MediaRecorder）、複数ファイル追加、プレビュー/再生、個別削除、Object URL revokeを実装した。ブラウザ内一時メモリのみ。
 - `tests/media.test.js` を追加（架空サンプルのみ）。全 `tests/*.test.js` がPASS。
-- GPT独立監査で全テスト 90 PASS / 0 FAIL を確認し、古い文書参照1件（design.md 第13節の `ref-media` 表記）を見つけて修正した。final-pr-auditはPASSではない（PR未作成のため未実施）。
+- GPT独立監査で全テスト 90 PASS / 0 FAIL を確認し、古い文書参照1件（design.md 第13節の `ref-media` 表記）を見つけて修正した。final-pr-auditの自動/コード/GitHub確認はここまで完了したが、必須のiPad Safari実機確認が未実施のため、全体PASSはまだ出せない。
 - `docs/design.md` 第15.12節にPhase 1実装事実を追記した。Phase 0境界は不変。
-- PRは未作成（GPTが独立監査後にDraft PRを作る）。mergeは行っていない。
+- Draft PR #118「feat: iPadメディア添付UI Phase 1」を作成した。mergeは行っていない。
 
 ## 未完了
 
@@ -31,7 +31,7 @@
 
 ## 次の最小作業
 
-- GPTがfinal-pr-auditを行い、PASSならDraft PRを作る。
+- iPad Safari実機確認を準備・実施する。合格後、GPTがfinal-pr-auditを完了し、merge前で停止する。
 
 ## blocker
 
@@ -39,5 +39,5 @@
 
 ## 人間確認が必要な項目
 
-- iPad Safari実機でのメディア操作確認（上記未確認項目）。
-- merge許可（人間が明示的に指示した場合のみ実施）。
+- iPad Safari実機でのメディア操作・見た目の確認（上記未確認項目）。
+- 実機確認後の、merge許可（人間が明示的に指示した場合のみ実施）。
