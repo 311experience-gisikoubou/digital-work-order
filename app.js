@@ -428,7 +428,20 @@ function generateWorkOrderRef(cryptoApi = globalThis.crypto) {
 // ============================================================
 //  受注一覧反映処理
 // ============================================================
+let submitInFlight = false;
+
 document.getElementById('submit-btn').addEventListener('click', async () => {
+  // 添付のcommitを待つ間の二重送信で受注が重複しないようにする。
+  if (submitInFlight) return;
+  submitInFlight = true;
+  try {
+    await submitOrder();
+  } finally {
+    submitInFlight = false;
+  }
+});
+
+async function submitOrder() {
   const data = collectFormData();
   const errors = validate(data);
 
@@ -445,13 +458,25 @@ document.getElementById('submit-btn').addEventListener('click', async () => {
     return;
   }
 
+  // 添付は state.orders へ入れる前に canonical workOrderRef へ紐付ける。
+  // 添付があり永続化できない/失敗した場合は fail closed（受注へ反映せず、フォームと添付を保持）。
+  // commit成功後の state.orders 反映は throw しない既存の best-effort 処理を前提とする（rollback不要の invariant）。
+  if (typeof ReferenceMediaManager !== 'undefined' && typeof ReferenceMediaManager.commitCurrentDraft === 'function') {
+    try {
+      await ReferenceMediaManager.commitCurrentDraft(data.workOrderRef);
+    } catch (error) {
+      showToast((error && error.userMessage) || '添付を安全に保存できないため、受注へ反映できませんでした', 'error');
+      return;
+    }
+  }
+
   // Reflect to the page order list and same-tab session only; no external transmission.
   state.orders.unshift(data);
   if (typeof syncTemporaryOrdersToSession === 'function') syncTemporaryOrdersToSession();
   if (typeof syncOrderLossGuard === 'function') syncOrderLossGuard();
   showToast('✅ このページの受注一覧へ反映しました');
   resetForm();
-});
+}
 
 function resetForm() {
   // テキスト入力リセット

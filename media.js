@@ -1,6 +1,7 @@
 // ============================================================
-//  参考資料メディア（Phase 1: ブラウザ内一時メモリのみ）
-//  Blob / Object URL は永続化しない。OPFS・暗号・送信は扱わない。
+//  参考資料メディア（UI・録音・Object URL）
+//  Object URL は表示専用で永続化しない。Blob/metadataの保存・復元・owner管理は
+//  media-storage.js（ReferenceMediaStorage）が担当する。暗号・送信は扱わない。
 // ============================================================
 (function(global) {
   'use strict';
@@ -10,6 +11,9 @@
   const SEND_NOTICE_TEXT = '送信完了までこの画面を閉じないでください';
   const MAX_NAME_CHARS = 100;
   const FALLBACK_NAME = '無題ファイル';
+  const UNPERSISTED_MESSAGE = '端末内に保存できていない添付があるため受注へ反映できません。その添付を削除するか、もう一度追加してください';
+  const UNRENDERED_MESSAGE = '端末内の添付を画面に表示できなかったため受注へ反映できません。ページを再読み込みしてからもう一度お試しください';
+  const UNSUPPORTED_MESSAGE = 'このブラウザでは添付を安全に保存できないため受注へ反映できません';
   const EXT_KIND = {
     jpg: 'image', jpeg: 'image', png: 'image', gif: 'image', webp: 'image', heic: 'image', heif: 'image',
     mp4: 'video', mov: 'video', m4v: 'video', webm: 'video',
@@ -102,7 +106,7 @@
       }
       if (!objectUrl) return null;
       const item = {
-        id: generateAttachmentId(),
+        id: typeof opts.id === 'string' && opts.id ? opts.id : generateAttachmentId(),
         source: opts.source || 'file-picker',
         kind: opts.kind && KINDS.includes(opts.kind) ? opts.kind : classifyKind(mime, rawName),
         name: sanitizeDisplayName(rawName),
@@ -110,7 +114,7 @@
         size: blob.size,
         blob,
         objectUrl,
-        createdAt: Date.now()
+        createdAt: Number.isSafeInteger(opts.createdAt) ? opts.createdAt : Date.now()
       };
       attachments.push(item);
       return item;
@@ -156,6 +160,20 @@
     generateAttachmentId,
     createAttachmentStore
   };
+  // UI統合API。DOMがある環境では init() が実体へ差し替える。
+  // 受注確定時の判定（純関数）。'fail' | 'skip' | 'commit'。
+  // 未保存の添付が1件でもあれば fail。永続化不可で添付0件なら従来フロー(skip)。永続化可なら0件でも commit（active draft更新・不正行の検出）。
+  function decideCommit(state) {
+    const items = state.items || [];
+    // 添付が画面の一覧へ出せなかった場合は、可視項目が0件でも再読込まで確定させない。
+    if (state.hiddenAttachmentBlock) return 'fail';
+    if (!state.persistenceReady) return items.length ? 'fail' : 'skip';
+    if (items.some(item => !state.persistedIds.has(item.id))) return 'fail';
+    return 'commit';
+  }
+  helpers.decideCommit = decideCommit;
+  helpers.hasAttachments = () => false;
+  helpers.commitCurrentDraft = async () => ({ committed: 0 });
   global.ReferenceMediaManager = helpers;
   if (typeof module !== 'undefined' && module.exports) module.exports = helpers;
 
@@ -173,6 +191,29 @@
     const recordingEl = $('#media-recording-indicator');
     const noticeEl = $('#media-send-notice');
     const store = createAttachmentStore();
+
+    // ---- 永続化（media-storage.js）。非対応・初期化失敗時はPhase 1同様のメモリ内添付だけ使う。 ----
+    const storageApi = global.ReferenceMediaStorage;
+    let persistence = null;
+    try { persistence = storageApi ? storageApi.createBrowserPersistence(global) : null; } catch (_) { persistence = null; }
+    let persistenceReady = !!(persistence && persistence.available);
+    const persistedIds = new Set();
+    // 添付を一覧(in-memory store)へ出せなかった件数。セッション限定で、再読込で0に戻り、永続済み分は復元を再試行する。
+    let materializationFailureCount = 0;
+    let pendingAdds = 0;
+    let queue = Promise.resolve();
+    // 追加・削除・復元・受注確定を直列化し、受注確定が未完了の追加を追い越さないようにする。
+    function enqueue(task) {
+      const run = queue.then(task);
+      queue = run.catch(() => {});
+      return run;
+    }
+    function storageError(code, message) {
+      const error = new Error(code);
+      error.code = code;
+      error.userMessage = message;
+      return error;
+    }
 
     let recorder = null;
     let recorderStream = null;
@@ -239,8 +280,23 @@
         del.textContent = '削除';
         del.setAttribute('aria-label', item.name + ' を削除');
         del.addEventListener('click', () => {
-          store.remove(item.id);
-          render();
+          if (!persistedIds.has(item.id)) {
+            store.remove(item.id);
+            render();
+            return;
+          }
+          // metadata削除 -> OPFSファイルbest-effort削除。失敗時は一覧に残す。
+          del.disabled = true;
+          enqueue(async () => {
+            try {
+              await persistence.removeAttachment(item.id);
+              persistedIds.delete(item.id);
+              store.remove(item.id);
+            } catch (error) {
+              showError((error && error.userMessage) || '添付を削除できませんでした。もう一度お試しください');
+            }
+            render();
+          });
         });
         li.appendChild(del);
         listEl.appendChild(li);
@@ -256,6 +312,41 @@
       return item;
     }
 
+    // 保存に成功してから一覧へ出す。非対応時はメモリ内だけ（受注確定時にfail closed）。
+    function addAttachment(blob, options) {
+      if (!persistenceReady) {
+        addBlob(blob, options);
+        render();
+        return;
+      }
+      const rawName = options.name || blob.name || '';
+      const kind = options.kind && KINDS.includes(options.kind) ? options.kind : classifyKind(blob.type, rawName);
+      const name = sanitizeDisplayName(rawName);
+      pendingAdds += 1;
+      enqueue(async () => {
+        try {
+          const meta = await persistence.persistAttachment({
+            blob, attachmentId: persistence.newAttachmentId(), source: options.source || 'file-picker', kind, name
+          });
+          const item = store.add(blob, { id: meta.attachmentId, source: meta.source, kind: meta.kind, name: meta.name, createdAt: meta.createdAt });
+          if (!item) {
+            // 永続化は成功済み。OPFS/metadataは消さず、再読込で復元を再試行する。このセッションでは受注確定を止める。
+            materializationFailureCount += 1;
+            showError(UNRENDERED_MESSAGE);
+            return;
+          }
+          persistedIds.add(item.id);
+        } catch (error) {
+          // 保存に失敗した添付は未保存項目として一覧に残す（persistedIdsへは入れない）。受注確定はfail closedし、削除か再追加を促す。
+          if (!store.add(blob, { source: options.source || 'file-picker', kind, name })) materializationFailureCount += 1;
+          showError((error && error.userMessage) || '添付を端末内に保存できませんでした。もう一度お試しください');
+        } finally {
+          pendingAdds -= 1;
+          render();
+        }
+      });
+    }
+
     function bindFileInput(id, source) {
       const input = $(id);
       const trigger = $(id + '-btn');
@@ -264,9 +355,8 @@
         const files = Array.from(input.files || []);
         if (!files.length) { input.value = ''; return; }
         showError('');
-        files.forEach(file => addBlob(file, { source }));
+        files.forEach(file => addAttachment(file, { source }));
         input.value = '';
-        render();
       });
     }
 
@@ -297,8 +387,7 @@
       const type = (chunks[0] && chunks[0].type) || (rec && rec.mimeType) || '';
       const blob = new Blob(chunks, type ? { type } : undefined);
       if (!blob.size) return;
-      addBlob(blob, { source: 'recording', kind: 'audio', name: buildRecordingName(new Date(), blob.type) });
-      render();
+      addAttachment(blob, { source: 'recording', kind: 'audio', name: buildRecordingName(new Date(), blob.type) });
     }
 
     function stopRecording() {
@@ -373,6 +462,7 @@
       }
       stopTracks();
       store.clear();
+      persistedIds.clear();
       render();
     }
     // beforeunloadは離脱確認でキャンセルされ得るため、確定後に必ず発火するpagehideで解放する。
@@ -383,7 +473,51 @@
     noticeEl.hidden = true;
     helpers.setSendingNoticeVisible = visible => { noticeEl.hidden = !visible; };
 
+    // 受注確定時: 現在のdraft添付を workOrderRef へ紐付ける。失敗時は例外（呼び出し側が受注反映を中止する）。
+    helpers.hasAttachments = () => store.list().length + pendingAdds > 0;
+    helpers.commitCurrentDraft = workOrderRef => enqueue(async () => {
+      const decision = decideCommit({ items: store.list(), persistedIds, persistenceReady, hiddenAttachmentBlock: materializationFailureCount > 0 });
+      if (decision === 'skip') return { committed: 0 };
+      if (decision === 'fail') {
+        const error = storageError('MEDIA_STORAGE_UNAVAILABLE', materializationFailureCount > 0 ? UNRENDERED_MESSAGE : persistenceReady ? UNPERSISTED_MESSAGE : UNSUPPORTED_MESSAGE);
+        showError(error.userMessage);
+        throw error;
+      }
+      let receipt;
+      try {
+        receipt = await persistence.commitDraftToWorkOrder(workOrderRef);
+      } catch (error) {
+        showError((error && error.userMessage) || UNSUPPORTED_MESSAGE);
+        throw error;
+      }
+      // 紐付け成功後は画面上の一覧とObject URLだけ空にする（OPFSファイルとmetadataは保持）。
+      persistedIds.clear();
+      store.clear();
+      showError('');
+      render();
+      return { committed: receipt.count };
+    });
+
     render();
+    if (persistenceReady) {
+      enqueue(async () => {
+        const draft = await persistence.getOrCreateActiveDraft();
+        const restored = await persistence.restoreOwner(draft);
+        if (restored.missing > 0 || restored.invalid > 0 || restored.corrupt > 0) showError('保存できなかった添付を除外しました。必要な資料は再追加してください。');
+        restored.items.forEach(({ meta, blob }) => {
+          const item = store.add(blob, { id: meta.attachmentId, source: meta.source, kind: meta.kind, name: meta.name, createdAt: meta.createdAt });
+          if (item) persistedIds.add(item.id);
+          else materializationFailureCount += 1;
+        });
+        if (materializationFailureCount > 0) showError(UNRENDERED_MESSAGE);
+        render();
+      }).catch(error => {
+        // 復元に失敗してもアプリは壊さない。以後の添付はメモリ内のみとし、受注確定時にfail closedする。
+        persistenceReady = false;
+        materializationFailureCount += 1; // 永続済みの添付が非表示のまま残り得るため、再読込まで確定させない
+        showError((error && error.userMessage) || '端末内に保存された添付を読み込めませんでした');
+      });
+    }
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

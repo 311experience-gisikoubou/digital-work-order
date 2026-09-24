@@ -12,43 +12,39 @@
 
 ## 現在branch
 
-- feat/media-attachments-phase1（基準: origin/main 10061baf55ad98192a047ccb1de0266bac3f870e）
+- feat/media-local-storage-phase2（基準: origin/main 5ffe6cefa6c1b4075fd839af422a937add121dbc）
 
 ## 完了したこと
 
-- Issue #117 Phase 1として、参考資料をiPadメディアUIへ置き換えた（`media.js` 新規、`index.html` / `style.css` 最小変更、`app.js` 変更なし）。
-- 写真・動画のcapture入力、音声録音（MediaRecorder）、複数ファイル追加、プレビュー/再生、個別削除、Object URL revokeを実装した。ブラウザ内一時メモリのみ。
-- `tests/media.test.js` を追加（架空サンプルのみ）。全 `tests/*.test.js` がPASS。
-- GPT独立監査で全テスト 90 PASS / 0 FAIL を確認し、古い文書参照1件（design.md 第13節の `ref-media` 表記）を見つけて修正した。final-pr-audit は現在のPhase 1実装scopeについてPASS。音声のiPad実機確認だけはHTTPS環境でのRelease Gateとして別管理する。
-- `docs/design.md` 第15.12節にPhase 1実装事実を追記した。Phase 0境界は不変。
-- Draft PR #118「feat: iPadメディア添付UI Phase 1」を作成した（現在もDraft PR #118が現行）。mergeは行っていない。
-- 自動確認とコード/GitHubレビューは完了した。
-- iPad実機テストを一度実施した。Phase 1のUIには到達でき、写真/動画/ファイルの流れについて、このテストからblockerの報告はない（詳細なPASS証拠は記録していない）。音声のみ未検証。
+- Issue #119 Phase 2として、参考資料メディアのローカル永続化とworkOrderRef紐付けを実装した（`media-storage.js` 新規、`media.js` / `app.js` / `index.html` 最小変更）。
+- Blob本体はOPFS（`dwo-media-v1/blobs/<attachmentId>`）、metadataはIndexedDB（`dwo_media_v1`）。受注確定時に既存の `workOrderRef`（生成タイミングは不変）へmetadata ownerを1 transactionで再紐付けし、active draftを更新する。OPFSファイルは移動しない。
+- 添付があり保存できない場合は受注へ反映せずfail closed。非対応環境ではメモリ内添付のまま、添付0件の受注は従来どおり。
+- `tests/media-storage.test.js` を追加（架空データのみ）。`tools/media-storage-e2e.mjs`（headless Chrome）でOPFS+IndexedDBの追加→再読込→復元→削除→commitを確認した。
+- `docs/design.md` 第15.13節にPhase 2実装事実を追記した。Phase 0/1要件は不変。
+- GPT独立監査の指摘（保存失敗時のfail closed・不正metadata/size不一致の紐付け前中止・復元の厳格化）を追補コミットで反映済み。
+- PRは未作成（GPTが監査後に作成）。mergeは行っていない。
 
-## 既知の保留検証項目（音声のiPad実機確認）
+## 既知の保留検証項目
 
-- 音声録音はiPad実機で検証できなかった。LAN previewが平文HTTPで配信され、Safariが `navigator.mediaDevices` / `getUserMedia` を公開しなかったため（HTTPはsecure contextではない）。
-- これはpreview環境のsecure context制約であり、アプリコードの欠陥の証拠ではない。同時に、コードのPASSでもない。既知の保留検証項目として扱う。
-- ローカル証明書による回避は中止した。承認済みのHTTPS preview/デプロイ環境が用意できるまで、正式な音声のiPad実機確認は保留とする。
-- 製品要件は変わらない: アプリ内での音声の開始/停止/再生/削除は必須。実装コードとPhase 0構成は変更していない。
+- 音声のiPad実機確認（HTTPS環境でのRelease Gate）: Phase 1から維持。今回音声仕様は変更していない。
+- iPad SafariでのOPFS書込（メインスレッド `createWritable`）対応と実機での追加→再読込→復元→受注確定の確認: 未実施。古いSafariで非対応の場合は「保存できないため受注へ反映できません」となる（添付ありのみ）。
+- 参考資料カードの案内文は監査指摘対応で「この端末内に一時保存されます。外部には送信されません。」へ更新済み（承認済み文言）。
 
 ## 未完了
 
-- 音声のiPad Safari実機確認（マイク権限、録音、停止、再生、削除）: 保留。承認済みHTTPS環境が最初に用意された時点で再実施する。本番利用前に必須。
-- 写真/動画captureの見た目など、その他の実機確認は詳細な証拠を記録していない。
-- `workOrderRef` への紐付け・永続化はPhase 2、送信はPhase 5以降。
-- 離脱時のObject URL解放は `pagehide` のみ（`beforeunload` は離脱確認キャンセル時に添付が壊れるため使わない）。
+- 状態遷移UI・送信処理・暗号化・クラウド・PC受信は後続Phase（3以降）。
+- OPFS orphan（metadataなし）の自動削除は未実装（送信対象にはならない）。
 
 ## 次の最小作業
 
-- 現在のPhase 1実装scopeはfinal-pr-audit PASS。ここで停止し、人間の明示的なmerge許可を待つ。
-- 後日、最初の承認済みHTTPS環境が用意された時点で、本番利用前に音声のiPad実機確認を再実施する。これはRelease Gateであり、音声要件のPASSを先取りしない。
+- GPTによるfinal-pr-audit後にPRを作成する。人間の明示的なmerge許可を待つ。
 
 ## blocker
 
-- なし（音声の実機確認は上記の既知の保留項目であり、現scopeのaudit進行を止めるものではない）。
+- なし。
 
 ## 人間確認が必要な項目
 
-- 人間の確認事項は、明示的なmerge許可のみ（人間が明示的に指示した場合のみ実施）。
-- 後日のHTTPS環境での音声実機確認は運用上の検証であり、設計判断ではない。
+- iPad実機での永続化確認（写真/動画/ファイルを追加→再読込で残る→受注確定→一覧が空）。
+- 案内文の文言を実態に合わせるかの判断。
+- 明示的なmerge許可のみ（人間が明示的に指示した場合のみ実施）。
