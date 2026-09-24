@@ -8,58 +8,35 @@
 
 ## 更新日時
 
-- 2026-08-17
+- 2026-09-24
 
 ## 現在branch
 
-- agent/add-learning-handoff-workflow
+- design/media-transfer-phase0
 
 ## 基準main SHA
 
-- 8f231ebfdd411bdcfed16b773ecfe8675c0605a9
+- f9358ba42401bc2ce2ed51cb0e031d09f8997c33
 
 ## 完了したこと
 
-- main を origin/main（上記SHA）に最新化。
-- 上記SHAから `agent/add-learning-handoff-workflow` ブランチを作成。
-- `AGENTS.md` に最小追記（役割分担・既定フロー・NG/UNKNOWN時の停止・自動更新禁止の原則）。
-- `docs/learnings.md` を新設し、今回の再発防止事項を記録。
-- `docs/session-handoff.md`（本ファイル）を新設。
-- commit: 完了。
-- push: 完了。
-- PR #4 作成: 完了。
+- Issue #115 Phase 0として、メディア転送機能の設計境界を `docs/design.md` 第15節に正本化した（docs-only）。
+- 第12節に第15節への参照を1行追加した。現行の外部送信禁止（第12・13・14.1節）は変更していない。
 
 ## 未完了
 
-- final-pr-audit: GPT実施中。
-
-## 確認済み
-
-- 作業前の `git status` はクリーンであることを確認済み。
-- `docs/design.md` に業務仕様の重複を追加していないことを確認済み（本作業は運用ルール文書のみ）。
-
-## 未確認
-
-- `preflight-audit` / `test-gate` / `final-pr-audit` 等のスキルは、
-  `AGENTS.md` 記載の通り本リポジトリに未導入のため、実施は文書レベルの確認（`git diff --check` 等）に限定。
+- Phase 1以降（UI・録音/動画・OPFS・クラウド・PC受信）の実装は未着手。
+- Google Cloud / Firebase採用可否、課金、リージョン、保持期限、暗号方式選定、秘密鍵バックアップ方針はPhase 5前に確認する。
+- final-pr-audit、PR作成、merge判断は未実施。
 
 ## 次の最小作業
 
-- 指摘修正 → GPT再監査 → 人間がmerge可否判断。
+- PR作成後、final-pr-auditを実施する。
 
 ## blocker
 
 - なし。
 
-## 実行担当
-
-- 役割分担の基本方針は `AGENTS.local.md` の「Roles And Default Flow」節を参照する。作業開始時に必ず確認すること。
-- 本セッション: Claude（ローカル実装・ローカルGit操作）。
-- 本リポジトリのmerge実行に関する補足（`AGENTS.local.md`にはまだ記載がない詳細）:
-  - 承認後のGitHub上のSquash and merge実行: GPT。
-  - post-merge-verification: GPT。
-
 ## 人間確認が必要な項目
 
-- 本PRのmerge可否。
-- `AGENTS.md` に追記した役割分担（Codex / GPT / Claude / 人間）の内容が実態と一致しているかの最終確認。
+- 本PRのmerge可否（実施はAIのfinal-pr-audit PASS後）。
