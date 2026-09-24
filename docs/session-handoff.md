@@ -19,7 +19,7 @@
 - Issue #117 Phase 1として、参考資料をiPadメディアUIへ置き換えた（`media.js` 新規、`index.html` / `style.css` 最小変更、`app.js` 変更なし）。
 - 写真・動画のcapture入力、音声録音（MediaRecorder）、複数ファイル追加、プレビュー/再生、個別削除、Object URL revokeを実装した。ブラウザ内一時メモリのみ。
 - `tests/media.test.js` を追加（架空サンプルのみ）。全 `tests/*.test.js` がPASS。
-- GPT独立監査で全テスト 90 PASS / 0 FAIL を確認し、古い文書参照1件（design.md 第13節の `ref-media` 表記）を見つけて修正した。final-pr-auditの自動/コード/GitHub確認はここまで完了したが、必須のiPad Safari実機確認が未実施のため、全体PASSはまだ出せない。
+- GPT独立監査で全テスト 90 PASS / 0 FAIL を確認し、古い文書参照1件（design.md 第13節の `ref-media` 表記）を見つけて修正した。final-pr-audit は現在のPhase 1実装scopeについてPASS。音声のiPad実機確認だけはHTTPS環境でのRelease Gateとして別管理する。
 - `docs/design.md` 第15.12節にPhase 1実装事実を追記した。Phase 0境界は不変。
 - Draft PR #118「feat: iPadメディア添付UI Phase 1」を作成した（現在もDraft PR #118が現行）。mergeは行っていない。
 - 自動確認とコード/GitHubレビューは完了した。
@@ -41,8 +41,8 @@
 
 ## 次の最小作業
 
-- GPTが現在のscopeについてfinal-pr-auditを実施し、merge前で停止する。
-- 後日、最初の承認済みHTTPS環境が用意された時点で、本番利用前に音声のiPad実機確認を再実施する。
+- 現在のPhase 1実装scopeはfinal-pr-audit PASS。ここで停止し、人間の明示的なmerge許可を待つ。
+- 後日、最初の承認済みHTTPS環境が用意された時点で、本番利用前に音声のiPad実機確認を再実施する。これはRelease Gateであり、音声要件のPASSを先取りしない。
 
 ## blocker
 
