@@ -218,7 +218,7 @@ Issue #82で、受注の自動長期保存ではなく **`sessionStorage` を使
 - 別画像への差し替え時とページ離脱時も、使用中のObject URLを解放する。
 - Phase 1では画像を `localStorage` / IndexedDB / Cache Storage / `state.orders` に保存しない。
 - Phase 1では取り込んだ画像を外部API・Firebase等へ送信しない。
-- 医院側の既存 `ref-media` とは独立した技工所側機能として扱う。
+- 医院側の「参考資料メディア添付UI」とは独立した技工所側機能（紙画像の取り込み）として扱う。
 - Phase 1ではOCR・AI解析・項目自動入力・データ化は行わない。
 - iPad Safari実機で、表示・カメラ起動・プレビュー・差し替え・破棄・医院側/受注管理切替を確認済み。
 - 将来のOCR/データ化は、次節のPhase 2設計に従う。OCR・フォーム反映・画像自動破棄の実装は別Issueで扱う。
@@ -436,3 +436,16 @@ DWO_DATA/
 ### 15.11 Phase 0の完了条件
 
 本節が上記の境界を矛盾なく記録していること、`git diff --check` がPASSすること、アプリコード・既存挙動・実データ・secretsを変更/追加していないこと。現行実装の「外部クラウドへ送信しない」は、後続Phaseが個別に実装・承認されるまで維持する。
+
+### 15.12 Phase 1の実装事実（Issue #117）
+
+Phase 0の境界（15.1〜15.11）は変更しない。Phase 1は医院側「参考資料」（旧 `ref-media` 入力）を置き換えるiPadメディアUIで、ブラウザ内の一時メモリと Object URL だけを使う。
+
+- 実装は `media.js`（`globalThis.ReferenceMediaManager` に純粋helperを公開）、`index.html` の参考資料カード、`style.css` の `.media-*` スタイル。`app.js` は変更しない。
+- 操作は「写真を撮る」（`image/*` + `capture=environment`）、「動画を撮る」（`video/*` + `capture=environment`）、「音声を録音」（`getUserMedia` + `MediaRecorder`）、「ファイルから追加」（複数選択）の4つ。
+- 種別は `image / video / audio / file`。MIMEは `File.type` / `blob.type` をそのまま保持し、MP4・m4aへ変換・偽装しない。未知MIMEは `file`。
+- 一覧は種別・名前・サイズ・MIMEを表示し、各項目を個別削除できる。削除・`pagehide` 時に Object URL を revoke し、録音中の `pagehide` ではトラックを停止する。端末元ファイルは削除しない。
+- 添付は `localStorage` / `sessionStorage` / IndexedDB / Cache Storage へ保存しない。`collectFormData()` へも含めない。`workOrderRef` への紐付けと永続化はPhase 2以降。
+- 患者名・医院名は添付名・ID に使わない。録音名は日時のみ（例: `音声録音_YYYYMMDD-HHMMSS.webm`）。
+- 「送信完了までこの画面を閉じないでください」は非表示要素として用意のみ。送信処理はPhase 5。
+- iPad Safariの実機確認（カメラ/動画capture、マイク権限、録音再生、見た目）は未確認。

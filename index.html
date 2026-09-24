@@ -804,12 +804,23 @@
 
     <div class="section-divider"></div>
     <div class="sub-title">参考資料</div>
-    <div class="form-group" style="margin-top:8px">
-      <label>画像・動画・音声を添付（複数可）</label>
-      <input type="file" id="ref-media" accept="image/*,video/*,audio/*" multiple
-        style="padding:8px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--input-bg);color:var(--text-primary);font-size:13px;width:100%;cursor:pointer;">
+    <div id="media-attachments" class="media-attachments">
+      <p class="media-hint">この端末の画面内だけに一時保存されます。画面を閉じると消えます。</p>
+      <div class="media-actions">
+        <button type="button" class="btn-secondary" id="media-photo-input-btn">写真を撮る</button>
+        <button type="button" class="btn-secondary" id="media-video-input-btn">動画を撮る</button>
+        <button type="button" class="btn-secondary" id="media-record-btn" aria-pressed="false">音声を録音</button>
+        <button type="button" class="btn-secondary" id="media-file-input-btn">ファイルから追加</button>
+      </div>
+      <input type="file" id="media-photo-input" accept="image/*" capture="environment" hidden>
+      <input type="file" id="media-video-input" accept="video/*" capture="environment" hidden>
+      <input type="file" id="media-file-input" multiple hidden>
+      <div id="media-recording-indicator" class="media-recording" role="status" hidden>● 録音中</div>
+      <div id="media-error" class="media-error" role="alert" hidden></div>
+      <p id="media-send-notice" class="media-send-notice" hidden></p>
+      <p id="media-empty" class="media-empty">添付はまだありません</p>
+      <ul id="media-list" class="media-list"></ul>
     </div>
-    <div id="ref-preview" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;"></div>
   </div>
 
   <!-- 8. 備考 -->
@@ -927,6 +938,7 @@
 <script src="vendor/ocr/tesseract.min.js"></script>
 <script src="paper-ocr.js"></script>
 <script src="consumer-rules.js"></script>
+<script src="media.js"></script>
 
 </body>
 </html>
