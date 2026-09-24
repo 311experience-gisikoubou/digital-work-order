@@ -449,3 +449,20 @@ Phase 0の境界（15.1〜15.11）は変更しない。Phase 1は医院側「参
 - 患者名・医院名は添付名・ID に使わない。録音名は日時のみ（例: `音声録音_YYYYMMDD-HHMMSS.webm`）。
 - 「送信完了までこの画面を閉じないでください」は非表示要素として用意のみ。送信処理はPhase 5。
 - iPad Safariの実機確認（カメラ/動画capture、マイク権限、録音再生、見た目）は未確認。
+
+### 15.13 Phase 2の実装事実（Issue #119）
+
+Phase 0の境界（15.1〜15.11）と15.12のUI仕様は変更しない。15.12の「永続化しない」はPhase 1時点の記述で、Phase 2で下記のローカル永続化を追加した。外部通信・暗号化・署名・SHA-256・manifest・chunk・クラウド・PC受信は実装していない。
+
+- 実装は新規 `media-storage.js`（`globalThis.ReferenceMediaStorage`。永続化・metadata・owner管理）と `media.js`（UI・録音・Object URL・`ReferenceMediaManager.commitCurrentDraft` / `hasAttachments`）。`index.html` は `media-storage.js` を `media.js` の前に1回読み込む。
+- Blob本体はOPFSの固定パス `dwo-media-v1/blobs/<attachmentId>` に保存する。`attachmentId` は `att-<uuid-v4>` の非機微なランダムIDで、元ファイル名・患者・医院・workOrderRefを物理パスに使わない。owner変更でファイルは移動しない。
+- metadataはIndexedDB `dwo_media_v1`（version 1）。`attachments`（keyPath `attachmentId`、index `ownerRef`）と `settings`（keyPath `key`、`activeDraft`）。metadataは `schemaVersion` `attachmentId` `ownerType` `ownerRef` `status` `source` `kind` `name` `mime` `size` `createdAt` `opfsName` の12項目のみで、Blob・Object URL・患者名・医院名などの未知プロパティは不正として扱う（fail closed）。
+- statusは `unsent / sending / cloud_uploaded / lab_receipt_pending / lab_received / deletable` の6種のみ有効で、不明値は拒否する。Phase 2で作る新規添付は `unsent`（未送信）のみ。状態遷移UI・送信処理はない。
+- 受注確定前の所有者は `draft:<uuid-v4>`（active draft。IndexedDB `settings` に保存し、`crypto` で生成。生成できなければ永続化不可として安全側に倒す）。
+- 追加は「OPFS書込 → metadata書込」の順。OPFS失敗時はmetadataを作らず、metadata失敗時はOPFSをbest-effortでrollbackする。保存成功後にだけ一覧へ出す。
+- 削除は「metadata削除 → OPFS削除（best-effort）」。OPFS削除に失敗したファイルはorphanとして残り得るが、metadataが無いため復元・送信対象にならない。端末元ファイルには触れない。
+- 起動時は active draft の添付だけを復元する。metadataは厳密検証し、OPFSファイルが欠落したmetadataは削除して一覧に出さず、metadataのないOPFS orphanは復元しない。復元後も表示はPhase 1と同じカード。
+- 受注確定（`app.js` の送信処理）は、validate → `workOrderRef` 生成（既存順序を維持）→ `await ReferenceMediaManager.commitCurrentDraft(workOrderRef)` → `state.orders.unshift` の順。commitは1つのIndexedDB transactionで、draft所有の全metadataを `ownerType='work-order'` / `ownerRef=workOrderRef` へ更新し、active draftを新規draftへ更新する。添付が1件以上あり保存未完了・失敗・非対応の場合は受注へ反映せず、フォームと添付を保持して日本語エラーを表示する。添付0件の受注は従来どおり反映できる。commit成功後の `state.orders` 反映は例外を出さない既存best-effort処理を前提とし、rollback receiptは設けない（documented invariant）。送信処理中の二重クリックは `submitInFlight` で無視する。
+- OPFS（メインスレッドの `createWritable`）またはIndexedDBが使えない環境では、Phase 1同様にメモリ内添付だけ使える。ただし添付が1件以上ある場合は「このブラウザでは添付を安全に保存できないため受注へ反映できません」を表示して受注確定をfail closedにする。
+- `pagehide` はObject URLと録音trackだけを解放し、OPFS・metadataは消さない。
+- 自動確認: `tests/media-storage.test.js`（Node。memory adapter）と `tools/media-storage-e2e.mjs`（headless ChromeでOPFS+IndexedDBの追加→再読込→復元→削除→commitを確認）。iPad Safariでの実機確認（OPFS書込対応を含む）は未実施。
