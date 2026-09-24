@@ -1,6 +1,7 @@
 // ============================================================
-//  参考資料メディア（Phase 1: ブラウザ内一時メモリのみ）
-//  Blob / Object URL は永続化しない。OPFS・暗号・送信は扱わない。
+//  参考資料メディア（UI・録音・Object URL）
+//  Object URL は表示専用で永続化しない。Blob/metadataの保存・復元・owner管理は
+//  media-storage.js（ReferenceMediaStorage）が担当する。暗号・送信は扱わない。
 // ============================================================
 (function(global) {
   'use strict';
@@ -10,6 +11,7 @@
   const SEND_NOTICE_TEXT = '送信完了までこの画面を閉じないでください';
   const MAX_NAME_CHARS = 100;
   const FALLBACK_NAME = '無題ファイル';
+  const UNSUPPORTED_MESSAGE = 'このブラウザでは添付を安全に保存できないため受注へ反映できません';
   const EXT_KIND = {
     jpg: 'image', jpeg: 'image', png: 'image', gif: 'image', webp: 'image', heic: 'image', heif: 'image',
     mp4: 'video', mov: 'video', m4v: 'video', webm: 'video',
@@ -102,7 +104,7 @@
       }
       if (!objectUrl) return null;
       const item = {
-        id: generateAttachmentId(),
+        id: typeof opts.id === 'string' && opts.id ? opts.id : generateAttachmentId(),
         source: opts.source || 'file-picker',
         kind: opts.kind && KINDS.includes(opts.kind) ? opts.kind : classifyKind(mime, rawName),
         name: sanitizeDisplayName(rawName),
@@ -110,7 +112,7 @@
         size: blob.size,
         blob,
         objectUrl,
-        createdAt: Date.now()
+        createdAt: Number.isSafeInteger(opts.createdAt) ? opts.createdAt : Date.now()
       };
       attachments.push(item);
       return item;
@@ -156,6 +158,9 @@
     generateAttachmentId,
     createAttachmentStore
   };
+  // UI統合API。DOMがある環境では init() が実体へ差し替える。
+  helpers.hasAttachments = () => false;
+  helpers.commitCurrentDraft = async () => ({ committed: 0 });
   global.ReferenceMediaManager = helpers;
   if (typeof module !== 'undefined' && module.exports) module.exports = helpers;
 
@@ -173,6 +178,27 @@
     const recordingEl = $('#media-recording-indicator');
     const noticeEl = $('#media-send-notice');
     const store = createAttachmentStore();
+
+    // ---- 永続化（media-storage.js）。非対応・初期化失敗時はPhase 1同様のメモリ内添付だけ使う。 ----
+    const storageApi = global.ReferenceMediaStorage;
+    let persistence = null;
+    try { persistence = storageApi ? storageApi.createBrowserPersistence(global) : null; } catch (_) { persistence = null; }
+    let persistenceReady = !!(persistence && persistence.available);
+    const persistedIds = new Set();
+    let pendingAdds = 0;
+    let queue = Promise.resolve();
+    // 追加・削除・復元・受注確定を直列化し、受注確定が未完了の追加を追い越さないようにする。
+    function enqueue(task) {
+      const run = queue.then(task);
+      queue = run.catch(() => {});
+      return run;
+    }
+    function storageError(code, message) {
+      const error = new Error(code);
+      error.code = code;
+      error.userMessage = message;
+      return error;
+    }
 
     let recorder = null;
     let recorderStream = null;
@@ -239,8 +265,23 @@
         del.textContent = '削除';
         del.setAttribute('aria-label', item.name + ' を削除');
         del.addEventListener('click', () => {
-          store.remove(item.id);
-          render();
+          if (!persistedIds.has(item.id)) {
+            store.remove(item.id);
+            render();
+            return;
+          }
+          // metadata削除 -> OPFSファイルbest-effort削除。失敗時は一覧に残す。
+          del.disabled = true;
+          enqueue(async () => {
+            try {
+              await persistence.removeAttachment(item.id);
+              persistedIds.delete(item.id);
+              store.remove(item.id);
+            } catch (error) {
+              showError((error && error.userMessage) || '添付を削除できませんでした。もう一度お試しください');
+            }
+            render();
+          });
         });
         li.appendChild(del);
         listEl.appendChild(li);
@@ -256,6 +297,38 @@
       return item;
     }
 
+    // 保存に成功してから一覧へ出す。非対応時はメモリ内だけ（受注確定時にfail closed）。
+    function addAttachment(blob, options) {
+      if (!persistenceReady) {
+        addBlob(blob, options);
+        render();
+        return;
+      }
+      const rawName = options.name || blob.name || '';
+      const kind = options.kind && KINDS.includes(options.kind) ? options.kind : classifyKind(blob.type, rawName);
+      const name = sanitizeDisplayName(rawName);
+      pendingAdds += 1;
+      enqueue(async () => {
+        try {
+          const meta = await persistence.persistAttachment({
+            blob, attachmentId: persistence.newAttachmentId(), source: options.source || 'file-picker', kind, name
+          });
+          const item = store.add(blob, { id: meta.attachmentId, source: meta.source, kind: meta.kind, name: meta.name, createdAt: meta.createdAt });
+          if (!item) {
+            try { await persistence.removeAttachment(meta.attachmentId); } catch (_) { /* 送信対象ではないorphanとして残るだけ */ }
+            showError('この資料を一覧に追加できませんでした。別のファイルでお試しください。');
+            return;
+          }
+          persistedIds.add(item.id);
+        } catch (error) {
+          showError((error && error.userMessage) || '添付を端末内に保存できませんでした。もう一度お試しください');
+        } finally {
+          pendingAdds -= 1;
+          render();
+        }
+      });
+    }
+
     function bindFileInput(id, source) {
       const input = $(id);
       const trigger = $(id + '-btn');
@@ -264,9 +337,8 @@
         const files = Array.from(input.files || []);
         if (!files.length) { input.value = ''; return; }
         showError('');
-        files.forEach(file => addBlob(file, { source }));
+        files.forEach(file => addAttachment(file, { source }));
         input.value = '';
-        render();
       });
     }
 
@@ -297,8 +369,7 @@
       const type = (chunks[0] && chunks[0].type) || (rec && rec.mimeType) || '';
       const blob = new Blob(chunks, type ? { type } : undefined);
       if (!blob.size) return;
-      addBlob(blob, { source: 'recording', kind: 'audio', name: buildRecordingName(new Date(), blob.type) });
-      render();
+      addAttachment(blob, { source: 'recording', kind: 'audio', name: buildRecordingName(new Date(), blob.type) });
     }
 
     function stopRecording() {
@@ -373,6 +444,7 @@
       }
       stopTracks();
       store.clear();
+      persistedIds.clear();
       render();
     }
     // beforeunloadは離脱確認でキャンセルされ得るため、確定後に必ず発火するpagehideで解放する。
@@ -383,7 +455,47 @@
     noticeEl.hidden = true;
     helpers.setSendingNoticeVisible = visible => { noticeEl.hidden = !visible; };
 
+    // 受注確定時: 現在のdraft添付を workOrderRef へ紐付ける。失敗時は例外（呼び出し側が受注反映を中止する）。
+    helpers.hasAttachments = () => store.list().length + pendingAdds > 0;
+    helpers.commitCurrentDraft = workOrderRef => enqueue(async () => {
+      const items = store.list();
+      if (!items.length) return { committed: 0 };
+      if (!persistenceReady || items.some(item => !persistedIds.has(item.id))) {
+        const error = storageError('MEDIA_STORAGE_UNAVAILABLE', UNSUPPORTED_MESSAGE);
+        showError(error.userMessage);
+        throw error;
+      }
+      let receipt;
+      try {
+        receipt = await persistence.commitDraftToWorkOrder(workOrderRef);
+      } catch (error) {
+        showError((error && error.userMessage) || UNSUPPORTED_MESSAGE);
+        throw error;
+      }
+      // 紐付け成功後は画面上の一覧とObject URLだけ空にする（OPFSファイルとmetadataは保持）。
+      persistedIds.clear();
+      store.clear();
+      showError('');
+      render();
+      return { committed: receipt.count };
+    });
+
     render();
+    if (persistenceReady) {
+      enqueue(async () => {
+        const draft = await persistence.getOrCreateActiveDraft();
+        const restored = await persistence.restoreOwner(draft);
+        restored.items.forEach(({ meta, blob }) => {
+          const item = store.add(blob, { id: meta.attachmentId, source: meta.source, kind: meta.kind, name: meta.name, createdAt: meta.createdAt });
+          if (item) persistedIds.add(item.id);
+        });
+        render();
+      }).catch(error => {
+        // 復元に失敗してもアプリは壊さない。以後の添付はメモリ内のみとし、受注確定時にfail closedする。
+        persistenceReady = false;
+        showError((error && error.userMessage) || '端末内に保存された添付を読み込めませんでした');
+      });
+    }
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
