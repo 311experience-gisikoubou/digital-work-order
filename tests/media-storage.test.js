@@ -224,27 +224,100 @@ test('restore drops metadata whose OPFS file is missing and cleans it up', async
   const restored = await env.persistence.restoreOwner(draft);
   assert.deepEqual(restored.items.map(i => i.meta.attachmentId), [b.attachmentId]);
   assert.equal(restored.missing, 1);
+  assert.equal(restored.invalid, 0);
+  assert.equal(restored.corrupt, 0);
   assert.equal(env.metaStore.records.has(a.attachmentId), false);
   assert.equal(env.metaStore.records.has(b.attachmentId), true);
 });
 
-test('restore fails closed on invalid, unknown-status or Blob-carrying metadata of the requested owner', async () => {
+test('restore cleans invalid metadata of the requested owner; valid sibling restores and bad row cannot be committed', async () => {
   const cases = {
     'unknown status': { status: 'archived' },
     'unknown property': { objectUrl: 'blob:sample/1' },
     'unknown owner type': { ownerType: 'clinic' }
   };
+  const badId = 'att-123e4567-e89b-42d3-a456-426614174003';
   for (const [label, override] of Object.entries(cases)) {
     const env = makeEnv();
     const draft = await env.persistence.getOrCreateActiveDraft();
     const good = validMeta({ ownerRef: draft, size: 16 });
-    const bad = validMeta(Object.assign({ ownerRef: draft, attachmentId: 'att-123e4567-e89b-42d3-a456-426614174003', opfsName: 'att-123e4567-e89b-42d3-a456-426614174003' }, override));
+    const bad = validMeta(Object.assign({ ownerRef: draft, attachmentId: badId, opfsName: badId }, override));
     [good, bad].forEach(m => {
       env.metaStore.records.set(m.attachmentId, m);
       env.blobStore.files.set(m.opfsName, realBlob(SAMPLES.note));
     });
-    await assert.rejects(() => env.persistence.restoreOwner(draft), { code: 'MEDIA_STORAGE_INVALID' }, label);
+    const restored = await env.persistence.restoreOwner(draft);
+    assert.deepEqual(restored.items.map(i => i.meta.attachmentId), [good.attachmentId], label);
+    assert.equal(restored.invalid, 1, label);
+    assert.equal(restored.missing, 0, label);
+    assert.equal(restored.corrupt, 0, label);
+    assert.equal(env.metaStore.records.has(badId), false, label);
+    assert.equal(env.blobStore.files.has(badId), false, label);
+    const receipt = await env.persistence.commitDraftToWorkOrder(WORK_ORDER_REF);
+    assert.equal(receipt.count, 1, label);
   }
+});
+
+test('restore cleans invalid metadata even when its attachmentId is not a safe id (no OPFS delete attempted)', async () => {
+  const env = makeEnv();
+  const draft = await env.persistence.getOrCreateActiveDraft();
+  env.metaStore.records.set('../evil', { attachmentId: '../evil', ownerRef: draft, junk: true });
+  const blobDeletes = [];
+  const origDelete = env.blobStore.delete;
+  env.blobStore.delete = async name => { blobDeletes.push(name); return origDelete(name); };
+  const restored = await env.persistence.restoreOwner(draft);
+  assert.equal(restored.invalid, 1);
+  assert.equal(env.metaStore.records.size, 0);
+  assert.deepEqual(blobDeletes, []);
+});
+
+test('restore cleans size-mismatch files (metadata first, then file) and they cannot block a later commit', async () => {
+  const env = makeEnv();
+  const a = await env.persistence.persistAttachment({ blob: realBlob(SAMPLES.photo), source: 'camera-photo', kind: 'image', name: SAMPLES.photo.name });
+  const b = await env.persistence.persistAttachment({ blob: realBlob(SAMPLES.note), source: 'file-picker', kind: 'file', name: SAMPLES.note.name });
+  env.blobStore.files.set(a.attachmentId, new Blob([new Uint8Array(3)]));
+  const order = [];
+  const origMetaDelete = env.metaStore.deleteAttachment;
+  env.metaStore.deleteAttachment = async id => { order.push('meta'); return origMetaDelete(id); };
+  const origBlobDelete = env.blobStore.delete;
+  env.blobStore.delete = async name => { order.push('opfs'); return origBlobDelete(name); };
+  const draft = await env.persistence.getOrCreateActiveDraft();
+  const restored = await env.persistence.restoreOwner(draft);
+  assert.deepEqual(restored.items.map(i => i.meta.attachmentId), [b.attachmentId]);
+  assert.equal(restored.corrupt, 1);
+  assert.deepEqual(order, ['meta', 'opfs']);
+  assert.equal(env.metaStore.records.has(a.attachmentId), false);
+  assert.equal(env.blobStore.files.has(a.attachmentId), false);
+  const receipt = await env.persistence.commitDraftToWorkOrder(WORK_ORDER_REF);
+  assert.equal(receipt.count, 1);
+});
+
+test('restore fails closed when cleanup cannot delete metadata', async () => {
+  const makeCase = async kind => {
+    const env = makeEnv();
+    const a = await env.persistence.persistAttachment({ blob: realBlob(SAMPLES.photo), source: 'camera-photo', kind: 'image', name: SAMPLES.photo.name });
+    const draft = await env.persistence.getOrCreateActiveDraft();
+    if (kind === 'missing') env.blobStore.files.delete(a.attachmentId);
+    if (kind === 'corrupt') env.blobStore.files.set(a.attachmentId, new Blob([new Uint8Array(3)]));
+    if (kind === 'invalid') env.metaStore.records.get(a.attachmentId).status = 'archived';
+    env.metaStore.failOn.deleteAttachment = true;
+    return { env, draft, a };
+  };
+  for (const kind of ['missing', 'corrupt', 'invalid']) {
+    const { env, draft, a } = await makeCase(kind);
+    await assert.rejects(() => env.persistence.restoreOwner(draft), { code: 'MEDIA_STORAGE_RESTORE_FAILED' }, kind);
+    // metadataを消せなかった場合、OPFSファイルも消さない。
+    if (kind !== 'missing') assert.equal(env.blobStore.files.has(a.attachmentId), true, kind);
+  }
+});
+
+test('commit still rejects and does not rotate when an invalid row survives (strict)', async () => {
+  const env = makeEnv();
+  const draft = await env.persistence.getOrCreateActiveDraft();
+  const bad = validMeta({ ownerRef: draft, status: 'archived' });
+  env.metaStore.records.set(bad.attachmentId, bad);
+  await assert.rejects(() => env.persistence.commitDraftToWorkOrder(WORK_ORDER_REF), { code: 'MEDIA_STORAGE_INVALID' });
+  assert.equal(await env.persistence.getOrCreateActiveDraft(), draft);
 });
 
 test('restore never commits a missing record and reports the missing count', async () => {

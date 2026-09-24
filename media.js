@@ -497,7 +497,7 @@
       enqueue(async () => {
         const draft = await persistence.getOrCreateActiveDraft();
         const restored = await persistence.restoreOwner(draft);
-        if (restored.missing > 0) showError('端末内で見つからない添付が' + restored.missing + '件ありました。必要なら追加し直してください');
+        if (restored.missing > 0 || restored.invalid > 0 || restored.corrupt > 0) showError('保存できなかった添付を除外しました。必要な資料は再追加してください。');
         restored.items.forEach(({ meta, blob }) => {
           const item = store.add(blob, { id: meta.attachmentId, source: meta.source, kind: meta.kind, name: meta.name, createdAt: meta.createdAt });
           if (item) persistedIds.add(item.id);

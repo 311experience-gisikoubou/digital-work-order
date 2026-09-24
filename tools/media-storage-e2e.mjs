@@ -149,6 +149,33 @@ async function main() {
   await waitFor('document.getElementById("media-empty").hidden === false', 'empty after reload');
   check('committed attachment is not restored into new draft', (await evaluate(names)).length === 0);
 
+  // 5) OPFSファイルのsize不一致 -> 復元時に掃除され、警告が出て、以後のcommitを塞がない
+  await evaluate(`(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array(1024)], 'corrupt-sample.pdf', { type: 'application/pdf' }));
+    const input = document.getElementById('media-file-input');
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change'));
+  })()`);
+  await waitFor(`${names}.length === 1`, 'attachment before corruption');
+  const victim = (await evaluate(inspect)).files.find(f => !after.files.includes(f));
+  await evaluate(`(async () => {
+    const root = await navigator.storage.getDirectory();
+    const blobs = await (await root.getDirectoryHandle('dwo-media-v1')).getDirectoryHandle('blobs');
+    const w = await (await blobs.getFileHandle('${victim}')).createWritable();
+    await w.write(new Uint8Array(7));
+    await w.close();
+  })()`);
+  await load();
+  await waitFor('document.getElementById("media-error").hidden === false', 'cleanup warning shown');
+  const warning = await evaluate('document.getElementById("media-error").textContent');
+  check('size-mismatch cleanup shows generic warning without file name', warning.includes('保存できなかった添付を除外しました') && !warning.includes('corrupt-sample'));
+  check('corrupt attachment is not listed', (await evaluate(names)).length === 0);
+  const cleaned = await evaluate(inspect);
+  check('corrupt metadata and OPFS file removed', cleaned.attachments.length === 1 && !cleaned.files.includes(victim));
+  const recommitted = await evaluate(`ReferenceMediaManager.commitCurrentDraft('dwo:123e4567-e89b-42d3-a456-426614174001')`);
+  check('later commit is not blocked by the cleaned row', recommitted && recommitted.committed === 0);
+
   ws.close();
   return checks;
 }

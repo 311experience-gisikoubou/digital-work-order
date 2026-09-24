@@ -249,29 +249,53 @@
       return meta;
     }
 
-    // 戻り値: { items: [{ meta, blob }], missing: 件数 }。要求ownerの不正metadataはMEDIA_STORAGE_INVALIDで失敗。欠落ファイルは一覧に出さず、missing件数で返す。
+    // 戻り値: { items, missing, invalid, corrupt }。
+    // 不正metadata・size不一致は「見えない受注ブロッカー」にならないよう、metadataを先に削除し、OPFSファイルはbest-effortで消す。
+    // metadataを削除できない場合は掃除成功を装わず MEDIA_STORAGE_RESTORE_FAILED で失敗（fail closed）。
     async function restoreOwner(ownerRef) {
       if (!isValidDraftRef(ownerRef) && !isValidWorkOrderRef(ownerRef)) throw makeError('MEDIA_STORAGE_INVALID');
       let rows;
       try { rows = await metaStore.listByOwner(ownerRef); } catch (error) { throw makeError('MEDIA_STORAGE_RESTORE_FAILED', error); }
       const items = [];
       let missing = 0;
+      let invalid = 0;
+      let corrupt = 0;
+      async function cleanMetadata(attachmentId) {
+        try { await metaStore.deleteAttachment(attachmentId); } catch (error) { throw makeError('MEDIA_STORAGE_RESTORE_FAILED', error); }
+      }
+      async function cleanFile(attachmentId) {
+        if (!isValidAttachmentId(attachmentId)) return;
+        try { await blobStore.delete(attachmentId); } catch (_) { /* orphanは送信対象ではない */ }
+      }
       for (const meta of rows) {
-        // 要求ownerの行が不正なら黙って捨てず fail closed（見えない不正行を残したまま続行しない）。
-        if (metadataProblem(meta) || meta.ownerRef !== ownerRef) throw makeError('MEDIA_STORAGE_INVALID');
+        // 別ownerの行を誤って消さない（indexが返す行は常にownerRef一致のはず）。
+        if (meta && meta.ownerRef !== ownerRef) throw makeError('MEDIA_STORAGE_INVALID');
+        if (metadataProblem(meta)) {
+          const rawId = meta && typeof meta === 'object' ? meta.attachmentId : undefined;
+          if (rawId === undefined || rawId === null) throw makeError('MEDIA_STORAGE_RESTORE_FAILED');
+          await cleanMetadata(rawId);
+          await cleanFile(rawId);
+          invalid += 1;
+          continue;
+        }
         let file;
         try { file = await blobStore.get(meta.opfsName); } catch (error) { throw makeError('MEDIA_STORAGE_RESTORE_FAILED', error); }
         if (!file) {
+          await cleanMetadata(meta.attachmentId);
           missing += 1;
-          try { await metaStore.deleteAttachment(meta.attachmentId); } catch (_) { /* 次回起動で再判定 */ }
           continue;
         }
-        if (file.size !== meta.size) continue;
+        if (file.size !== meta.size) {
+          await cleanMetadata(meta.attachmentId);
+          await cleanFile(meta.attachmentId);
+          corrupt += 1;
+          continue;
+        }
         const blob = new Blob([file], meta.mime ? { type: meta.mime } : undefined);
         items.push({ meta, blob });
       }
       items.sort((a, b) => a.meta.createdAt - b.meta.createdAt);
-      return { items, missing };
+      return { items, missing, invalid, corrupt };
     }
 
     // metadataを先に削除して復元・送信の対象から外し、その後OPFSファイルをbest-effortで消す。
