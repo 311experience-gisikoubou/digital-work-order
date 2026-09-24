@@ -8,58 +8,43 @@
 
 ## 更新日時
 
-- 2026-08-17
+- 2026-09-24
 
 ## 現在branch
 
-- agent/add-learning-handoff-workflow
+- design/media-transfer-phase0（基準: origin/main）
 
 ## 基準main SHA
 
-- 8f231ebfdd411bdcfed16b773ecfe8675c0605a9
+- f9358ba42401bc2ce2ed51cb0e031d09f8997c33
 
 ## 完了したこと
 
-- main を origin/main（上記SHA）に最新化。
-- 上記SHAから `agent/add-learning-handoff-workflow` ブランチを作成。
-- `AGENTS.md` に最小追記（役割分担・既定フロー・NG/UNKNOWN時の停止・自動更新禁止の原則）。
-- `docs/learnings.md` を新設し、今回の再発防止事項を記録。
-- `docs/session-handoff.md`（本ファイル）を新設。
-- commit: 完了。
-- push: 完了。
-- PR #4 作成: 完了。
+- Issue #115 Phase 0として、メディア転送機能の設計境界を `docs/design.md` 第15節に正本化した（docs-only）。
+- 独立監査の指摘に対する修正パス（2回目のcommit）を実施した:
+  - 文字化けを解消し、第15節を全面的に書き直した。
+  - 技工所PCの復号用秘密鍵の暗号化オフラインバックアップを、将来判断ではなく固定要件として復元した。
+  - 承認済みアーキテクチャ（暗号化・ペアリング・署名・失効・認可境界・受信手順・manifest・保存構成・クラウド候補・Phase 5前の人間確認・Phase 0〜8のロードマップ）を第15節へ反映した。
+- 第12節の第15節への参照は維持。現行の外部送信禁止（第12・13・14.1節）は変更していない。
+- Draft PR #116（「docs: メディア転送機能 Phase 0 設計固定」）を作成済み。
+- mergeは行っていない。
 
 ## 未完了
 
-- final-pr-audit: GPT実施中。
-
-## 確認済み
-
-- 作業前の `git status` はクリーンであることを確認済み。
-- `docs/design.md` に業務仕様の重複を追加していないことを確認済み（本作業は運用ルール文書のみ）。
-
-## 未確認
-
-- `preflight-audit` / `test-gate` / `final-pr-audit` 等のスキルは、
-  `AGENTS.md` 記載の通り本リポジトリに未導入のため、実施は文書レベルの確認（`git diff --check` 等）に限定。
+- Phase 1以降の実装は未着手（Phase 0は設計凍結のみ）。
+- Google Cloud / Firebase採用、課金、リージョン、保持期限、規約、ガイドライン適合、医院への説明はPhase 5直前に人間が確認する。
+- 暗号方式・ライブラリ選定、鍵バックアップ手順、鍵更新・再ペアリング手順はPhase 4で行う。
+- final-pr-audit は実施中／未完了（PASSは未確認。本commitの監査後に判定する）。
+- merge は未実施。
 
 ## 次の最小作業
 
-- 指摘修正 → GPT再監査 → 人間がmerge可否判断。
+- GPTがfinal-pr-auditを完了する。PASSの場合もmerge前で停止する（人間確認は不要）。
 
 ## blocker
 
 - なし。
 
-## 実行担当
-
-- 役割分担の基本方針は `AGENTS.local.md` の「Roles And Default Flow」節を参照する。作業開始時に必ず確認すること。
-- 本セッション: Claude（ローカル実装・ローカルGit操作）。
-- 本リポジトリのmerge実行に関する補足（`AGENTS.local.md`にはまだ記載がない詳細）:
-  - 承認後のGitHub上のSquash and merge実行: GPT。
-  - post-merge-verification: GPT。
-
 ## 人間確認が必要な項目
 
-- 本PRのmerge可否。
-- `AGENTS.md` に追記した役割分担（Codex / GPT / Claude / 人間）の内容が実態と一致しているかの最終確認。
+- merge許可のみ（人間が明示的に「マージして」と指示した場合のみ実施）。
