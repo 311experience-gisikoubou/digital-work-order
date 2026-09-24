@@ -8,38 +8,29 @@
 
 ## 更新日時
 
-- 2026-09-24
+- 2026-09-25
 
 ## 現在branch
 
-- design/media-transfer-phase0（基準: origin/main）
-
-## 基準main SHA
-
-- f9358ba42401bc2ce2ed51cb0e031d09f8997c33
+- feat/media-attachments-phase1（基準: origin/main 10061baf55ad98192a047ccb1de0266bac3f870e）
 
 ## 完了したこと
 
-- Issue #115 Phase 0として、メディア転送機能の設計境界を `docs/design.md` 第15節に正本化した（docs-only）。
-- 独立監査の指摘に対する修正パス（2回目のcommit）を実施した:
-  - 文字化けを解消し、第15節を全面的に書き直した。
-  - 技工所PCの復号用秘密鍵の暗号化オフラインバックアップを、将来判断ではなく固定要件として復元した。
-  - 承認済みアーキテクチャ（暗号化・ペアリング・署名・失効・認可境界・受信手順・manifest・保存構成・クラウド候補・Phase 5前の人間確認・Phase 0〜8のロードマップ）を第15節へ反映した。
-- 第12節の第15節への参照は維持。現行の外部送信禁止（第12・13・14.1節）は変更していない。
-- Draft PR #116（「docs: メディア転送機能 Phase 0 設計固定」）を作成済み。
-- mergeは行っていない。
+- Issue #117 Phase 1として、参考資料をiPadメディアUIへ置き換えた（`media.js` 新規、`index.html` / `style.css` 最小変更、`app.js` 変更なし）。
+- 写真・動画のcapture入力、音声録音（MediaRecorder）、複数ファイル追加、プレビュー/再生、個別削除、Object URL revokeを実装した。ブラウザ内一時メモリのみ。
+- `tests/media.test.js` を追加（架空サンプルのみ）。全 `tests/*.test.js` がPASS。
+- `docs/design.md` 第15.12節にPhase 1実装事実を追記した。Phase 0境界は不変。
+- PRは未作成（GPTが独立監査後にDraft PRを作る）。mergeは行っていない。
 
 ## 未完了
 
-- Phase 1以降の実装は未着手（Phase 0は設計凍結のみ）。
-- Google Cloud / Firebase採用、課金、リージョン、保持期限、規約、ガイドライン適合、医院への説明はPhase 5直前に人間が確認する。
-- 暗号方式・ライブラリ選定、鍵バックアップ手順、鍵更新・再ペアリング手順はPhase 4で行う。
-- final-pr-audit は実施中／未完了（PASSは未確認。本commitの監査後に判定する）。
-- merge は未実施。
+- iPad Safari実機での確認は未確認: カメラ/動画capture、マイク権限、録音の再生、見た目。
+- `workOrderRef` への紐付け・永続化はPhase 2、送信はPhase 5以降。
+- 離脱時のObject URL解放は `pagehide` のみ（`beforeunload` は離脱確認キャンセル時に添付が壊れるため使わない）。
 
 ## 次の最小作業
 
-- GPTがfinal-pr-auditを完了する。PASSの場合もmerge前で停止する（人間確認は不要）。
+- GPTがfinal-pr-auditを行い、PASSならDraft PRを作る。
 
 ## blocker
 
@@ -47,4 +38,5 @@
 
 ## 人間確認が必要な項目
 
-- merge許可のみ（人間が明示的に「マージして」と指示した場合のみ実施）。
+- iPad Safari実機でのメディア操作確認（上記未確認項目）。
+- merge許可（人間が明示的に指示した場合のみ実施）。

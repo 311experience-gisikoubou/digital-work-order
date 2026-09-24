@@ -811,3 +811,24 @@ body.edit-active .tooth-num { display:none; }
   .paper-work-order-reference img { max-height:34vh; }
 }
 @media print { .paper-work-order-reference { display:none !important; } }
+
+/* ===== 参考資料メディア（Phase 1） ===== */
+.media-attachments { margin-top:8px; }
+.media-hint, .media-empty { font-size:12px; color:var(--text-secondary); margin-bottom:8px; }
+.media-empty { padding:14px; text-align:center; border:1px dashed var(--border-color); border-radius:var(--radius-sm); }
+.media-empty[hidden], .media-error[hidden], .media-recording[hidden], .media-send-notice[hidden] { display:none !important; }
+.media-actions { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:8px; margin-bottom:10px; }
+.media-actions button { min-height:48px; font-size:15px; }
+.media-actions button[aria-pressed="true"] { background:#c62828; color:#fff; border-color:#c62828; }
+.media-recording { color:#c62828; font-weight:700; margin-bottom:8px; }
+.media-error { color:#b71c1c; background:#fdecea; border-radius:var(--radius-sm); padding:8px 10px; font-size:13px; margin-bottom:8px; }
+.media-send-notice { font-weight:700; color:#b71c1c; margin-bottom:8px; }
+.media-list { list-style:none; display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:10px; }
+.media-item { display:flex; flex-direction:column; gap:6px; padding:8px; border:1px solid var(--border-color); border-radius:var(--radius-sm); background:var(--input-bg); }
+.media-preview { width:100%; max-height:200px; object-fit:contain; background:#000; border-radius:var(--radius-sm); }
+.media-preview-audio { background:transparent; }
+.media-file-card { display:flex; align-items:center; justify-content:center; height:80px; font-weight:700; color:var(--text-secondary); background:var(--navy-mid); border-radius:var(--radius-sm); }
+.media-name { font-size:13px; font-weight:700; color:var(--text-primary); overflow-wrap:anywhere; }
+.media-detail { font-size:12px; color:var(--text-secondary); overflow-wrap:anywhere; }
+.media-delete { min-height:44px; }
+@media print { .media-attachments { display:none !important; } }
