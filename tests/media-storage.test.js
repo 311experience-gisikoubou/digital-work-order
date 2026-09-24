@@ -228,20 +228,36 @@ test('restore drops metadata whose OPFS file is missing and cleans it up', async
   assert.equal(env.metaStore.records.has(b.attachmentId), true);
 });
 
-test('restore fails closed on invalid, unknown-status or Blob-carrying metadata', async () => {
+test('restore fails closed on invalid, unknown-status or Blob-carrying metadata of the requested owner', async () => {
+  const cases = {
+    'unknown status': { status: 'archived' },
+    'unknown property': { objectUrl: 'blob:sample/1' },
+    'unknown owner type': { ownerType: 'clinic' }
+  };
+  for (const [label, override] of Object.entries(cases)) {
+    const env = makeEnv();
+    const draft = await env.persistence.getOrCreateActiveDraft();
+    const good = validMeta({ ownerRef: draft, size: 16 });
+    const bad = validMeta(Object.assign({ ownerRef: draft, attachmentId: 'att-123e4567-e89b-42d3-a456-426614174003', opfsName: 'att-123e4567-e89b-42d3-a456-426614174003' }, override));
+    [good, bad].forEach(m => {
+      env.metaStore.records.set(m.attachmentId, m);
+      env.blobStore.files.set(m.opfsName, realBlob(SAMPLES.note));
+    });
+    await assert.rejects(() => env.persistence.restoreOwner(draft), { code: 'MEDIA_STORAGE_INVALID' }, label);
+  }
+});
+
+test('restore never commits a missing record and reports the missing count', async () => {
   const env = makeEnv();
+  const a = await env.persistence.persistAttachment({ blob: realBlob(SAMPLES.photo), source: 'camera-photo', kind: 'image', name: SAMPLES.photo.name });
+  env.blobStore.files.delete(a.attachmentId);
   const draft = await env.persistence.getOrCreateActiveDraft();
-  const good = validMeta({ ownerRef: draft, size: 16 });
-  env.blobStore.files.set(good.attachmentId, realBlob(SAMPLES.note));
-  const badStatus = validMeta({ ownerRef: draft, attachmentId: 'att-123e4567-e89b-42d3-a456-426614174003', opfsName: 'att-123e4567-e89b-42d3-a456-426614174003', status: 'archived' });
-  const withBlob = validMeta({ ownerRef: draft, attachmentId: 'att-123e4567-e89b-42d3-a456-426614174004', opfsName: 'att-123e4567-e89b-42d3-a456-426614174004', objectUrl: 'blob:sample/1' });
-  const badOwner = validMeta({ ownerRef: draft, attachmentId: 'att-123e4567-e89b-42d3-a456-426614174005', opfsName: 'att-123e4567-e89b-42d3-a456-426614174005', ownerType: 'clinic' });
-  [good, badStatus, withBlob, badOwner].forEach(m => {
-    env.metaStore.records.set(m.attachmentId, m);
-    env.blobStore.files.set(m.opfsName, realBlob(SAMPLES.note));
-  });
   const restored = await env.persistence.restoreOwner(draft);
-  assert.deepEqual(restored.items.map(i => i.meta.attachmentId), [good.attachmentId]);
+  assert.equal(restored.items.length, 0);
+  assert.equal(restored.missing, 1);
+  const receipt = await env.persistence.commitDraftToWorkOrder(WORK_ORDER_REF);
+  assert.equal(receipt.count, 0);
+  assert.equal(env.metaStore.records.has(a.attachmentId), false);
 });
 
 test('OPFS orphan without metadata is never restored', async () => {
@@ -339,6 +355,70 @@ test('commit fails closed when an OPFS file is missing', async () => {
   await assert.rejects(() => env.persistence.commitDraftToWorkOrder(WORK_ORDER_REF), { code: 'MEDIA_STORAGE_FILE_MISSING' });
   assert.equal(env.metaStore.records.get(a.attachmentId).ownerType, 'draft');
   assert.equal(await env.persistence.getOrCreateActiveDraft(), before);
+});
+
+async function commitFailClosed(setup, code) {
+  const env = makeEnv();
+  const sibling = await addSample(env, SAMPLES.photo);
+  const before = await env.persistence.getOrCreateActiveDraft();
+  const target = await addSample(env, SAMPLES.note);
+  setup(env, target, before);
+  const filesBefore = Array.from(env.blobStore.files.keys()).sort();
+  await assert.rejects(() => env.persistence.commitDraftToWorkOrder(WORK_ORDER_REF), { code });
+  assert.equal(env.metaStore.records.get(sibling.attachmentId).ownerType, 'draft');
+  assert.equal(env.metaStore.records.get(sibling.attachmentId).ownerRef, before);
+  assert.equal(await env.persistence.getOrCreateActiveDraft(), before);
+  assert.deepEqual(Array.from(env.blobStore.files.keys()).sort(), filesBefore);
+}
+
+test('commit rejects unknown status in the active draft; valid sibling stays draft', async () => {
+  await commitFailClosed((env, t) => { env.metaStore.records.get(t.attachmentId).status = 'archived'; }, 'MEDIA_STORAGE_INVALID');
+});
+
+test('commit rejects unknown property in the active draft; valid sibling stays draft', async () => {
+  await commitFailClosed((env, t) => { env.metaStore.records.get(t.attachmentId).objectUrl = 'blob:sample/1'; }, 'MEDIA_STORAGE_INVALID');
+});
+
+test('commit rejects a malformed active-draft row; valid sibling stays draft', async () => {
+  await commitFailClosed((env, t) => { env.metaStore.records.set(t.attachmentId, { attachmentId: t.attachmentId, ownerRef: env.metaStore.records.get(t.attachmentId).ownerRef }); }, 'MEDIA_STORAGE_INVALID');
+});
+
+test('commit rejects a row whose ownerRef does not match the active draft', async () => {
+  await commitFailClosed((env, t) => {
+    const other = 'draft:123e4567-e89b-42d3-a456-426614174099';
+    const listByOwner = env.metaStore.listByOwner;
+    env.metaStore.listByOwner = async ref => (await listByOwner(ref)).map(r => (r.attachmentId === t.attachmentId ? Object.assign({}, r, { ownerRef: other }) : r));
+  }, 'MEDIA_STORAGE_INVALID');
+});
+
+test('commit rejects OPFS size mismatch before binding; activeDraft unchanged', async () => {
+  await commitFailClosed((env, t) => { env.blobStore.files.set(t.attachmentId, { size: t.size + 1, type: t.mime }); }, 'MEDIA_STORAGE_INVALID');
+});
+
+test('commit rejects a missing OPFS file before binding; valid sibling stays draft', async () => {
+  await commitFailClosed((env, t) => { env.blobStore.files.delete(t.attachmentId); }, 'MEDIA_STORAGE_FILE_MISSING');
+});
+
+test('decideCommit: unpersisted item fails; no persistence + zero items skips; persistence + zero items commits', () => {
+  const ids = new Set(['a']);
+  assert.equal(M.decideCommit({ items: [{ id: 'a' }], persistedIds: ids, persistenceReady: true }), 'commit');
+  assert.equal(M.decideCommit({ items: [{ id: 'a' }, { id: 'b' }], persistedIds: ids, persistenceReady: true }), 'fail');
+  assert.equal(M.decideCommit({ items: [], persistedIds: new Set(), persistenceReady: true }), 'commit');
+  assert.equal(M.decideCommit({ items: [], persistedIds: new Set(), persistenceReady: false }), 'skip');
+  assert.equal(M.decideCommit({ items: [{ id: 'a' }], persistedIds: ids, persistenceReady: false }), 'fail');
+});
+
+test('media.js keeps a failed-persist attachment in memory without marking it persisted', () => {
+  const src = fs.readFileSync(path.join(root, 'media.js'), 'utf8');
+  const start = src.indexOf('function addAttachment');
+  const body = src.slice(start, src.indexOf('function bindFileInput', start));
+  const catchBody = body.slice(body.indexOf('} catch (error) {'), body.indexOf('} finally {'));
+  assert.match(catchBody, /store\.add\(blob/);
+  assert.doesNotMatch(catchBody, /persistedIds\.add/);
+  assert.match(src, /commitDraftToWorkOrder/);
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  assert.ok(html.includes('この端末内に一時保存されます。外部には送信されません。'));
+  assert.ok(!html.includes('画面を閉じると消えます'));
 });
 
 test('commit rejects an invalid workOrderRef', async () => {
@@ -456,7 +536,7 @@ test('media.js commit fails closed for unpersisted attachments and clears UI onl
   const src = fs.readFileSync(path.join(root, 'media.js'), 'utf8');
   const commitAt = src.indexOf('helpers.commitCurrentDraft = workOrderRef =>');
   const body = src.slice(commitAt, src.indexOf('render();\n    if (persistenceReady)', commitAt));
-  assert.match(body, /!persistenceReady \|\| items\.some\(item => !persistedIds\.has\(item\.id\)\)/);
+  assert.match(body, /decideCommit\(/);
   assert.ok(body.indexOf('commitDraftToWorkOrder') < body.indexOf('store.clear()'));
   // pagehideはURL/録音のみ解放し、永続データは消さない
   const releaseAt = src.indexOf('function releaseAll()');

@@ -11,6 +11,7 @@
   const SEND_NOTICE_TEXT = '送信完了までこの画面を閉じないでください';
   const MAX_NAME_CHARS = 100;
   const FALLBACK_NAME = '無題ファイル';
+  const UNPERSISTED_MESSAGE = '端末内に保存できていない添付があるため受注へ反映できません。その添付を削除するか、もう一度追加してください';
   const UNSUPPORTED_MESSAGE = 'このブラウザでは添付を安全に保存できないため受注へ反映できません';
   const EXT_KIND = {
     jpg: 'image', jpeg: 'image', png: 'image', gif: 'image', webp: 'image', heic: 'image', heif: 'image',
@@ -159,6 +160,15 @@
     createAttachmentStore
   };
   // UI統合API。DOMがある環境では init() が実体へ差し替える。
+  // 受注確定時の判定（純関数）。'fail' | 'skip' | 'commit'。
+  // 未保存の添付が1件でもあれば fail。永続化不可で添付0件なら従来フロー(skip)。永続化可なら0件でも commit（active draft更新・不正行の検出）。
+  function decideCommit(state) {
+    const items = state.items || [];
+    if (!state.persistenceReady) return items.length ? 'fail' : 'skip';
+    if (items.some(item => !state.persistedIds.has(item.id))) return 'fail';
+    return 'commit';
+  }
+  helpers.decideCommit = decideCommit;
   helpers.hasAttachments = () => false;
   helpers.commitCurrentDraft = async () => ({ committed: 0 });
   global.ReferenceMediaManager = helpers;
@@ -321,6 +331,8 @@
           }
           persistedIds.add(item.id);
         } catch (error) {
+          // 保存に失敗した添付は未保存項目として一覧に残す（persistedIdsへは入れない）。受注確定はfail closedし、削除か再追加を促す。
+          store.add(blob, { source: options.source || 'file-picker', kind, name });
           showError((error && error.userMessage) || '添付を端末内に保存できませんでした。もう一度お試しください');
         } finally {
           pendingAdds -= 1;
@@ -458,10 +470,10 @@
     // 受注確定時: 現在のdraft添付を workOrderRef へ紐付ける。失敗時は例外（呼び出し側が受注反映を中止する）。
     helpers.hasAttachments = () => store.list().length + pendingAdds > 0;
     helpers.commitCurrentDraft = workOrderRef => enqueue(async () => {
-      const items = store.list();
-      if (!items.length) return { committed: 0 };
-      if (!persistenceReady || items.some(item => !persistedIds.has(item.id))) {
-        const error = storageError('MEDIA_STORAGE_UNAVAILABLE', UNSUPPORTED_MESSAGE);
+      const decision = decideCommit({ items: store.list(), persistedIds, persistenceReady });
+      if (decision === 'skip') return { committed: 0 };
+      if (decision === 'fail') {
+        const error = storageError('MEDIA_STORAGE_UNAVAILABLE', persistenceReady ? UNPERSISTED_MESSAGE : UNSUPPORTED_MESSAGE);
         showError(error.userMessage);
         throw error;
       }
@@ -485,6 +497,7 @@
       enqueue(async () => {
         const draft = await persistence.getOrCreateActiveDraft();
         const restored = await persistence.restoreOwner(draft);
+        if (restored.missing > 0) showError('端末内で見つからない添付が' + restored.missing + '件ありました。必要なら追加し直してください');
         restored.items.forEach(({ meta, blob }) => {
           const item = store.add(blob, { id: meta.attachmentId, source: meta.source, kind: meta.kind, name: meta.name, createdAt: meta.createdAt });
           if (item) persistedIds.add(item.id);

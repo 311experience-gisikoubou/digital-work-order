@@ -249,7 +249,7 @@
       return meta;
     }
 
-    // 戻り値: { items: [{ meta, blob }], missing: 件数 }。不正metadata・他owner・欠落ファイルは一覧に出さない。
+    // 戻り値: { items: [{ meta, blob }], missing: 件数 }。要求ownerの不正metadataはMEDIA_STORAGE_INVALIDで失敗。欠落ファイルは一覧に出さず、missing件数で返す。
     async function restoreOwner(ownerRef) {
       if (!isValidDraftRef(ownerRef) && !isValidWorkOrderRef(ownerRef)) throw makeError('MEDIA_STORAGE_INVALID');
       let rows;
@@ -257,7 +257,8 @@
       const items = [];
       let missing = 0;
       for (const meta of rows) {
-        if (metadataProblem(meta) || meta.ownerRef !== ownerRef) continue;
+        // 要求ownerの行が不正なら黙って捨てず fail closed（見えない不正行を残したまま続行しない）。
+        if (metadataProblem(meta) || meta.ownerRef !== ownerRef) throw makeError('MEDIA_STORAGE_INVALID');
         let file;
         try { file = await blobStore.get(meta.opfsName); } catch (error) { throw makeError('MEDIA_STORAGE_RESTORE_FAILED', error); }
         if (!file) {
@@ -289,9 +290,14 @@
       const nextDraft = newDraftRef(cryptoApi);
       try {
         const rows = await metaStore.listByOwner(previousDraft);
+        // 1行でも不正・owner不一致・size不一致・欠落なら、metadata transactionの前に全体を中止する。
         for (const meta of rows) {
-          if (metadataProblem(meta) || meta.ownerRef !== previousDraft) continue;
-          if (!(await blobStore.exists(meta.opfsName))) throw makeError('MEDIA_STORAGE_FILE_MISSING');
+          if (metadataProblem(meta) || meta.ownerRef !== previousDraft || meta.ownerType !== 'draft') throw makeError('MEDIA_STORAGE_INVALID');
+        }
+        for (const meta of rows) {
+          const file = await blobStore.get(meta.opfsName);
+          if (!file) throw makeError('MEDIA_STORAGE_FILE_MISSING');
+          if (file.size !== meta.size) throw makeError('MEDIA_STORAGE_INVALID');
         }
         const count = await metaStore.commitDraft({
           fromDraft: previousDraft,
@@ -300,7 +306,7 @@
         });
         return { workOrderRef, previousDraft, activeDraft: nextDraft, count };
       } catch (error) {
-        if (error && error.code === 'MEDIA_STORAGE_FILE_MISSING') throw error;
+        if (error && (error.code === 'MEDIA_STORAGE_FILE_MISSING' || error.code === 'MEDIA_STORAGE_INVALID')) throw error;
         throw makeError('MEDIA_STORAGE_COMMIT_FAILED', error);
       }
     }
