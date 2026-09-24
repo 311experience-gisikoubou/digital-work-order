@@ -12,6 +12,7 @@
   const MAX_NAME_CHARS = 100;
   const FALLBACK_NAME = '無題ファイル';
   const UNPERSISTED_MESSAGE = '端末内に保存できていない添付があるため受注へ反映できません。その添付を削除するか、もう一度追加してください';
+  const UNRENDERED_MESSAGE = '端末内の添付を画面に表示できなかったため受注へ反映できません。ページを再読み込みしてからもう一度お試しください';
   const UNSUPPORTED_MESSAGE = 'このブラウザでは添付を安全に保存できないため受注へ反映できません';
   const EXT_KIND = {
     jpg: 'image', jpeg: 'image', png: 'image', gif: 'image', webp: 'image', heic: 'image', heif: 'image',
@@ -164,6 +165,8 @@
   // 未保存の添付が1件でもあれば fail。永続化不可で添付0件なら従来フロー(skip)。永続化可なら0件でも commit（active draft更新・不正行の検出）。
   function decideCommit(state) {
     const items = state.items || [];
+    // 添付が画面の一覧へ出せなかった場合は、可視項目が0件でも再読込まで確定させない。
+    if (state.hiddenAttachmentBlock) return 'fail';
     if (!state.persistenceReady) return items.length ? 'fail' : 'skip';
     if (items.some(item => !state.persistedIds.has(item.id))) return 'fail';
     return 'commit';
@@ -195,6 +198,8 @@
     try { persistence = storageApi ? storageApi.createBrowserPersistence(global) : null; } catch (_) { persistence = null; }
     let persistenceReady = !!(persistence && persistence.available);
     const persistedIds = new Set();
+    // 添付を一覧(in-memory store)へ出せなかった件数。セッション限定で、再読込で0に戻り、永続済み分は復元を再試行する。
+    let materializationFailureCount = 0;
     let pendingAdds = 0;
     let queue = Promise.resolve();
     // 追加・削除・復元・受注確定を直列化し、受注確定が未完了の追加を追い越さないようにする。
@@ -325,14 +330,15 @@
           });
           const item = store.add(blob, { id: meta.attachmentId, source: meta.source, kind: meta.kind, name: meta.name, createdAt: meta.createdAt });
           if (!item) {
-            try { await persistence.removeAttachment(meta.attachmentId); } catch (_) { /* 送信対象ではないorphanとして残るだけ */ }
-            showError('この資料を一覧に追加できませんでした。別のファイルでお試しください。');
+            // 永続化は成功済み。OPFS/metadataは消さず、再読込で復元を再試行する。このセッションでは受注確定を止める。
+            materializationFailureCount += 1;
+            showError(UNRENDERED_MESSAGE);
             return;
           }
           persistedIds.add(item.id);
         } catch (error) {
           // 保存に失敗した添付は未保存項目として一覧に残す（persistedIdsへは入れない）。受注確定はfail closedし、削除か再追加を促す。
-          store.add(blob, { source: options.source || 'file-picker', kind, name });
+          if (!store.add(blob, { source: options.source || 'file-picker', kind, name })) materializationFailureCount += 1;
           showError((error && error.userMessage) || '添付を端末内に保存できませんでした。もう一度お試しください');
         } finally {
           pendingAdds -= 1;
@@ -470,10 +476,10 @@
     // 受注確定時: 現在のdraft添付を workOrderRef へ紐付ける。失敗時は例外（呼び出し側が受注反映を中止する）。
     helpers.hasAttachments = () => store.list().length + pendingAdds > 0;
     helpers.commitCurrentDraft = workOrderRef => enqueue(async () => {
-      const decision = decideCommit({ items: store.list(), persistedIds, persistenceReady });
+      const decision = decideCommit({ items: store.list(), persistedIds, persistenceReady, hiddenAttachmentBlock: materializationFailureCount > 0 });
       if (decision === 'skip') return { committed: 0 };
       if (decision === 'fail') {
-        const error = storageError('MEDIA_STORAGE_UNAVAILABLE', persistenceReady ? UNPERSISTED_MESSAGE : UNSUPPORTED_MESSAGE);
+        const error = storageError('MEDIA_STORAGE_UNAVAILABLE', materializationFailureCount > 0 ? UNRENDERED_MESSAGE : persistenceReady ? UNPERSISTED_MESSAGE : UNSUPPORTED_MESSAGE);
         showError(error.userMessage);
         throw error;
       }
@@ -501,11 +507,14 @@
         restored.items.forEach(({ meta, blob }) => {
           const item = store.add(blob, { id: meta.attachmentId, source: meta.source, kind: meta.kind, name: meta.name, createdAt: meta.createdAt });
           if (item) persistedIds.add(item.id);
+          else materializationFailureCount += 1;
         });
+        if (materializationFailureCount > 0) showError(UNRENDERED_MESSAGE);
         render();
       }).catch(error => {
         // 復元に失敗してもアプリは壊さない。以後の添付はメモリ内のみとし、受注確定時にfail closedする。
         persistenceReady = false;
+        materializationFailureCount += 1; // 永続済みの添付が非表示のまま残り得るため、再読込まで確定させない
         showError((error && error.userMessage) || '端末内に保存された添付を読み込めませんでした');
       });
     }

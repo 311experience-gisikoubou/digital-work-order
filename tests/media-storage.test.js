@@ -616,3 +616,26 @@ test('media.js commit fails closed for unpersisted attachments and clears UI onl
   const release = src.slice(releaseAt, src.indexOf("global.addEventListener('pagehide'", releaseAt));
   assert.doesNotMatch(release, /removeAttachment|commitDraftToWorkOrder|deleteAttachment/);
 });
+
+test('decideCommit: hidden attachment block fails even with zero visible items', () => {
+  [true, false].forEach(ready => {
+    assert.equal(M.decideCommit({ items: [], persistedIds: new Set(), persistenceReady: ready, hiddenAttachmentBlock: true }), 'fail');
+  });
+  assert.equal(M.decideCommit({ items: [{ id: 'a' }], persistedIds: new Set(['a']), persistenceReady: true, hiddenAttachmentBlock: true }), 'fail');
+  assert.equal(M.decideCommit({ items: [], persistedIds: new Set(), persistenceReady: true, hiddenAttachmentBlock: false }), 'commit');
+});
+
+test('media.js: store.add failure activates the block, keeps persisted data, and never removes it', () => {
+  const src = fs.readFileSync(path.join(root, 'media.js'), 'utf8');
+  const addAt = src.indexOf('function addAttachment(');
+  const add = src.slice(addAt, src.indexOf('function bindFileInput', addAt));
+  const noItem = add.slice(add.indexOf('if (!item) {'), add.indexOf('persistedIds.add(item.id)'));
+  assert.match(noItem, /materializationFailureCount \+= 1/);
+  assert.doesNotMatch(noItem, /removeAttachment/);
+  assert.match(add, /if \(!store\.add\([^\n]*\)\) materializationFailureCount \+= 1/);
+  const restoreAt = src.indexOf('restored.items.forEach');
+  const restore = src.slice(restoreAt, src.indexOf('render();', restoreAt));
+  assert.match(restore, /else materializationFailureCount \+= 1/);
+  assert.doesNotMatch(restore, /removeAttachment|deleteAttachment/);
+  assert.match(src, /hiddenAttachmentBlock: materializationFailureCount > 0/);
+});
