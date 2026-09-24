@@ -37,7 +37,7 @@
 
 ## 次の最小作業
 
-- 人間の指示でPRを作成し、final-pr-auditを実施する。
+- GPT/AIがDraft PRを作成し、final-pr-auditを自動で実施する（人間確認は不要）。
 
 ## blocker
 
@@ -45,4 +45,4 @@
 
 ## 人間確認が必要な項目
 
-- PR作成とmerge可否（実施はAIのfinal-pr-audit PASS後）。
+- merge許可（人間が明示的に「マージして」と指示した場合のみ実施。AIのfinal-pr-audit PASS後）。
