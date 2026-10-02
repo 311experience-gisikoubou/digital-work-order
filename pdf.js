@@ -119,14 +119,22 @@ async function _createFixedPdfBlob(id, id2, paperSize) {
   if (typeof html2canvas !== 'function') throw new Error('html2canvas unavailable');
   var order1 = id ? state.orders.find(function(o){ return o.id === id; }) : collectFormData();
   if (!order1) throw new Error('PDF data unavailable');
+  if (!id && !order1.visualSnapshot) {
+    var currentVisualSnapshot = typeof freezeVisualSnapshot === 'function' ? freezeVisualSnapshot() : null;
+    if (!currentVisualSnapshot) throw new Error('visual snapshot unavailable');
+    order1 = Object.assign({}, order1, {
+      visualSnapshot: currentVisualSnapshot,
+      selectedTeeth: JSON.parse(JSON.stringify(currentVisualSnapshot.selectedTeeth)),
+      memoStrokes: JSON.parse(JSON.stringify(currentVisualSnapshot.drawing.memoStrokes))
+    });
+  }
   var order2 = (id2 != null) ? (state.orders.find(function(o){ return o.id === id2; }) || null) : null;
   var chartWrap = document.querySelector('.chart-wrap');
-  var chartHtml = chartWrap ? chartWrap.outerHTML : '';
-  var sourceMemoStrokes = Array.isArray(order1.memoStrokes)
-    ? order1.memoStrokes
-    : (typeof memoStrokes !== 'undefined' && Array.isArray(memoStrokes) ? memoStrokes : []);
-  var memoHtml = buildMemoPngHTML(sourceMemoStrokes) || buildMemoSvgHTML(sourceMemoStrokes);
-  var html = _buildPrintHTML(order1, chartHtml, order2, memoHtml);
+  var chartHtml1 = buildOrderChartHTML(order1, chartWrap);
+  var memoHtml1 = buildOrderMemoHTML(order1);
+  var chartHtml2 = order2 ? buildOrderChartHTML(order2, chartWrap) : '';
+  var memoHtml2 = order2 ? buildOrderMemoHTML(order2) : '';
+  var html = _buildPrintHTML(order1, chartHtml1, order2, memoHtml1, chartHtml2, memoHtml2);
 
   var iframe = document.createElement('iframe');
   iframe.style.cssText = 'position:fixed;top:0;left:-10000px;width:182mm;height:257mm;border:0;background:#fff;pointer-events:none;';
@@ -225,7 +233,134 @@ function buildMemoPngHTML(strokes) {
     : '';
 }
 
-function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
+function buildOrderMemoHTML(order) {
+  if (!order || !order.visualSnapshot || typeof isValidVisualSnapshot !== 'function'
+      || !isValidVisualSnapshot(order.visualSnapshot)) return '';
+  var strokes = order.visualSnapshot.drawing.memoStrokes;
+  return buildMemoPngHTML(strokes) || buildMemoSvgHTML(strokes);
+}
+
+function _appendSnapshotDrawPaths(layer, strokes) {
+  if (!layer || !Array.isArray(strokes)) return;
+  strokes.forEach(function(stroke) {
+    if (!stroke || !stroke.d) return;
+    var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('class', 'draw-path');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', stroke.color || '#111');
+    path.setAttribute('stroke-width', String(Number(stroke.width) > 0 ? stroke.width : 6));
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    path.setAttribute('d', stroke.d);
+    layer.appendChild(path);
+  });
+}
+
+function _appendSnapshotClasps(layer, snapshot) {
+  if (!layer || !snapshot || !snapshot.claspState) return;
+  var labelMap = { W:'WC', E:'CC', T:'双子', C:'コンビ', H:'フック', R:'レスト', CR:'CR', I:'Ｉバー', WI:'WCＩバー' };
+  var colorMap = { W:'#2563a8', E:'#22aa66', T:'#8844cc', C:'#8B4513', H:'#cc2222', R:'#dd7700', CR:'#b45309', I:'#0088aa', WI:'#0088aa' };
+  Object.keys(snapshot.claspState).forEach(function(key) {
+    var coord = snapshot.coordinates[key];
+    if (!coord) return;
+    (snapshot.claspState[key] || []).forEach(function(clasp) {
+      var label = labelMap[clasp.type] || clasp.type || '';
+      var tooth = { num:Number(key), cx:coord.cx, cy:coord.cy, rx:coord.rx, ry:coord.ry };
+      var offset = typeof getClaspLabelOffset === 'function'
+        ? getClaspLabelOffset(tooth, label)
+        : { x: 0, y: tooth.num < 30 ? -(tooth.ry + 30) : (tooth.ry + 30) };
+      var tx = Number.isFinite(clasp.cx) ? clasp.cx : coord.cx;
+      var ty = Number.isFinite(clasp.cy) ? clasp.cy : coord.cy;
+      var group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      group.setAttribute('class', 'clasp-group');
+      group.setAttribute('transform', 'translate(' + tx + ',' + ty + ')');
+      var text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      text.setAttribute('x', offset.x);
+      text.setAttribute('y', offset.y);
+      text.setAttribute('class', 'clasp-label');
+      text.setAttribute('fill', colorMap[clasp.type] || '#555');
+      text.style.fontSize = (typeof getClaspLabelFontSize === 'function' ? getClaspLabelFontSize(label) : 40) + 'px';
+      text.style.fontWeight = '900';
+      text.textContent = label;
+      group.appendChild(text);
+      layer.appendChild(group);
+    });
+  });
+}
+
+function buildOrderChartHTML(order, baseChartWrap) {
+  if (!order || !order.visualSnapshot || typeof isValidVisualSnapshot !== 'function'
+      || !isValidVisualSnapshot(order.visualSnapshot)) return '';
+  if (!baseChartWrap || typeof baseChartWrap.cloneNode !== 'function') return '';
+
+  var snapshot = order.visualSnapshot;
+  var clone = baseChartWrap.cloneNode(true);
+  Array.prototype.slice.call(clone.querySelectorAll('.clasp-group,.draw-path,#drawHitArea,#eraserLayer'))
+    .forEach(function(node) { if (node.parentNode) node.parentNode.removeChild(node); });
+
+  Object.keys(snapshot.teeth).forEach(function(key) {
+    var toothState = snapshot.teeth[key];
+    var coord = snapshot.coordinates[key];
+    var tooth = clone.querySelector('#tooth-' + key);
+    var stamp = clone.querySelector('#stamp-' + key);
+    var caution = clone.querySelector('#caution-' + key);
+    var group = clone.querySelector('#g-' + key);
+    if (tooth && coord) {
+      tooth.setAttribute('cx', coord.cx);
+      tooth.setAttribute('cy', coord.cy);
+      tooth.setAttribute('rx', coord.rx);
+      tooth.setAttribute('ry', coord.ry);
+      var className = 'tooth-el';
+      if (toothState.baseState === 'missing') className += ' missing';
+      if (toothState.baseState === 'abutment') className += ' abutment';
+      if (toothState.caution) className += ' caution';
+      tooth.setAttribute('class', className);
+    }
+    if (stamp && coord) {
+      stamp.setAttribute('x', coord.cx);
+      stamp.setAttribute('y', coord.cy);
+      if (toothState.baseState === 'missing') {
+        stamp.setAttribute('class', 'tooth-stamp show missing');
+        stamp.textContent = '✕';
+      } else if (toothState.baseState === 'abutment') {
+        stamp.setAttribute('class', 'tooth-stamp show abutment');
+        stamp.textContent = '支';
+      } else {
+        stamp.setAttribute('class', 'tooth-stamp');
+        stamp.textContent = '';
+      }
+    }
+    if (!caution && group && coord) {
+      caution = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      caution.id = 'caution-' + key;
+      caution.textContent = '!';
+      group.appendChild(caution);
+    }
+    if (caution && coord) {
+      caution.setAttribute('x', coord.cx + coord.rx * 0.6);
+      caution.setAttribute('y', coord.cy - coord.ry * 0.6);
+      caution.setAttribute('class', toothState.caution ? 'tooth-caution-mark show' : 'tooth-caution-mark');
+    }
+    if (group && coord) {
+      var number = group.querySelector('.tooth-num');
+      var editNumber = group.querySelector('.edit-num');
+      if (number) {
+        number.setAttribute('x', coord.cx);
+        number.setAttribute('y', coord.cy + coord.ry + 11);
+      }
+      if (editNumber) {
+        editNumber.setAttribute('x', coord.cx);
+        editNumber.setAttribute('y', coord.cy);
+      }
+    }
+  });
+
+  _appendSnapshotClasps(clone.querySelector('#claspLayer'), snapshot);
+  _appendSnapshotDrawPaths(clone.querySelector('#freeLineLayer'), snapshot.drawing.strokes);
+  return clone.outerHTML;
+}
+
+function _buildPrintHTML(order1, chartHtml, order2, memoHtml, chartHtml2, memoHtml2) {
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;')
@@ -274,10 +409,10 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
     function selectedText(teeth) {
       return teeth.filter(function(num) { return missingSet.has(num); }).join('・');
     }
-    var upperRight = selectedText([17,16,15,14,13,12,11]);
-    var upperLeft = selectedText([21,22,23,24,25,26,27]);
-    var lowerRight = selectedText([47,46,45,44,43,42,41]);
-    var lowerLeft = selectedText([31,32,33,34,35,36,37]);
+    var upperRight = selectedText([18,17,16,15,14,13,12,11]);
+    var upperLeft = selectedText([21,22,23,24,25,26,27,28]);
+    var lowerRight = selectedText([48,47,46,45,44,43,42,41]);
+    var lowerLeft = selectedText([31,32,33,34,35,36,37,38]);
     var lines = [];
     if (upperRight || upperLeft) lines.push('上顎：' + (upperRight || '—') + '｜' + (upperLeft || '—'));
     if (lowerRight || lowerLeft) lines.push('下顎：' + (lowerRight || '—') + '｜' + (lowerLeft || '—'));
@@ -338,7 +473,7 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
   }
 
   // ── 1件分のスリップHTMLを生成（orderがnullなら空スリップ）──
-  function buildSlip(order) {
+  function buildSlip(order, slipChartHtml, slipMemoHtml) {
     if (!order) {
       return '<div class="slip-header"><h1>歯科技工指示書</h1><div class="issue-date"></div></div>' +
              '<div class="slip-empty"></div>';
@@ -379,21 +514,29 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
 
     // ── 歯式番号欄（7番まで・欠損部を強調）─────────
     var missingSet = new Set(order.selectedTeeth || []);
+    var snapshotTeeth = order.visualSnapshot && order.visualSnapshot.teeth ? order.visualSnapshot.teeth : null;
     var tnSpan = function(fdiNum, posNum) {
-      var isMissing = missingSet.has(fdiNum);
-      return '<span class="tn-num' + (isMissing ? ' tn-missing' : '') + '">' + posNum + '</span>';
+      var toothStateForPdf = snapshotTeeth ? snapshotTeeth[String(fdiNum)] : null;
+      var isMissing = toothStateForPdf ? toothStateForPdf.baseState === 'missing' : missingSet.has(fdiNum);
+      var isAbutment = Boolean(toothStateForPdf && toothStateForPdf.baseState === 'abutment');
+      var isCaution = Boolean(toothStateForPdf && toothStateForPdf.caution);
+      var classes = 'tn-num';
+      if (isMissing) classes += ' tn-missing';
+      if (isAbutment) classes += ' tn-abutment';
+      if (isCaution) classes += ' tn-caution';
+      return '<span class="' + classes + '">' + posNum + '</span>';
     };
     var upperRow =
       '<div class="tn-row">' +
-      tnSpan(17,7) + tnSpan(16,6) + tnSpan(15,5) + tnSpan(14,4) + tnSpan(13,3) + tnSpan(12,2) + tnSpan(11,1) +
+      tnSpan(18,8) + tnSpan(17,7) + tnSpan(16,6) + tnSpan(15,5) + tnSpan(14,4) + tnSpan(13,3) + tnSpan(12,2) + tnSpan(11,1) +
       '<span class="tn-mid">│</span>' +
-      tnSpan(21,1) + tnSpan(22,2) + tnSpan(23,3) + tnSpan(24,4) + tnSpan(25,5) + tnSpan(26,6) + tnSpan(27,7) +
+      tnSpan(21,1) + tnSpan(22,2) + tnSpan(23,3) + tnSpan(24,4) + tnSpan(25,5) + tnSpan(26,6) + tnSpan(27,7) + tnSpan(28,8) +
       '</div>';
     var lowerRow =
       '<div class="tn-row">' +
-      tnSpan(47,7) + tnSpan(46,6) + tnSpan(45,5) + tnSpan(44,4) + tnSpan(43,3) + tnSpan(42,2) + tnSpan(41,1) +
+      tnSpan(48,8) + tnSpan(47,7) + tnSpan(46,6) + tnSpan(45,5) + tnSpan(44,4) + tnSpan(43,3) + tnSpan(42,2) + tnSpan(41,1) +
       '<span class="tn-mid">│</span>' +
-      tnSpan(31,1) + tnSpan(32,2) + tnSpan(33,3) + tnSpan(34,4) + tnSpan(35,5) + tnSpan(36,6) + tnSpan(37,7) +
+      tnSpan(31,1) + tnSpan(32,2) + tnSpan(33,3) + tnSpan(34,4) + tnSpan(35,5) + tnSpan(36,6) + tnSpan(37,7) + tnSpan(38,8) +
       '</div>';
     L.push('<div class="tn-block">' + upperRow + '<div class="tn-sep"></div>' + lowerRow + '</div>');
 
@@ -404,17 +547,21 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
     row(R, 'クラスプ', order.claspType);
     if (order.barType) row(R, 'バー', order.barType + 'バー');
 
-    if (typeof claspState !== 'undefined') {
+    var items = [];
+    var orderClaspState = order.visualSnapshot && order.visualSnapshot.claspState
+      ? order.visualSnapshot.claspState
+      : null;
+    if (orderClaspState) {
       var CN = { W:'W ワイヤークラスプ', E:'C キャスト鉤', T:'T 双子鉤', R:'R レスト', CR:'CR キャストレスト', H:'H フック', C:'CM コンビ鉤', I:'I Iバー', WI:'WI ワイヤーIバー' };
       var counts = {};
-      Object.keys(claspState).forEach(function(num) {
-        (claspState[num] || []).forEach(function(c) {
+      Object.keys(orderClaspState).forEach(function(num) {
+        (orderClaspState[num] || []).forEach(function(c) {
           if (c.isTwin1) return;
           counts[c.type] = (counts[c.type] || 0) + 1;
         });
       });
       var deviceName = { W:'WC', E:'CC', T:'双子鉤', R:'レスト', CR:'CR', H:'フック', C:'コンビ鉤', I:'Iバー', WI:'WIバー' };
-      var items = Object.keys(counts).map(function(t) {
+      items = Object.keys(counts).map(function(t) {
         return (deviceName[t] || CN[t] || t) + ' ×' + counts[t];
       });
       if (items.length) row(R, 'クラスプ配置', items.join('　'));
@@ -455,6 +602,12 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
       return '<span class="inline-item"><span class="inline-lbl">' + esc(label) + '</span><span class="inline-val">' + esc(value) + '</span></span>';
     }
     gridRow(compactR, '床種', order.bedType);
+    gridRow(compactR, '模型発送予定日', order.shippingDate ? formatMonthDay(order.shippingDate) : '');
+    var expediteFee = Number(order.expediteFeeYen);
+    var expediteText = Number.isFinite(expediteFee)
+      ? (expediteFee > 0 ? '¥' + Math.round(expediteFee).toLocaleString() : 'なし')
+      : '';
+    gridRow(compactR, '急ぎ料金', expediteText);
 
     var deviceCountItems = [];
     if (items && items.length) deviceCountItems = deviceCountItems.concat(items);
@@ -489,6 +642,19 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
       ? missingToothNotation(missingSet)
       : '';
     pushHtmlRow('欠損歯式', missingTeethHtml, 'missing-chart-row');
+
+    if (snapshotTeeth) {
+      var abutmentTeeth = Object.keys(snapshotTeeth)
+        .filter(function(key) { return snapshotTeeth[key].baseState === 'abutment'; })
+        .map(Number).sort(function(a, b) { return a - b; });
+      var cautionTeeth = Object.keys(snapshotTeeth)
+        .filter(function(key) { return snapshotTeeth[key].caution; })
+        .map(Number).sort(function(a, b) { return a - b; });
+      var toothStateParts = [];
+      if (abutmentTeeth.length) toothStateParts.push('支台歯：' + abutmentTeeth.join('・'));
+      if (cautionTeeth.length) toothStateParts.push('要注意：' + cautionTeeth.join('・'));
+      if (toothStateParts.length) pushHtmlRow('歯状態', esc(toothStateParts.join('　')), 'tooth-state-row');
+    }
 
     var toothInfoHtml = [
       inlineItem('前歯', toothMaterialName(order.toothAnterior)),
@@ -527,7 +693,7 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
       '<div class="remarks">' + (remarksText ? esc(remarksText).replace(/\n/g, '<br>') : '') + '</div>' +
       '</div></div>';
     var studioName = '咬み合わせ医療会　こよし技工房';
-    var chartMemoHtml = '<div class="chart-memo">' + (memoHtml || '') + '</div>';
+    var chartMemoHtml = '<div class="chart-memo">' + (slipMemoHtml || '') + '</div>';
     var bottomContactHtml =
       '<div class="bottom-contact">' +
       '<div class="contact-address">住所</div>' +
@@ -570,7 +736,7 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
       '<div class="issue-date">発行日：' + esc(order.issueDate ? formatJapaneseEraDate(order.issueDate) : '') + '</div></div>' +
       '<div class="print-body">' +
       '<div class="chart-col">' +
-      (chartHtml || '') +
+      (slipChartHtml || '<div class="chart-unavailable">図情報なし</div>') +
       chartMemoHtml +
       '</div>' +
       '<div class="' + infoWrapClass + '">' +
@@ -838,8 +1004,10 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
     }
     .tn-block { margin: 1.3mm 0 0.8mm; border: 0.2mm solid #dbe6eb; border-radius: 1.2mm; padding: 0.8mm; }
     .tn-row { display: flex; font-size: 5.5pt; padding: 0.2mm 0; }
-    .tn-num { flex: 1; text-align: center; color: #ddd; }
-    .tn-num.tn-missing { color: #000; }
+    .tn-num { flex: 1; text-align: center; color: #ddd; border-bottom: 0.35mm solid transparent; }
+    .tn-num.tn-missing { color: #aa1a1a; font-weight: 900; text-decoration: line-through; }
+    .tn-num.tn-abutment { color: #1d4ed8; font-weight: 900; }
+    .tn-num.tn-caution { border-bottom-color: #d97706; }
     .tn-mid { flex: 0 0 auto; padding: 0 0.5mm; color: #333; font-weight: bold; }
     .tn-sep { border-top: 0.3mm solid #ccc; margin: 0.5mm 0; }
     .remarks {
@@ -1111,19 +1279,29 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml) {
       position:absolute !important; top:0 !important; left:0 !important;
       width:35mm !important; height:60mm !important;
     }
-    .clasp-sel-rect, .clasp-bbox, .clasp-handle, .rot-line { display: none !important; }
+    .chart-unavailable {
+      width: 35mm; height: 60mm; display: flex; align-items: center; justify-content: center;
+      border: 0.2mm dashed #cbd5d9; color: #7a8b92; font-size: 6pt; font-weight: 700;
+    }
+    .clasp-sel-rect, .clasp-bbox, .clasp-handle, .rot-line, .edit-num { display: none !important; }
+    .clasp-label { text-anchor: middle; dominant-baseline: middle; font-weight: 900; }
     .tooth-el { fill:transparent; stroke:transparent; }
     .tooth-el.missing { fill: rgba(204,34,34,0.28); stroke: #c00; stroke-width: 2.5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .tooth-el.abutment { fill: rgba(37,99,235,0.18); stroke: #1d4ed8; stroke-width: 2.5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .tooth-el.caution { stroke: #d97706; stroke-width: 3; stroke-dasharray: 6 4; }
     .tooth-stamp { font-size: 18px; text-anchor: middle; dominant-baseline: middle; font-weight: 900; opacity: 0; }
     .tooth-stamp.show { opacity: 1; }
     .tooth-stamp.missing { fill: #aa1a1a; }
+    .tooth-stamp.abutment { fill: #1d4ed8; }
+    .tooth-caution-mark { opacity: 0; fill: #d97706; font-size: 28px; font-weight: 900; text-anchor: middle; dominant-baseline: middle; }
+    .tooth-caution-mark.show { opacity: 1; }
     @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
   `;
 
   return '<!DOCTYPE html>\n<html lang="ja">\n<head>\n<meta charset="UTF-8">\n<title>歯科技工指示書</title>\n' +
     '<style>' + css + '</style>\n</head>\n<body>\n' +
-    '<div class="slip">' + buildSlip(order1) + '</div>\n' +
+    '<div class="slip">' + buildSlip(order1, chartHtml, memoHtml) + '</div>\n' +
     '<div class="perforated"></div>\n' +
-    '<div class="slip">' + buildSlip(order2 || null) + '</div>\n' +
+    '<div class="slip">' + buildSlip(order2 || null, chartHtml2 || '', memoHtml2 || '') + '</div>\n' +
     '</body>\n</html>';
 }

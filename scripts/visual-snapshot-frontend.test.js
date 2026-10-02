@@ -428,9 +428,13 @@ test('script order loads visual snapshot after tooth state and before session va
   assert.ok(visualIndex < ordersIndex);
 });
 
-test('Stage 3 does not wire visualSnapshot into protected Stage 4+ consumers', () => {
+test('Stage 4 connects PDF only and keeps unrelated protected consumers isolated', () => {
+  const pdfSource = fs.readFileSync(path.join(root, 'pdf.js'), 'utf8');
+  assert.equal(pdfSource.includes('visualSnapshot'), true);
+  assert.equal(pdfSource.includes('buildOrderChartHTML'), true);
+
   for (const file of [
-    'pdf.js', 'modal.js', 'media.js', 'calendar.js',
+    'modal.js', 'media.js', 'calendar.js',
     'delivery-intake-export.js', 'tooth-chart.js', 'app/tooth-state.js'
   ]) {
     const source = fs.readFileSync(path.join(root, file), 'utf8');
