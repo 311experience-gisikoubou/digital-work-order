@@ -428,7 +428,9 @@ function generateWorkOrderRef(cryptoApi = globalThis.crypto) {
 // ============================================================
 //  受注一覧反映処理
 // ============================================================
-document.getElementById('submit-btn').addEventListener('click', async () => {
+document.getElementById('submit-btn').addEventListener('click', submitOrder);
+
+function submitOrder() {
   const data = collectFormData();
   const errors = validate(data);
 
@@ -451,7 +453,7 @@ document.getElementById('submit-btn').addEventListener('click', async () => {
   if (typeof syncOrderLossGuard === 'function') syncOrderLossGuard();
   showToast('✅ このページの受注一覧へ反映しました');
   resetForm();
-});
+}
 
 function resetForm() {
   // テキスト入力リセット
