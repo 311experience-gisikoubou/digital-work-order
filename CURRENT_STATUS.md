@@ -6,7 +6,7 @@
 - Status: `ACTIVE`
 - Current phase: `Phase 2 input/save/output specification canonicalized; media persistence integration slice implemented, remaining Phase 2 work (visualSnapshot, dual-axis tooth state, PDF reflection) pending`
 - Active product Issue: `NONE`
-- Active product PR: `NONE (feat/media-local-storage-phase2 branch work-in-progress; PR #120 superseded as unmerged reuse reference only)`
+- Active product PR: `NONE`
 - Last completed product work: `Media persistence integration slice: FormDraftManager (app/draft-persistence.js) is the sole dwo_form_draft_v1 / mediaOwnerRef draft authority; media-storage.js no longer generates/rotates an independent active draft and takes explicit draftRef/ownerRef on persist/restore/removeOwner/commit; app.js submit reverted to current list-reflection behavior (no commitCurrentDraft, no media-to-workOrderRef binding)`
 - Current blocker: `NONE`
 - Next action: `continue the remaining Phase 2 canonical specification items (visualSnapshot per order, dual-axis tooth state, PDF reflection) in minimal verified stages`

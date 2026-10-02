@@ -12,7 +12,7 @@
 
 ## 現在branch
 
-- feat/media-local-storage-phase2（基準: origin/main 5ffe6cefa6c1b4075fd839af422a937add121dbc）
+- feat/media-local-storage-phase2（基準: origin/main 0e71390f44411bc4810b469d7639e5eb5808bed3 / Draft PR #120）
 
 ## 完了したこと
 
@@ -27,7 +27,7 @@
 ## 既知の保留検証項目
 
 - 音声のiPad実機確認（HTTPS環境でのRelease Gate）: Phase 1から維持。今回音声仕様は変更していない。
-- 本スライスはソース編集のみで、自動テスト・headless Chrome E2Eの実行確認はこのセッションでは行っていない。次セッションで `node --test` と `node tools/media-storage-e2e.mjs` を実行して確認すること。
+- 自動テストは `node --test tests\\*.test.js scripts\\*.test.js` で **180 PASS / 0 FAIL**。`node tools/media-storage-e2e.mjs` も **MEDIA_STORAGE_E2E=PASS**。共有 `draftRef`、再読込復元、削除、明示破棄、将来commit APIの非ローテーション、現行submitの非commitまで確認済み。
 - 参考資料カードの案内文「この端末内に一時保存されます。外部には送信されません。」はPhase 1/旧Phase 2スライドから変更していない。
 
 ## 未完了
@@ -38,8 +38,8 @@
 
 ## 次の最小作業
 
-- `node --test` でtests一式と `node tools/media-storage-e2e.mjs` を実行し、本スライスの契約（フォームdraftRef == media ownerRef、再永続化での同一draftRef再利用、不正下書き/storage不可のfail closed、明示破棄の順序、将来commit APIの非ローテーション、現行submitの非commit）を自動確認する。
-- 上記確認後、Phase 2本体（visualSnapshot・歯状態2軸・PDF反映）を次の最小ステージとして着手する。
+- PR #120の最新HEADでfinal-pr-auditを完了し、merge手前で停止する。
+- merge後は、残るPhase 2本体（visualSnapshot・歯状態2軸・PDF反映）を次の最小ステージとして着手する。
 
 ## blocker
 
