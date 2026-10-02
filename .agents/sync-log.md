@@ -400,3 +400,12 @@
 - Human Decision Sync adoption: enabled with no automatic backfill of project-specific mutable decisions; current canonicalContract remains authority until future explicit human decisions are synced
 - scope: Foundation governance/control + PROJECT_CONTEXT governance metadata only; application/runtime/data/dependency behavior unchanged
 - merge: Draft remains locked until fresh explicit human authorization for exact PR/head
+
+## 2026-10-02 - ai-dev-foundation 1.0.0-dev.132
+- source commit: 31ac99d712fee461421aa98d0c905daea07f704e
+- trusted previous foundation: 1.0.0-dev.130 (6963477d2fcee438f2456f9503d558a08da9be2b)
+- target branch: chore/foundation-current-sync-20261002-dwo
+- method: fail-closed foundation-update.mjs dev.130 -> dev.132; dry-run/apply PASS; 6 managed files replaced, no create/delete
+- purpose: activate the merged chat-first routing update and measured UI canonicalization-before-implementation rule in this application repository
+- scope: Foundation governance/control + sync history only; no application code, docs/design.md, localStorage/PDF/handwriting behavior, dependency manifest, or real data changes
+- merge authorization remains separate from synchronization preparation
