@@ -164,9 +164,22 @@
           "digital-work-order-phase2-business-v1",
           "digital-work-order-layout-20261001-v1"
         ]
+      },
+      {
+        "id": "U07",
+        "topic": "project-intake:media-transfer-phase3-20261002",
+        "status": "CONFIRMED",
+        "summary": "次の製品マイルストーンとしてメディア転送Phase 3を進める。範囲はローカルの転送パッケージ、完全性検証、チャンク再開までとし、クラウド送信、暗号・署名・鍵・認証、PC自動受信、実データ、追加課金は含めない。",
+        "decidedAt": "2026-10-02",
+        "source": "EXPLICIT_HUMAN",
+        "type": "BUSINESS",
+        "replaces": null,
+        "artifactIds": [
+          "digital-work-order-phase2-business-v1"
+        ]
       }
     ],
-    "currentState": "U01〜U06はCONFIRMED。Phase 2の入力・保存・出力はmainへ実装済みで、公開GitHub Pagesでもsynthetic browser smokeを通過している。CURRENT canonical artifactsは引き続き実装権威とする。",
-    "nextAction": "Phase 2は完了扱いとする。次の製品マイルストーンはcompletion roadmapから選択し、新要件または回帰がない限り完了済みPhase 2を再実装しない。"
+    "currentState": "U01〜U07はCONFIRMED。Phase 2は完了済み。Issue #136でメディア転送Phase 3（ローカルpackage / integrity / chunk resume）を外部送信なし・synthetic data限定で開始する。",
+    "nextAction": "承認済みPhase 3 intakeをproject-intake gateへ通し、既存workOrderRef・発行snapshot・OPFS/IndexedDB添付管理を再利用した最小変更の実装へ進む。"
   }
 }
