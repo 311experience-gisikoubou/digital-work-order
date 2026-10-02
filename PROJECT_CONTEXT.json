@@ -166,7 +166,7 @@
         ]
       }
     ],
-    "currentState": "U01〜U06はCONFIRMED。Phase 2の入力・保存・出力仕様と採用済み機械可読レイアウトをCURRENTの実装権威とする。アプリ実装は未着手。",
-    "nextAction": "CONFIRMEDのU01〜U06とCURRENT canonical artifactsを基準に、Phase 2を最小変更の段階実装で進める。未マージのメディア永続化作業は別途整合し、統合後HEADで再検証する。"
+    "currentState": "U01〜U06はCONFIRMED。Phase 2の入力・保存・出力はmainへ実装済みで、公開GitHub Pagesでもsynthetic browser smokeを通過している。CURRENT canonical artifactsは引き続き実装権威とする。",
+    "nextAction": "Phase 2は完了扱いとする。次の製品マイルストーンはcompletion roadmapから選択し、新要件または回帰がない限り完了済みPhase 2を再実装しない。"
   }
 }
