@@ -177,9 +177,22 @@
         "artifactIds": [
           "digital-work-order-phase2-business-v1"
         ]
+      },
+      {
+        "id": "U08",
+        "topic": "project-intake:media-transfer-phase4-20261003",
+        "status": "CONFIRMED",
+        "summary": "Phase 3完了後の次マイルストーンとしてメディア転送Phase 4を進める。範囲はローカルのペアリングpayload、標準暗号・署名、sender失効、鍵更新、復号秘密鍵の暗号化offline backupまでとし、クラウド送信、課金、実データ、PC自動受信は含めない。",
+        "decidedAt": "2026-10-03",
+        "source": "EXPLICIT_HUMAN",
+        "type": "BUSINESS",
+        "replaces": null,
+        "artifactIds": [
+          "digital-work-order-phase2-business-v1"
+        ]
       }
     ],
-    "currentState": "U01〜U07はCONFIRMED。Phase 2は完了済み。Issue #136でメディア転送Phase 3（ローカルpackage / integrity / chunk resume）を外部送信なし・synthetic data限定で開始する。",
-    "nextAction": "承認済みPhase 3 intakeをproject-intake gateへ通し、既存workOrderRef・発行snapshot・OPFS/IndexedDB添付管理を再利用した最小変更の実装へ進む。"
+    "currentState": "U01〜U08はCONFIRMED。Phase 3はmainへmerge済み。Issue #138でメディア転送Phase 4（pairing / crypto / signature / revocation / key rotation / encrypted offline backup）を外部送信なし・synthetic data限定で開始する。",
+    "nextAction": "承認済みPhase 4 intakeをproject-intake gateへ通し、Phase 3 MediaTransferPackageを再利用したlocal-only crypto protocol coreを実装する。"
   }
 }
