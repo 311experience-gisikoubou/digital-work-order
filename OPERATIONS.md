@@ -229,7 +229,7 @@ The foundation does not require an always-on hourly GitHub Actions schedule in e
 - Remote Desktop Commander の one-shot コマンドはシェル層を1つにする。必要でない限り、PowerShell の中で `powershell -Command` を入れ子にしない。
 - one-shot セッションが実際に終了したことを確認する（残留プロセスを放置しない）。
 - 意図的に起動した長寿命の dev server / tunnel は自動 kill しない。
-- ローカル運用シミュレーションは `tools/run-local-ops-simulation.ps1` をオンデマンドで実行する（実 Claude・GitHub 書き込み・merge・scheduled task を使わない）。
+- ローカル運用シミュレーションは `tools/run-local-ops-simulation.ps1` をオンデマンドで実行する。`-Mode Core` は日常的な高速経路として推奨されるが、引数省略時の既定は後方互換のため `-Mode Full` のままとする（`Core`を既定と呼ばない）。`Full`は自己クリーンアップする一時的な合成Scheduled Taskを作成する場合がある。両モードとも実Claude・GitHub書き込み・mergeは使わない。
 
 ## Anti-Loop
 
