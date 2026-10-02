@@ -449,3 +449,29 @@ Phase 0の境界（15.1〜15.11）は変更しない。Phase 1は医院側「参
 - 患者名・医院名は添付名・ID に使わない。録音名は日時のみ（例: `音声録音_YYYYMMDD-HHMMSS.webm`）。
 - 「送信完了までこの画面を閉じないでください」は非表示要素として用意のみ。送信処理はPhase 5。
 - iPad Safariの実機確認（カメラ/動画capture、マイク権限、録音再生、見た目）は未確認。
+
+
+## 16. 全体入力・保存・出力 Phase 2（2026-10-02 確定仕様）
+
+全体機能棚卸しと業務判断 U01〜U06 の確定を受け、入力・保存・発行・PDF・歯式の統合仕様を次の文書へ正本化する。
+
+- `docs/phase2-input-save-output-spec.md` — 業務フローと保存/発行/PDF仕様
+- `docs/phase2-field-matrix.md` — 各入力項目の下書き・発行・PDF・JSON反映先
+- `docs/phase2-schema-v1.md` — draft / visual snapshot / 互換schema
+- `docs/phase2-compatibility-change-scope.md` — 保護対象、変更予定範囲、実装順序
+- `docs/canonical/business-layout-20261001-toothchart-compact-sync-v1.json` — 採用済みカード配置
+- `docs/canonical/tooth-chart-sync-spec-v1.json` — 採用済み32歯FDI番号・座標・同期基準
+
+確定事項:
+
+- 下書きは端末内に1件保存し、タブ/ブラウザ終了後も再開できる。これは「編集中フォーム」の保存であり、現行の発行済み `state.orders` のsessionStorage境界を自動的に長期DBへ変更するものではない。
+- 「この内容で発行する」は受注確定とPDF作成まで。技工所PC送信完了を意味しない。
+- 歯状態は `baseState = normal | missing | abutment` と独立 `caution` を正本とする。既存 `selectedTeeth` はmissing集合の互換派生値として維持する。
+- 発行時に歯式、クラスプ、手書き、座標を受注ごとの `visualSnapshot` として固定し、PDFは現在画面のグローバル状態ではなく対象受注snapshotから描画する。
+- 現行B5上下2面を維持し、8番歯、模型発送予定日、急ぎ料金をPDFへ反映する。休日判定・営業日数・急ぎ料金式は変更しない。
+- PR #120は未マージの再利用候補であり、main実装として数えない。統合時はフォームdraftとメディアdraftの `draftRef` を一本化する。
+- 採用済み歯形態を描き直さず、canonical JSONと現行の歯部品・座標を再利用する。
+
+第12.1節の「localStorage / IndexedDBは今回は採用しない」はIssue #82当時の**一時受注再読込復元**の境界である。2026-10-02のU01確定後は、編集中フォームの明示的な下書き保存についてのみ `dwo_form_draft_v1` の端末内永続化を許可する。発行済み受注の長期DB化はこのPhase 2に含めない。
+
+本節は仕様確定であり、アプリ実装完了を意味しない。
