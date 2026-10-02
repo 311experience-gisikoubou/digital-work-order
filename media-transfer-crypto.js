@@ -358,7 +358,14 @@
     const aesKey = await derivePbkdf2AesKey(passphrase, saltBytes, backup.kdf.iterations, ['decrypt'], cryptoApi);
     const aad = canonicalJSONBytes({ version: backup.version, recipientKeyId: backup.recipientKeyId, publicJwk: backup.publicJwk });
 
-    const privateJwkBytes = await aesDecrypt(aesKey, ivBytes, aad, ciphertextBytes, cryptoApi);
+    // 誤ったパスフレーズと改ざんされた暗号文/タグを区別しない（fail-closed）。
+    // どちらの原因でもAES-GCMの認証/復号失敗は同一の安定したエラーコードにまとめる。
+    let privateJwkBytes;
+    try {
+      privateJwkBytes = await aesDecrypt(aesKey, ivBytes, aad, ciphertextBytes, cryptoApi);
+    } catch (_) {
+      throw cryptoError('CRYPTO_BACKUP_AUTH_FAILED');
+    }
     let privateJwk;
     try {
       privateJwk = normalizePrivateJwk(JSON.parse(new TextDecoder().decode(privateJwkBytes)));
