@@ -24,7 +24,7 @@
 - 受注1件以上では画面内の一時受注警告を表示する。対応ブラウザでは `beforeunload` も有効化するが、iPad Safariでは標準ダイアログ表示を保証しない。
 - 紙指示書はブラウザ内ローカルOCRを補助機能として維持し、紙画像を見ながらの手入力を主経路とする。
 - OCR承認反映の4条件成立後だけ、一時画像を安全に自動破棄する。
-- 参考資料メディアはOPFS+IndexedDBへ端末内保存され、受注確定時にcanonical `workOrderRef` へ紐付く（外部送信なし）。音声のHTTPS実機確認はRelease Gateとして保留、iPad SafariでのOPFS動作も実機未確認。
+- 参考資料メディアはOPFS+IndexedDBへ端末内保存され、受注確定時にcanonical `workOrderRef` へ紐付く（外部送信なし）。iPad Safariで写真撮影→再読込復元→削除→再読込で非復活を実機確認済み。音声のHTTPS実機確認はRelease Gateとして保留。
 - `workOrderRef` と納品アプリ取り込み用JSON exportは実装済み。外部クラウド送信は追加していない。
 
 ## Rules
