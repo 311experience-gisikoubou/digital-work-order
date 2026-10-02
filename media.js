@@ -610,6 +610,19 @@
       return transferApi.buildPackage(workOrderRef, workOrder, restored.items, options);
     });
 
+    // Phase 4: 非UIの暗号化転送エンベロープ作成ヘルパー。ボタン・自動実行・送信・鍵の永続化は持たない。
+    // 既存の prepareTransferPackage（直列化キューを内部で使う）をそのまま呼び、
+    // 得られたPhase 3パッケージを MediaTransferCrypto.encryptPackage へ委譲するだけ。
+    helpers.prepareEncryptedTransferEnvelope = async (workOrder, senderIdentity, recipientPublicInfo, options) => {
+      const cryptoApi = global.MediaTransferCrypto;
+      if (!cryptoApi || typeof cryptoApi.encryptPackage !== 'function') {
+        throw storageError('MEDIA_STORAGE_UNAVAILABLE', UNSUPPORTED_MESSAGE);
+      }
+      const opts = options || {};
+      const pkg = await helpers.prepareTransferPackage(workOrder, opts.packageOptions);
+      return cryptoApi.encryptPackage(pkg, senderIdentity, recipientPublicInfo, opts.cryptoOptions);
+    };
+
     render();
     if (persistenceReady) {
       enqueue(async () => {
