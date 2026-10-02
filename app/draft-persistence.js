@@ -200,6 +200,43 @@ function removeStoredFormDraft(storage) {
   }
 }
 
+// ============================================================
+//  FormDraftManager: dwo_form_draft_v1 の唯一のdraft authority
+//  draftRef === mediaOwnerRef を常に維持する。media-storage.js/media.js は
+//  このAPI経由でのみ canonical draftRef を取得し、自前でdraftを生成しない。
+// ============================================================
+function getCurrentDraftRef(storage) {
+  const result = readStoredFormDraft(storage);
+  return result.status === 'valid' ? result.draft.draftRef : null;
+}
+
+// 既存の有効な下書きがあればそのdraftRefを再利用する（保存内容は現在のフォームへ更新する）。
+// 下書きが存在しない場合だけ新規作成する。保存済み下書きが不正、またはstorageが使えない場合は
+// 新しいdraftへ置き換えず、fail closedで失敗を返す。
+function ensureCurrentDraftRef(storage, cryptoApi, now) {
+  let target;
+  try {
+    target = getFormDraftStorage(storage);
+  } catch (_) {
+    return { ok: false, code: 'STORAGE_UNAVAILABLE' };
+  }
+  const current = readStoredFormDraft(target);
+  if (current.status === 'valid') return { ok: true, draftRef: current.draft.draftRef };
+  if (current.status === 'invalid' || current.status === 'storage-error') {
+    return { ok: false, code: current.status === 'storage-error' ? 'STORAGE_UNAVAILABLE' : 'FORM_DRAFT_INVALID' };
+  }
+  const saved = saveFormDraftEnvelope(collectDraftFormData(), target, cryptoApi, now);
+  if (!saved.ok) return { ok: false, code: saved.code };
+  return { ok: true, draftRef: saved.draft.draftRef };
+}
+
+function removeCurrentFormDraft(storage) {
+  return removeStoredFormDraft(storage);
+}
+
+var FormDraftManager = { getCurrentDraftRef, ensureCurrentDraftRef, removeCurrentFormDraft };
+window.FormDraftManager = FormDraftManager;
+
 function collectDraftFormData() {
   const data = collectFormData();
   const insKey = data.insuranceType === 'insurance' ? 'ins' : 'jishi';
@@ -426,7 +463,18 @@ function saveCurrentFormDraft() {
   return true;
 }
 
-function discardCurrentFormDraft() {
+// draftRef（== mediaOwnerRef）配下の添付をReferenceMediaManagerで先に破棄してから
+// 下書き自体を削除する。添付の掃除が完了できない場合は、下書きも現在の入力もそのまま残す。
+async function discardCurrentFormDraft() {
+  const draftRef = getCurrentDraftRef();
+  if (draftRef && typeof ReferenceMediaManager !== 'undefined' && typeof ReferenceMediaManager.discardCurrentDraft === 'function') {
+    try {
+      await ReferenceMediaManager.discardCurrentDraft(draftRef);
+    } catch (_) {
+      showToast('添付を削除できなかったため、下書きを保持しました。入力内容はそのまま残しています。', 'error');
+      return false;
+    }
+  }
   if (!removeStoredFormDraft()) {
     showToast('下書きを削除できませんでした。入力内容はそのまま残しています。', 'error');
     return false;

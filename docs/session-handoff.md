@@ -16,29 +16,30 @@
 
 ## 完了したこと
 
-- Issue #119 Phase 2として、参考資料メディアのローカル永続化とworkOrderRef紐付けを実装した（`media-storage.js` 新規、`media.js` / `app.js` / `index.html` 最小変更）。
-- Blob本体はOPFS（`dwo-media-v1/blobs/<attachmentId>`）、metadataはIndexedDB（`dwo_media_v1`）。受注確定時に既存の `workOrderRef`（生成タイミングは不変）へmetadata ownerを1 transactionで再紐付けし、active draftを更新する。OPFSファイルは移動しない。
-- 添付があり保存できない場合は受注へ反映せずfail closed。非対応環境ではメモリ内添付のまま、添付0件の受注は従来どおり。
-- `tests/media-storage.test.js` を追加（架空データのみ）。`tools/media-storage-e2e.mjs`（headless Chrome）でOPFS+IndexedDBの追加→再読込→復元→削除→commitを確認した。
-- `docs/design.md` 第15.13節にPhase 2実装事実を追記した。Phase 0/1要件は不変。
-- GPT独立監査の指摘（保存失敗時のfail closed・不正metadata/size不一致の紐付け前中止・復元の厳格化）を追補コミットで反映済み。
-- Draft PR #120「feat: メディア添付ローカル永続化 Phase 2」を作成済み。mergeは行っていない。
-- iPad Safari実機で、PR #120 / product code HEAD `3fc96e1` を対象に「写真撮影 → 表示 → 再読み込み後も残る → 削除 → 再読み込み後に復活しない」を確認し、Phase 2のOPFS/IndexedDB実機保存経路をPASSとした。
+- Phase 2のメディア永続化統合スライスとして、下書きIDとメディアownerを一本化した。
+- `app/draft-persistence.js` に `FormDraftManager`（`getCurrentDraftRef` / `ensureCurrentDraftRef` / `removeCurrentFormDraft`）を追加。`dwo_form_draft_v1.draftRef === mediaOwnerRef` を唯一のdraft authorityとする。`ensureCurrentDraftRef` は既存の有効な下書きを再利用し、不正な下書き・storage不可時は新規draftへ置き換えずfail closedする。
+- `media-storage.js` から独立したactive draft生成・補修・ローテーション（旧 `getOrCreateActiveDraft`）を削除した。`persistAttachment` / `restoreOwner` / `removeAttachment` / `commitDraftToWorkOrder` は呼び出し側が渡す明示的な `draftRef` / `ownerRef` だけで動作する。新たに `removeOwner(ownerRef)` を追加し、明示破棄（下書き破棄）専用のfail-closedなmetadata削除 + OPFS best-effort削除を行う。IndexedDBの `settings`（旧 `activeDraft`）オブジェクトストアはschema互換のためだけに残し、読み書きしない。
+- `media.js` は `FormDraftManager` から canonical `draftRef` を取得してから永続化・復元する（`requireFormDraftRef()`）。有効な下書きが無い場合は `FormDraftManager.ensureCurrentDraftRef()` で確保し、確保できない場合はfail closedする。`ReferenceMediaManager.discardCurrentDraft(draftRef)` を追加し、`removeOwner` を呼ぶ。`commitCurrentDraft(workOrderRef)` は将来の正式発行フロー用APIとして残すが、draftRefのローテーションは行わない。
+- `app.js` からPR #120由来の「受注一覧反映時に `commitCurrentDraft` を呼ぶ」フックと、それに伴う二重送信ガード付き非同期submitラッパーを削除し、現行mainの「このページの受注一覧へ反映するだけ」の同期的submitへ戻した。現行の送信は正式発行ではなく、メディアをworkOrderRefへ紐付けない。
+- 明示的な「下書きを破棄」操作は `ReferenceMediaManager.discardCurrentDraft(draftRef)` を先にawaitし、添付の掃除が完了してから `dwo_form_draft_v1` を削除する。掃除に失敗した場合は下書きも現在の入力もそのまま残す。
+- `tests/media-storage.test.js` / `scripts/draft-persistence-frontend.test.js` / `tools/media-storage-e2e.mjs` を上記の契約に合わせて更新した（架空データのみ）。
 
 ## 既知の保留検証項目
 
 - 音声のiPad実機確認（HTTPS環境でのRelease Gate）: Phase 1から維持。今回音声仕様は変更していない。
-- iPad SafariでのOPFS/IndexedDB実機保存は確認済み（写真撮影→再読み込み復元→削除→再読み込みで非復活）。受注確定時の `workOrderRef` 紐付けはheadless Chrome E2Eで確認済みで、iPad上のフォーム全体操作までは追加実施していない。
-- 参考資料カードの案内文は監査指摘対応で「この端末内に一時保存されます。外部には送信されません。」へ更新済み（承認済み文言）。
+- 本スライスはソース編集のみで、自動テスト・headless Chrome E2Eの実行確認はこのセッションでは行っていない。次セッションで `node --test` と `node tools/media-storage-e2e.mjs` を実行して確認すること。
+- 参考資料カードの案内文「この端末内に一時保存されます。外部には送信されません。」はPhase 1/旧Phase 2スライドから変更していない。
 
 ## 未完了
 
-- 状態遷移UI・送信処理・暗号化・クラウド・PC受信は後続Phase（3以降）。
+- Phase 2本体（`visualSnapshot` の受注ごとの固定、歯状態 `baseState/caution` の2軸統合、PDFへの8番歯・模型発送予定日・急ぎ料金反映、正式発行フロー `submitOrder` → `commitCurrentDraft` 連結）は未実装。今回のスライスはメディア永続化とdraft一本化の基盤のみ。
 - OPFS orphan（metadataなし）の自動削除は未実装（送信対象にはならない）。
+- 状態遷移UI・暗号化・クラウド・PC受信は後続Phase（3以降）。
 
 ## 次の最小作業
 
-- GPTが最新HEADでfinal-pr-auditを完了し、PR #120をmerge手前で停止する。人間の明示的なmerge許可を待つ。
+- `node --test` でtests一式と `node tools/media-storage-e2e.mjs` を実行し、本スライスの契約（フォームdraftRef == media ownerRef、再永続化での同一draftRef再利用、不正下書き/storage不可のfail closed、明示破棄の順序、将来commit APIの非ローテーション、現行submitの非commit）を自動確認する。
+- 上記確認後、Phase 2本体（visualSnapshot・歯状態2軸・PDF反映）を次の最小ステージとして着手する。
 
 ## blocker
 

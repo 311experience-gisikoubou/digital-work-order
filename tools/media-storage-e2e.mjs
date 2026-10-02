@@ -101,9 +101,14 @@ async function main() {
 
   const checks = [];
   const check = (label, ok) => { checks.push({ label, ok: !!ok }); };
+  const draftRefNow = () => evaluate('window.FormDraftManager && window.FormDraftManager.getCurrentDraftRef()');
 
   await load();
   check('OPFS+IndexedDB persistence available', await evaluate('ReferenceMediaStorage.createBrowserPersistence(window).available === true'));
+
+  // dwo_form_draft_v1.draftRef が唯一のdraft authority。初回表示でFormDraftManagerが確保する。
+  const initialDraftRef = await draftRefNow();
+  check('a canonical form draftRef (dwo_form_draft_v1) is ensured on first load', typeof initialDraftRef === 'string' && initialDraftRef.startsWith('draft:'));
 
   // 1) 架空ファイルをUI経由（file input change）で追加
   await evaluate(`(() => {
@@ -119,12 +124,15 @@ async function main() {
   check('metadata x2 stored as unsent draft', state.attachments.length === 2 && state.attachments.every(a => a.status === 'unsent' && a.ownerType === 'draft'));
   check('OPFS files x2 with safe names', state.files.length === 2 && state.files.every(f => /^att-[0-9a-f-]{36}$/.test(f)));
   check('metadata has no blob/objectUrl', state.attachments.every(a => !('blob' in a) && !('objectUrl' in a) && Object.keys(a).length === 12));
+  check('repeated persistence reuses the same canonical form draftRef', await draftRefNow() === initialDraftRef);
+  check('metadata ownerRef equals the form draftRef (form draftRef === media ownerRef)', state.attachments.every(a => a.ownerRef === initialDraftRef));
 
-  // 2) reload -> 復元
+  // 2) reload -> 復元（同じform draftRefで復元する）
   await load();
   await waitFor(`${names}.length === 2`, 'restored after reload');
   check('restored after reload with same names', JSON.stringify((await evaluate(names)).sort()) === JSON.stringify(['note-sample.pdf', 'photo-sample.jpg']));
   check('restored item has Object URL preview', await evaluate('document.querySelectorAll("#media-list img").length === 1'));
+  check('reload restores by the same canonical form draftRef', await draftRefNow() === initialDraftRef);
 
   // 3) 削除
   await evaluate('document.querySelector("#media-list .media-delete").click()');
@@ -134,20 +142,23 @@ async function main() {
   await load();
   await waitFor(`${names}.length === 1`, 'one attachment after reload');
 
-  // 4) 受注確定相当: commit -> owner再紐付け + active draft更新
+  // 4) 受注確定相当（将来の正式発行フロー用API）: canonical form draftRef を明示的に
+  //    workOrderRef へ紐付ける。media-storageは独立したactive draftを生成・ローテーションしない。
+  const draftBeforeCommit = await draftRefNow();
   const before = await evaluate(inspect);
   const ref = 'dwo:123e4567-e89b-42d3-a456-426614174000';
   const committed = await evaluate(`ReferenceMediaManager.commitCurrentDraft('${ref}')`);
   check('commit reports 1 attachment', committed && committed.committed === 1);
   await waitFor(`${names}.length === 0`, 'list emptied after commit');
   const after = await evaluate(inspect);
-  const draftOf = s => (s.settings.find(x => x.key === 'activeDraft') || {}).value;
   check('owner rebound to workOrderRef', after.attachments.length === 1 && after.attachments[0].ownerType === 'work-order' && after.attachments[0].ownerRef === ref);
-  check('active draft rotated', draftOf(before) && draftOf(after) && draftOf(before) !== draftOf(after));
+  check('commit does not rotate the canonical form draftRef', await draftRefNow() === draftBeforeCommit);
+  check('media-storage settings store stays empty (no independent active-draft authority)', before.settings.length === 0 && after.settings.length === 0);
   check('OPFS file not moved', JSON.stringify(after.files) === JSON.stringify(before.files));
   await load();
   await waitFor('document.getElementById("media-empty").hidden === false', 'empty after reload');
   check('committed attachment is not restored into new draft', (await evaluate(names)).length === 0);
+  check('reload after commit still uses the same unrotated form draftRef', await draftRefNow() === draftBeforeCommit);
 
   // 5) OPFSファイルのsize不一致 -> 復元時に掃除され、警告が出て、以後のcommitを塞がない
   await evaluate(`(() => {
@@ -175,6 +186,24 @@ async function main() {
   check('corrupt metadata and OPFS file removed', cleaned.attachments.length === 1 && !cleaned.files.includes(victim));
   const recommitted = await evaluate(`ReferenceMediaManager.commitCurrentDraft('dwo:123e4567-e89b-42d3-a456-426614174001')`);
   check('later commit is not blocked by the cleaned row', recommitted && recommitted.committed === 0);
+
+  // 6) 明示的な下書き破棄: 「下書きを破棄」はReferenceMediaManager.discardCurrentDraftで
+  //    添付を先に削除してから dwo_form_draft_v1 を削除する。
+  await evaluate(`(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array(512)], 'discard-sample.pdf', { type: 'application/pdf' }));
+    const input = document.getElementById('media-file-input');
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change'));
+  })()`);
+  await waitFor(`${names}.length === 1`, 'attachment before discard');
+  const draftRefBeforeDiscard = await draftRefNow();
+  await evaluate(`document.getElementById('draft-discard-btn').click()`);
+  await waitFor(`${names}.length === 0`, 'list emptied after discard');
+  await waitFor(`window.localStorage.getItem('dwo_form_draft_v1') === null`, 'form draft removed after discard');
+  const afterDiscard = await evaluate(inspect);
+  check('explicit discard removes the draft-owned attachment metadata and OPFS file', afterDiscard.attachments.every(a => a.ownerRef !== draftRefBeforeDiscard));
+  check('explicit discard removes the form draft only after media cleanup succeeds', await evaluate("window.localStorage.getItem('dwo_form_draft_v1') === null"));
 
   ws.close();
   return checks;

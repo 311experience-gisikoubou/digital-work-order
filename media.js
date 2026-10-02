@@ -174,6 +174,7 @@
   helpers.decideCommit = decideCommit;
   helpers.hasAttachments = () => false;
   helpers.commitCurrentDraft = async () => ({ committed: 0 });
+  helpers.discardCurrentDraft = async () => ({ removed: 0 });
   global.ReferenceMediaManager = helpers;
   if (typeof module !== 'undefined' && module.exports) module.exports = helpers;
 
@@ -213,6 +214,21 @@
       error.code = code;
       error.userMessage = message;
       return error;
+    }
+
+    // canonicalなdraftRefはFormDraftManager（唯一のdraft authority）から取得する。
+    // 有効な下書きが無い場合はFormDraftManager経由で確保する。media-storage.js自身は
+    // 独立したactive draftを生成・ローテーションしない。確保できない場合はfail closed。
+    function requireFormDraftRef() {
+      const manager = global.FormDraftManager;
+      if (!manager || typeof manager.getCurrentDraftRef !== 'function' || typeof manager.ensureCurrentDraftRef !== 'function') {
+        throw storageError('MEDIA_STORAGE_UNAVAILABLE', UNSUPPORTED_MESSAGE);
+      }
+      const current = manager.getCurrentDraftRef();
+      if (current) return current;
+      const ensured = manager.ensureCurrentDraftRef();
+      if (!ensured || !ensured.ok || !ensured.draftRef) throw storageError('MEDIA_STORAGE_UNAVAILABLE', UNSUPPORTED_MESSAGE);
+      return ensured.draftRef;
     }
 
     let recorder = null;
@@ -325,8 +341,9 @@
       pendingAdds += 1;
       enqueue(async () => {
         try {
+          const draftRef = requireFormDraftRef();
           const meta = await persistence.persistAttachment({
-            blob, attachmentId: persistence.newAttachmentId(), source: options.source || 'file-picker', kind, name
+            blob, attachmentId: persistence.newAttachmentId(), source: options.source || 'file-picker', kind, name, draftRef
           });
           const item = store.add(blob, { id: meta.attachmentId, source: meta.source, kind: meta.kind, name: meta.name, createdAt: meta.createdAt });
           if (!item) {
@@ -473,7 +490,9 @@
     noticeEl.hidden = true;
     helpers.setSendingNoticeVisible = visible => { noticeEl.hidden = !visible; };
 
-    // 受注確定時: 現在のdraft添付を workOrderRef へ紐付ける。失敗時は例外（呼び出し側が受注反映を中止する）。
+    // 受注確定時（将来の正式発行フロー用API）: 現在の canonical form draftRef 配下の添付を
+    // workOrderRef へ紐付ける。media-storage側のactive draftはローテーションしない。
+    // 失敗時は例外（呼び出し側が受注反映を中止する）。
     helpers.hasAttachments = () => store.list().length + pendingAdds > 0;
     helpers.commitCurrentDraft = workOrderRef => enqueue(async () => {
       const decision = decideCommit({ items: store.list(), persistedIds, persistenceReady, hiddenAttachmentBlock: materializationFailureCount > 0 });
@@ -483,9 +502,16 @@
         showError(error.userMessage);
         throw error;
       }
+      let draftRef;
+      try {
+        draftRef = requireFormDraftRef();
+      } catch (error) {
+        showError(error.userMessage || UNSUPPORTED_MESSAGE);
+        throw error;
+      }
       let receipt;
       try {
-        receipt = await persistence.commitDraftToWorkOrder(workOrderRef);
+        receipt = await persistence.commitDraftToWorkOrder(draftRef, workOrderRef);
       } catch (error) {
         showError((error && error.userMessage) || UNSUPPORTED_MESSAGE);
         throw error;
@@ -498,11 +524,36 @@
       return { committed: receipt.count };
     });
 
+    // 明示的な下書き破棄専用: 指定draftRef配下の添付metadata/OPFSを削除する。
+    // metadata削除が完了できない場合は例外（呼び出し側=下書き破棄処理が下書き自体を保持する）。
+    helpers.discardCurrentDraft = draftRef => enqueue(async () => {
+      if (!persistenceReady) {
+        persistedIds.clear();
+        store.clear();
+        materializationFailureCount = 0;
+        showError('');
+        render();
+        return { removed: 0 };
+      }
+      try {
+        const result = await persistence.removeOwner(draftRef);
+        persistedIds.clear();
+        store.clear();
+        materializationFailureCount = 0;
+        showError('');
+        render();
+        return result;
+      } catch (error) {
+        showError((error && error.userMessage) || '添付を削除できませんでした。もう一度お試しください');
+        throw error;
+      }
+    });
+
     render();
     if (persistenceReady) {
       enqueue(async () => {
-        const draft = await persistence.getOrCreateActiveDraft();
-        const restored = await persistence.restoreOwner(draft);
+        const draftRef = requireFormDraftRef();
+        const restored = await persistence.restoreOwner(draftRef);
         if (restored.missing > 0 || restored.invalid > 0 || restored.corrupt > 0) showError('保存できなかった添付を除外しました。必要な資料は再追加してください。');
         restored.items.forEach(({ meta, blob }) => {
           const item = store.add(blob, { id: meta.attachmentId, source: meta.source, kind: meta.kind, name: meta.name, createdAt: meta.createdAt });

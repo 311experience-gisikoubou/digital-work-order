@@ -167,6 +167,7 @@
     };
   }
 
+  // settingsはschema互換のためだけに残す（authorityではない。読み書きしない）。
   function createMemoryMetaStore(options) {
     const failOn = (options && options.failOn) || {};
     const records = new Map();
@@ -181,13 +182,9 @@
       async getAttachment(id) { return clone(records.get(id)); },
       async deleteAttachment(id) { guard('deleteAttachment'); records.delete(id); },
       async listByOwner(ownerRef) { guard('listByOwner'); return Array.from(records.values()).filter(r => r && r.ownerRef === ownerRef).map(clone); },
-      async getActiveDraft() { return clone(settings.get(ACTIVE_DRAFT_KEY)); },
-      async putActiveDraft(ref) { settings.set(ACTIVE_DRAFT_KEY, { key: ACTIVE_DRAFT_KEY, value: ref }); },
-      // 全件変換に成功した場合だけ反映する（atomic）。
+      // fromDraftの全件を呼び出し側から渡された明示refへ付け替える。active draftの生成・更新は行わない。
       async commitDraft(args) {
         guard('commit');
-        const current = settings.get(ACTIVE_DRAFT_KEY);
-        if (!current || current.value !== args.fromDraft) throw new Error('active-draft-mismatch');
         const next = [];
         records.forEach(record => {
           if (record && record.ownerRef === args.fromDraft) {
@@ -196,7 +193,6 @@
           }
         });
         next.forEach(updated => records.set(updated.attachmentId, clone(updated)));
-        settings.set(ACTIVE_DRAFT_KEY, { key: ACTIVE_DRAFT_KEY, value: args.newDraft });
         return next.length;
       }
     };
@@ -209,20 +205,13 @@
     const cryptoApi = deps.crypto;
     const now = deps.now || (() => Date.now());
 
-    async function getOrCreateActiveDraft() {
-      let record;
-      try { record = await metaStore.getActiveDraft(); } catch (error) { throw makeError('MEDIA_STORAGE_UNAVAILABLE', error); }
-      if (record && record.key === ACTIVE_DRAFT_KEY && isValidDraftRef(record.value)) return record.value;
-      // 未作成または不正なrecordは新しいdraftへ置き換える（不正recordが指すmetadataは復元・送信の対象にならない）。
-      const ref = newDraftRef(cryptoApi);
-      try { await metaStore.putActiveDraft(ref); } catch (error) { throw makeError('MEDIA_STORAGE_UNAVAILABLE', error); }
-      return ref;
-    }
-
+    // ownerRef（draftRef）は呼び出し側（media.js経由でFormDraftManager）が渡す。
+    // ここでは独立したactive draftを生成・補修・ローテーションしない。
     async function persistAttachment(input) {
       const blob = input && input.blob;
       if (!blob || typeof blob.size !== 'number') throw makeError('MEDIA_STORAGE_INVALID');
-      const ownerRef = await getOrCreateActiveDraft();
+      const ownerRef = input && input.draftRef;
+      if (!isValidDraftRef(ownerRef)) throw makeError('MEDIA_STORAGE_INVALID');
       const attachmentId = input.attachmentId || newAttachmentId(cryptoApi);
       const meta = buildMetadata({
         attachmentId,
@@ -307,16 +296,36 @@
       return { metadataDeleted: true, fileDeleted };
     }
 
-    // active draftの全metadataを work-order 所有へ付け替え、active draftを新規draftへ更新する（1 transaction）。
-    async function commitDraftToWorkOrder(workOrderRef) {
+    // 指定ownerRef配下の全metadataを削除する（fail closed）。OPFSファイルはbest-effortで消す。
+    // 明示破棄（下書き破棄）専用。復元対象から即座に外すため、metadataを先に消す。
+    async function removeOwner(ownerRef) {
+      if (!isValidDraftRef(ownerRef) && !isValidWorkOrderRef(ownerRef)) throw makeError('MEDIA_STORAGE_INVALID');
+      let rows;
+      try { rows = await metaStore.listByOwner(ownerRef); } catch (error) { throw makeError('MEDIA_STORAGE_DELETE_FAILED', error); }
+      let removed = 0;
+      for (const row of rows) {
+        if (row && row.ownerRef !== ownerRef) throw makeError('MEDIA_STORAGE_INVALID');
+        const rawId = row && typeof row === 'object' ? row.attachmentId : undefined;
+        if (rawId === undefined || rawId === null) throw makeError('MEDIA_STORAGE_DELETE_FAILED');
+        try { await metaStore.deleteAttachment(rawId); } catch (error) { throw makeError('MEDIA_STORAGE_DELETE_FAILED', error); }
+        if (isValidAttachmentId(rawId)) {
+          try { await blobStore.delete(rawId); } catch (_) { /* orphanとして残り得るが送信対象ではない */ }
+        }
+        removed += 1;
+      }
+      return { removed };
+    }
+
+    // 呼び出し側（media.js）が渡した明示draftRefの全metadataをwork-order所有へ付け替える。
+    // active draftの生成・ローテーションは行わない（media-storageは独立したdraft authorityを持たない）。
+    async function commitDraftToWorkOrder(draftRef, workOrderRef) {
+      if (!isValidDraftRef(draftRef)) throw makeError('MEDIA_STORAGE_INVALID');
       if (!isValidWorkOrderRef(workOrderRef)) throw makeError('MEDIA_STORAGE_INVALID');
-      const previousDraft = await getOrCreateActiveDraft();
-      const nextDraft = newDraftRef(cryptoApi);
       try {
-        const rows = await metaStore.listByOwner(previousDraft);
+        const rows = await metaStore.listByOwner(draftRef);
         // 1行でも不正・owner不一致・size不一致・欠落なら、metadata transactionの前に全体を中止する。
         for (const meta of rows) {
-          if (metadataProblem(meta) || meta.ownerRef !== previousDraft || meta.ownerType !== 'draft') throw makeError('MEDIA_STORAGE_INVALID');
+          if (metadataProblem(meta) || meta.ownerRef !== draftRef || meta.ownerType !== 'draft') throw makeError('MEDIA_STORAGE_INVALID');
         }
         for (const meta of rows) {
           const file = await blobStore.get(meta.opfsName);
@@ -324,11 +333,10 @@
           if (file.size !== meta.size) throw makeError('MEDIA_STORAGE_INVALID');
         }
         const count = await metaStore.commitDraft({
-          fromDraft: previousDraft,
-          newDraft: nextDraft,
+          fromDraft: draftRef,
           rebind: meta => rebindMetadata(meta, workOrderRef)
         });
-        return { workOrderRef, previousDraft, activeDraft: nextDraft, count };
+        return { workOrderRef, draftRef, count };
       } catch (error) {
         if (error && (error.code === 'MEDIA_STORAGE_FILE_MISSING' || error.code === 'MEDIA_STORAGE_INVALID')) throw error;
         throw makeError('MEDIA_STORAGE_COMMIT_FAILED', error);
@@ -338,10 +346,10 @@
     return {
       available: true,
       newAttachmentId: () => newAttachmentId(cryptoApi),
-      getOrCreateActiveDraft,
       persistAttachment,
       restoreOwner,
       removeAttachment,
+      removeOwner,
       commitDraftToWorkOrder
     };
   }
@@ -352,10 +360,10 @@
       available: false,
       reason: reason || 'unsupported',
       newAttachmentId: () => null,
-      getOrCreateActiveDraft: fail,
       persistAttachment: fail,
       restoreOwner: fail,
       removeAttachment: fail,
+      removeOwner: fail,
       commitDraftToWorkOrder: fail
     };
   }
@@ -480,33 +488,19 @@
           tx.objectStore(STORE_ATTACHMENTS).index('ownerRef').getAll(ownerRef).onsuccess = event => set(event.target.result || []);
         });
       },
-      getActiveDraft() {
-        return run([STORE_SETTINGS], 'readonly', (tx, set) => {
-          tx.objectStore(STORE_SETTINGS).get(ACTIVE_DRAFT_KEY).onsuccess = event => set(event.target.result);
-        });
-      },
-      putActiveDraft(ref) {
-        return run([STORE_SETTINGS], 'readwrite', tx => { tx.objectStore(STORE_SETTINGS).put({ key: ACTIVE_DRAFT_KEY, value: ref }); });
-      },
-      // metadata付け替えとactive draft更新を同一transactionで行う。途中失敗はabortで全体を戻す。
+      // 呼び出し側が渡した明示refの全metadataを付け替える。settings（legacy active draft）は読み書きしない。
       commitDraft(args) {
-        return run([STORE_ATTACHMENTS, STORE_SETTINGS], 'readwrite', (tx, set, fail) => {
-          const settings = tx.objectStore(STORE_SETTINGS);
+        return run([STORE_ATTACHMENTS], 'readwrite', (tx, set, fail) => {
           const attachments = tx.objectStore(STORE_ATTACHMENTS);
-          settings.get(ACTIVE_DRAFT_KEY).onsuccess = event => {
-            const current = event.target.result;
-            if (!current || current.value !== args.fromDraft) { fail(new Error('active-draft-mismatch')); return; }
-            attachments.index('ownerRef').getAll(args.fromDraft).onsuccess = listEvent => {
-              try {
-                let moved = 0;
-                (listEvent.target.result || []).forEach(record => {
-                  const updated = args.rebind(record);
-                  if (updated) { attachments.put(updated); moved += 1; }
-                });
-                settings.put({ key: ACTIVE_DRAFT_KEY, value: args.newDraft });
-                set(moved);
-              } catch (error) { fail(error); }
-            };
+          attachments.index('ownerRef').getAll(args.fromDraft).onsuccess = listEvent => {
+            try {
+              let moved = 0;
+              (listEvent.target.result || []).forEach(record => {
+                const updated = args.rebind(record);
+                if (updated) { attachments.put(updated); moved += 1; }
+              });
+              set(moved);
+            } catch (error) { fail(error); }
           };
         });
       }

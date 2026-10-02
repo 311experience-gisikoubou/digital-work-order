@@ -327,28 +327,79 @@ test('invalid stored draft does not partially mutate the current form', async ()
   assert.equal(ui.toasts.at(-1).type, 'error');
 });
 
-test('discard resets only after storage removal succeeds', () => {
+test('discard resets only after storage removal succeeds', async () => {
   const failStorage = {
     getItem() { return 'draft'; },
     removeItem() { throw new Error('blocked'); }
   };
   const failed = bootDraftUi(failStorage);
-  assert.equal(failed.context.discardCurrentFormDraft(), false);
+  assert.equal(await failed.context.discardCurrentFormDraft(), false);
   assert.equal(failed.getResetCount(), 0);
 
   const okStorage = memoryStorage({ dwo_form_draft_v1: 'draft' });
   const succeeded = bootDraftUi(okStorage);
-  assert.equal(succeeded.context.discardCurrentFormDraft(), true);
+  assert.equal(await succeeded.context.discardCurrentFormDraft(), true);
   assert.equal(succeeded.getResetCount(), 1);
   assert.equal(okStorage.getItem('dwo_form_draft_v1'), null);
 });
 
+test('explicit discard awaits ReferenceMediaManager.discardCurrentDraft(draftRef) before removing the form draft', async () => {
+  const crypto = fakeUuidCrypto(['723e4567-e89b-42d3-a456-426614174000']);
+  const storage = memoryStorage();
+  const pure = bootPure();
+  const saved = pure.saveFormDraftEnvelope(syntheticForm(), storage, crypto);
+  assert.equal(saved.ok, true);
+
+  const calls = [];
+  const okMedia = { discardCurrentDraft: async draftRef => { calls.push(draftRef); return { removed: 0 }; } };
+  const ok = bootDraftUi(storage);
+  ok.context.ReferenceMediaManager = okMedia;
+  assert.equal(await ok.context.discardCurrentFormDraft(), true);
+  assert.deepEqual(calls, [saved.draft.draftRef]);
+  assert.equal(storage.getItem('dwo_form_draft_v1'), null);
+  assert.equal(ok.getResetCount(), 1);
+});
+
+test('explicit discard keeps the form draft and current input when media cleanup fails', async () => {
+  const crypto = fakeUuidCrypto(['823e4567-e89b-42d3-a456-426614174000']);
+  const storage = memoryStorage();
+  const pure = bootPure();
+  const saved = pure.saveFormDraftEnvelope(syntheticForm(), storage, crypto);
+  assert.equal(saved.ok, true);
+  const before = storage.snapshot().dwo_form_draft_v1;
+
+  const failing = bootDraftUi(storage);
+  failing.context.ReferenceMediaManager = { discardCurrentDraft: async () => { throw new Error('cleanup-failed'); } };
+  failing.get('patient-name').value = 'STILL-THERE';
+  assert.equal(await failing.context.discardCurrentFormDraft(), false);
+  assert.equal(storage.snapshot().dwo_form_draft_v1, before);
+  assert.equal(failing.get('patient-name').value, 'STILL-THERE');
+  assert.equal(failing.getResetCount(), 0);
+  assert.equal(failing.toasts.at(-1).type, 'error');
+});
+
+test('discard with no stored draft does not call ReferenceMediaManager and still succeeds', async () => {
+  const storage = memoryStorage();
+  const calls = [];
+  const ui = bootDraftUi(storage);
+  ui.context.ReferenceMediaManager = { discardCurrentDraft: async draftRef => { calls.push(draftRef); return { removed: 0 }; } };
+  assert.equal(await ui.context.discardCurrentFormDraft(), true);
+  assert.deepEqual(calls, []);
+});
+
 test('current list-reflection submit preserves the saved draft and buttons are wired without new assets', () => {
   const submitStart = appSource.indexOf("document.getElementById('submit-btn').addEventListener");
-  const submitEnd = appSource.indexOf('function resetForm()', submitStart);
+  const submitFnStart = appSource.indexOf('function submitOrder()', submitStart);
+  const submitEnd = appSource.indexOf('function resetForm()', submitFnStart);
   const submitBlock = appSource.slice(submitStart, submitEnd);
   assert.match(submitBlock, /state\.orders\.unshift\(data\);[\s\S]*resetForm\(\);/);
   assert.doesNotMatch(submitBlock, /removeStoredFormDraft\(\)/);
+  // PR #120由来の添付commitフック・二重送信ガードの非同期wrapperは現行mainの受注一覧反映には含まれない。
+  assert.doesNotMatch(submitBlock, /ReferenceMediaManager/);
+  assert.doesNotMatch(submitBlock, /commitCurrentDraft/);
+  assert.doesNotMatch(appSource, /submitInFlight/);
+  assert.match(submitBlock, /addEventListener\('click', submitOrder\);/);
+  assert.match(submitBlock.slice(submitFnStart - submitStart), /^function submitOrder\(\)/);
 
   assert.equal(draftSource.includes('resetForm = function resetFormWithDraftGuard()'), false);
   assert.equal(draftSource.includes('baseResetForm'), false);
@@ -360,6 +411,78 @@ test('current list-reflection submit preserves the saved draft and buttons are w
   assert.match(draftSource, /restoreFormDraftOnStartup\(\);/);
   assert.equal(draftSource.includes('dwo_drawing_v1'), false);
   assert.equal(draftSource.includes('dwo_clasp_v1'), false);
+});
+
+test('FormDraftManager is the sole global draft authority and keeps draftRef === mediaOwnerRef', () => {
+  assert.match(draftSource, /var FormDraftManager = \{ getCurrentDraftRef, ensureCurrentDraftRef, removeCurrentFormDraft \};/);
+  assert.match(draftSource, /window\.FormDraftManager = FormDraftManager;/);
+});
+
+test('FormDraftManager.getCurrentDraftRef returns the stored draftRef only when the draft is valid', () => {
+  const context = bootPure();
+  const storage = memoryStorage();
+  assert.equal(context.getCurrentDraftRef(storage), null);
+
+  const saved = context.saveFormDraftEnvelope(
+    syntheticForm(),
+    storage,
+    fakeUuidCrypto(['923e4567-e89b-42d3-a456-426614174000'])
+  );
+  assert.equal(context.getCurrentDraftRef(storage), saved.draft.draftRef);
+  assert.equal(saved.draft.mediaOwnerRef, saved.draft.draftRef);
+
+  const corrupted = memoryStorage({ dwo_form_draft_v1: '{bad-json' });
+  assert.equal(context.getCurrentDraftRef(corrupted), null);
+});
+
+test('FormDraftManager.ensureCurrentDraftRef creates a draft only when none exists and reuses an existing valid one', () => {
+  const context = bootPure();
+  const storage = memoryStorage();
+  const crypto = fakeUuidCrypto(['a23e4567-e89b-42d3-a456-426614174000']);
+  context.collectDraftFormData = () => syntheticForm({ patientName: 'ENSURED' });
+
+  const first = context.ensureCurrentDraftRef(storage, crypto);
+  assert.equal(first.ok, true);
+  assert.match(first.draftRef, /^draft:[0-9a-f-]{36}$/);
+  assert.equal(crypto.calls(), 1);
+
+  const second = context.ensureCurrentDraftRef(storage, crypto);
+  assert.equal(second.ok, true);
+  assert.equal(second.draftRef, first.draftRef);
+  assert.equal(crypto.calls(), 1); // 既存の有効な下書きは再利用し、新規draftRefを生成しない
+});
+
+test('FormDraftManager.ensureCurrentDraftRef fails closed instead of replacing an invalid stored draft', () => {
+  const context = bootPure();
+  const storage = memoryStorage({ dwo_form_draft_v1: '{bad-json' });
+  const crypto = fakeUuidCrypto(['b23e4567-e89b-42d3-a456-426614174000']);
+  context.collectDraftFormData = () => syntheticForm();
+
+  const result = context.ensureCurrentDraftRef(storage, crypto);
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'FORM_DRAFT_INVALID');
+  assert.equal(storage.snapshot().dwo_form_draft_v1, '{bad-json');
+  assert.equal(crypto.calls(), 0);
+});
+
+test('FormDraftManager.ensureCurrentDraftRef fails closed when storage is unavailable', () => {
+  const context = bootPure();
+  const throwingStorage = { getItem() { throw new Error('blocked'); } };
+  context.collectDraftFormData = () => syntheticForm();
+
+  const result = context.ensureCurrentDraftRef(throwingStorage, fakeUuidCrypto(['c23e4567-e89b-42d3-a456-426614174000']));
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'STORAGE_UNAVAILABLE');
+});
+
+test('FormDraftManager.removeCurrentFormDraft removes only the form draft key and is fail-closed on error', () => {
+  const context = bootPure();
+  const storage = memoryStorage({ dwo_form_draft_v1: 'draft', dwo_drawing_v1: 'drawing' });
+  assert.equal(context.removeCurrentFormDraft(storage), true);
+  assert.deepEqual(storage.snapshot(), { dwo_drawing_v1: 'drawing' });
+
+  const throwing = { removeItem() { throw new Error('blocked'); }, getItem() { return 'still-there'; } };
+  assert.equal(context.removeCurrentFormDraft(throwing), false);
 });
 
 test('draft device values use visible labels without changing existing checkbox values', () => {
