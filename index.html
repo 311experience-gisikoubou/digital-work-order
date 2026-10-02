@@ -831,9 +831,12 @@
     </div>
   </div>
 
-  <!-- 受注一覧反映ボタン -->
-  <div class="submit-area">
+  <!-- 下書き / 受注一覧反映 -->
+  <div class="submit-area" style="gap:12px;flex-wrap:wrap;align-items:center;">
+    <button type="button" class="btn-secondary" id="draft-save-btn">下書き保存</button>
+    <button type="button" class="btn-secondary" id="draft-discard-btn">下書きを破棄</button>
     <button class="submit-btn" id="submit-btn">受注一覧へ反映する　→</button>
+    <span id="draft-local-note" style="font-size:12px;opacity:.72;">下書きはこの端末内に保存されます。不要になったら「下書きを破棄」で削除してください。</span>
   </div>
   </div><!-- /clinic-form-content -->
 
@@ -928,6 +931,7 @@
 <script src="tooth-chart.js"></script>
 <script src="validate.js"></script>
 <script src="app.js"></script>
+<script src="app/draft-persistence.js"></script>
 <script src="delivery-intake-export.js"></script>
 <script src="orders.js"></script>
 <script src="modal.js"></script>
