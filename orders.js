@@ -68,6 +68,15 @@ function isValidSessionOrder(order) {
   if (!Array.isArray(order.selectedTeeth) || !order.selectedTeeth.every(v => typeof v === 'string' || Number.isInteger(v))) return false;
   if (!Array.isArray(order.orderTypes) || !order.orderTypes.every(v => typeof v === 'string')) return false;
   if (!Array.isArray(order.devices) || !order.devices.every(v => typeof v === 'string')) return false;
+  for (const pair of [['claspTypes', 'claspType'], ['barTypes', 'barType']]) {
+    const arrayKey = pair[0];
+    const scalarKey = pair[1];
+    if (Object.prototype.hasOwnProperty.call(order, arrayKey)) {
+      if (!Array.isArray(order[arrayKey]) || !order[arrayKey].every(v => typeof v === 'string')) return false;
+      const expectedScalar = order[arrayKey][0] ?? null;
+      if ((order[scalarKey] ?? null) !== expectedScalar) return false;
+    }
+  }
   if (!Array.isArray(order.memoStrokes)) return false;
 
   // Old session orders may not have a visualSnapshot. New ones must validate
