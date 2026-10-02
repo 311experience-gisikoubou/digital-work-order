@@ -62,6 +62,14 @@ function isValidSessionOrder(order) {
   if (!Array.isArray(order.orderTypes) || !order.orderTypes.every(v => typeof v === 'string')) return false;
   if (!Array.isArray(order.devices) || !order.devices.every(v => typeof v === 'string')) return false;
   if (!Array.isArray(order.memoStrokes)) return false;
+
+  // Old session orders may not have a visualSnapshot. New ones must validate
+  // strictly and keep compatibility fields identical to the frozen snapshot.
+  if (Object.prototype.hasOwnProperty.call(order, 'visualSnapshot')) {
+    if (typeof isValidVisualSnapshot !== 'function' || !isValidVisualSnapshot(order.visualSnapshot)) return false;
+    if (JSON.stringify(order.selectedTeeth) !== JSON.stringify(order.visualSnapshot.selectedTeeth)) return false;
+    if (JSON.stringify(order.memoStrokes) !== JSON.stringify(order.visualSnapshot.drawing.memoStrokes)) return false;
+  }
   return true;
 }
 
