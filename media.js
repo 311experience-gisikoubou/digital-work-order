@@ -174,6 +174,7 @@
   helpers.decideCommit = decideCommit;
   helpers.hasAttachments = () => false;
   helpers.commitCurrentDraft = async () => ({ committed: 0 });
+  helpers.rollbackCommittedDraft = async () => ({ rolledBack: 0 });
   helpers.discardCurrentDraft = async () => ({ removed: 0 });
   global.ReferenceMediaManager = helpers;
   if (typeof module !== 'undefined' && module.exports) module.exports = helpers;
@@ -521,7 +522,43 @@
       store.clear();
       showError('');
       render();
-      return { committed: receipt.count };
+      return { committed: receipt.count, draftRef: receipt.draftRef };
+    });
+
+    // 発行後工程が失敗した場合の補償処理。workOrderRefへ移した添付を元draftRefへ戻し、
+    // 画面一覧も同じdraftから再構成する。通常の取消・削除操作には使わない。
+    helpers.rollbackCommittedDraft = (workOrderRef, draftRef) => enqueue(async () => {
+      if (!persistenceReady || !persistence || typeof persistence.rollbackWorkOrderToDraft !== 'function') {
+        throw storageError('MEDIA_STORAGE_UNAVAILABLE', UNSUPPORTED_MESSAGE);
+      }
+      let receipt;
+      try {
+        receipt = await persistence.rollbackWorkOrderToDraft(workOrderRef, draftRef);
+        const restored = await persistence.restoreOwner(draftRef);
+        persistedIds.clear();
+        store.clear();
+        materializationFailureCount = 0;
+        restored.items.forEach(({ meta, blob }) => {
+          const item = store.add(blob, {
+            id: meta.attachmentId,
+            source: meta.source,
+            kind: meta.kind,
+            name: meta.name,
+            createdAt: meta.createdAt
+          });
+          if (item) persistedIds.add(item.id);
+          else materializationFailureCount += 1;
+        });
+        if (restored.missing > 0 || restored.invalid > 0 || restored.corrupt > 0 || materializationFailureCount > 0) {
+          throw storageError('MEDIA_STORAGE_RESTORE_FAILED', UNRENDERED_MESSAGE);
+        }
+        showError('');
+        render();
+        return { rolledBack: receipt.count };
+      } catch (error) {
+        showError((error && error.userMessage) || UNSUPPORTED_MESSAGE);
+        throw error;
+      }
     });
 
     // 明示的な下書き破棄専用: 指定draftRef配下の添付metadata/OPFSを削除する。

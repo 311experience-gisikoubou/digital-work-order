@@ -151,6 +151,14 @@
     return Object.assign({}, meta, { ownerType: 'work-order', ownerRef: workOrderRef });
   }
 
+  // 発行後工程が失敗した場合だけ、直前のwork-order所有を元draftへ戻す。
+  // 通常操作では使わず、Stage 5の発行トランザクションの補償処理専用。
+  function rebindMetadataToDraft(meta, draftRef) {
+    if (!isValidDraftRef(draftRef)) throw makeError('MEDIA_STORAGE_INVALID');
+    if (metadataProblem(meta) || meta.ownerType !== 'work-order') return null;
+    return Object.assign({}, meta, { ownerType: 'draft', ownerRef: draftRef });
+  }
+
   // ---------- テスト用メモリadapter ----------
   // failOn: { put, get, exists, delete, putAttachment, deleteAttachment, listByOwner, commit }
   function createMemoryBlobStore(options) {
@@ -343,6 +351,29 @@
       }
     }
 
+    async function rollbackWorkOrderToDraft(workOrderRef, draftRef) {
+      if (!isValidWorkOrderRef(workOrderRef) || !isValidDraftRef(draftRef)) throw makeError('MEDIA_STORAGE_INVALID');
+      try {
+        const rows = await metaStore.listByOwner(workOrderRef);
+        for (const meta of rows) {
+          if (metadataProblem(meta) || meta.ownerRef !== workOrderRef || meta.ownerType !== 'work-order') throw makeError('MEDIA_STORAGE_INVALID');
+        }
+        for (const meta of rows) {
+          const file = await blobStore.get(meta.opfsName);
+          if (!file) throw makeError('MEDIA_STORAGE_FILE_MISSING');
+          if (file.size !== meta.size) throw makeError('MEDIA_STORAGE_INVALID');
+        }
+        const count = await metaStore.commitDraft({
+          fromDraft: workOrderRef,
+          rebind: meta => rebindMetadataToDraft(meta, draftRef)
+        });
+        return { workOrderRef, draftRef, count };
+      } catch (error) {
+        if (error && (error.code === 'MEDIA_STORAGE_FILE_MISSING' || error.code === 'MEDIA_STORAGE_INVALID')) throw error;
+        throw makeError('MEDIA_STORAGE_COMMIT_FAILED', error);
+      }
+    }
+
     return {
       available: true,
       newAttachmentId: () => newAttachmentId(cryptoApi),
@@ -350,7 +381,8 @@
       restoreOwner,
       removeAttachment,
       removeOwner,
-      commitDraftToWorkOrder
+      commitDraftToWorkOrder,
+      rollbackWorkOrderToDraft
     };
   }
 
@@ -364,7 +396,8 @@
       restoreOwner: fail,
       removeAttachment: fail,
       removeOwner: fail,
-      commitDraftToWorkOrder: fail
+      commitDraftToWorkOrder: fail,
+      rollbackWorkOrderToDraft: fail
     };
   }
 
@@ -527,7 +560,7 @@
     OPFS_ROOT_DIR, OPFS_BLOB_DIR, OPFS_PATH_PREFIX,
     STATUSES, INITIAL_STATUS, STATUS_LABELS, KINDS, SOURCES, OWNER_TYPES, META_KEYS, MESSAGES,
     isValidStatus, isValidAttachmentId, isValidDraftRef, isValidWorkOrderRef,
-    isValidMetadata, metadataProblem, buildMetadata, rebindMetadata,
+    isValidMetadata, metadataProblem, buildMetadata, rebindMetadata, rebindMetadataToDraft,
     newAttachmentId, newDraftRef, opfsPathFor,
     createMemoryBlobStore, createMemoryMetaStore, createPersistence, createUnavailablePersistence,
     supportsOpfs, createBrowserPersistence

@@ -3,6 +3,19 @@
 //  html2canvas + pdf-lib は vendor/pdf のローカル同梱資産のみを使用する。
 // ============================================================
 var pendingPrintRequest = null;
+var pendingIssuePaperResolve = null;
+
+function requestIssuePdfPaperSize() {
+  if (pendingIssuePaperResolve || pendingPrintRequest) {
+    return Promise.reject(new Error('PDF_PAPER_SELECTION_BUSY'));
+  }
+  var modal = document.getElementById('modal-print-paper');
+  if (!modal) return Promise.resolve('b5');
+  modal.classList.add('open');
+  return new Promise(function(resolve) {
+    pendingIssuePaperResolve = resolve;
+  });
+}
 
 function exportPDF(id, id2) {
   pendingPrintRequest = { id: id || null, id2: id2 != null ? id2 : null };
@@ -17,22 +30,40 @@ function exportPDF(id, id2) {
 }
 
 function cancelPrintPaperSize() {
-  pendingPrintRequest = null;
   var modal = document.getElementById('modal-print-paper');
   if (modal) modal.classList.remove('open');
+  if (pendingIssuePaperResolve) {
+    var resolveIssue = pendingIssuePaperResolve;
+    pendingIssuePaperResolve = null;
+    resolveIssue(null);
+    return;
+  }
+  pendingPrintRequest = null;
 }
 
 function confirmPrintPaperSize(paperSize) {
-  if (!pendingPrintRequest) {
-    cancelPrintPaperSize();
-    return;
-  }
   var normalized = paperSize === 'a4' ? 'a4' : 'b5';
-  var request = pendingPrintRequest;
-  pendingPrintRequest = null;
   var modal = document.getElementById('modal-print-paper');
   if (modal) modal.classList.remove('open');
+
+  if (pendingIssuePaperResolve) {
+    var resolveIssue = pendingIssuePaperResolve;
+    pendingIssuePaperResolve = null;
+    resolveIssue(normalized);
+    return;
+  }
+
+  if (!pendingPrintRequest) return;
+  var request = pendingPrintRequest;
+  pendingPrintRequest = null;
   _startFixedPdfExport(request.id, request.id2, normalized);
+}
+
+function openFixedPdfBlob(blob, paperSize) {
+  var label = paperSize === 'a4' ? 'A4' : 'B5';
+  var url = URL.createObjectURL(blob);
+  showToast(label + ' PDFを作成しました');
+  window.location.assign(url);
 }
 
 function _startFixedPdfExport(id, id2, paperSize) {
@@ -40,9 +71,7 @@ function _startFixedPdfExport(id, id2, paperSize) {
   showToast(label + ' PDFをブラウザ内で作成しています');
   _createFixedPdfBlob(id, id2, paperSize)
     .then(function(blob) {
-      var url = URL.createObjectURL(blob);
-      showToast(label + ' PDFを作成しました');
-      window.location.assign(url);
+      openFixedPdfBlob(blob, paperSize);
     })
     .catch(function() {
       showToast('PDFを作成できませんでした', 'error');
@@ -116,7 +145,6 @@ async function _waitForPrintFrame(iframe) {
 }
 
 async function _createFixedPdfBlob(id, id2, paperSize) {
-  if (typeof html2canvas !== 'function') throw new Error('html2canvas unavailable');
   var order1 = id ? state.orders.find(function(o){ return o.id === id; }) : collectFormData();
   if (!order1) throw new Error('PDF data unavailable');
   if (!id && !order1.visualSnapshot) {
@@ -129,6 +157,18 @@ async function _createFixedPdfBlob(id, id2, paperSize) {
     });
   }
   var order2 = (id2 != null) ? (state.orders.find(function(o){ return o.id === id2; }) || null) : null;
+  return _createFixedPdfBlobFromOrders(order1, order2, paperSize);
+}
+
+async function createIssuePdfBlob(order, paperSize) {
+  if (!order || !order.visualSnapshot) throw new Error('PDF data unavailable');
+  return _createFixedPdfBlobFromOrders(order, null, paperSize);
+}
+
+async function _createFixedPdfBlobFromOrders(order1, order2, paperSize) {
+  if (typeof html2canvas !== 'function') throw new Error('html2canvas unavailable');
+  if (!order1) throw new Error('PDF data unavailable');
+
   var chartWrap = document.querySelector('.chart-wrap');
   var chartHtml1 = buildOrderChartHTML(order1, chartWrap);
   var memoHtml1 = buildOrderMemoHTML(order1);
