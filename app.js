@@ -322,6 +322,21 @@ function collectFormData() {
   const memoSnapshot = (typeof memoStrokes !== 'undefined' && Array.isArray(memoStrokes))
     ? JSON.parse(JSON.stringify(memoStrokes))
     : [];
+  const deliveryDateValue = document.getElementById('delivery-date').value;
+  const shippingDateValue = (typeof shippingDateGlobal === 'string' && shippingDateGlobal)
+    ? shippingDateGlobal
+    : (document.getElementById('shipping-date')?.value ?? '');
+  const standardDeliveryDateValue = (typeof stdDeliveryDate === 'string' && stdDeliveryDate)
+    ? stdDeliveryDate
+    : '';
+  const holidaySnapshot = (typeof HOLIDAYS_CACHE === 'object' && HOLIDAYS_CACHE) ? HOLIDAYS_CACHE : {};
+  const businessDaysFromShippingValue = (
+    shippingDateValue && deliveryDateValue && typeof countBizDays === 'function'
+  ) ? countBizDays(shippingDateValue, deliveryDateValue, holidaySnapshot) : 0;
+  const urgentFeeCandidate = Number(globalThis._urgentFee);
+  const expediteFeeYenValue = Number.isFinite(urgentFeeCandidate) && urgentFeeCandidate >= 0
+    ? Math.round(urgentFeeCandidate)
+    : 0;
 
   return {
     // 患者・医院情報
@@ -382,10 +397,14 @@ function collectFormData() {
     articulatorType:  document.getElementById('articulator-type').value,
     articulatorDetail:document.getElementById('articulator-detail').value,
 
-    // 納期
-    deliveryDate:    document.getElementById('delivery-date').value,
+    // 納期（既存カレンダー計算結果を発行時点の値として保持）
+    shippingDate: shippingDateValue,
+    standardDeliveryDate: standardDeliveryDateValue,
+    businessDaysFromShipping: businessDaysFromShippingValue,
+    expediteFeeYen: expediteFeeYenValue,
+    deliveryDate: deliveryDateValue,
     nextAppointment: (updateNextAppointmentValue(), document.getElementById('next-appointment').value),
-    priority:        state.priority,
+    priority: state.priority,
     remarks:      document.getElementById('remarks').value,
     memoStrokes:  memoSnapshot,
 

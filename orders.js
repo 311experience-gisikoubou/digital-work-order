@@ -58,6 +58,13 @@ function isValidSessionOrder(order) {
   for (const key of ['clinicName', 'doctorName', 'patientName', 'patientAge', 'patientGender', 'issueDate', 'deliveryDate', 'remarks']) {
     if (typeof order[key] !== 'string') return false;
   }
+  for (const key of ['shippingDate', 'standardDeliveryDate']) {
+    if (Object.prototype.hasOwnProperty.call(order, key) && typeof order[key] !== 'string') return false;
+  }
+  if (Object.prototype.hasOwnProperty.call(order, 'businessDaysFromShipping')
+      && (!Number.isInteger(order.businessDaysFromShipping) || order.businessDaysFromShipping < 0)) return false;
+  if (Object.prototype.hasOwnProperty.call(order, 'expediteFeeYen')
+      && (!Number.isInteger(order.expediteFeeYen) || order.expediteFeeYen < 0)) return false;
   if (!Array.isArray(order.selectedTeeth) || !order.selectedTeeth.every(v => typeof v === 'string' || Number.isInteger(v))) return false;
   if (!Array.isArray(order.orderTypes) || !order.orderTypes.every(v => typeof v === 'string')) return false;
   if (!Array.isArray(order.devices) || !order.devices.every(v => typeof v === 'string')) return false;
