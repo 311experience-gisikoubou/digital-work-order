@@ -9,7 +9,7 @@
   "canonicalContract": {
     "schemaVersion": 1,
     "contractId": "digital-work-order-contract",
-    "contractVersion": "2",
+    "contractVersion": "3",
     "approved": true,
     "artifacts": [
       {
@@ -38,6 +38,38 @@
         "sources": [
           "AGENTS.local.md"
         ]
+      },
+      {
+        "id": "digital-work-order-phase2-business-v1",
+        "kind": "BUSINESS",
+        "slot": "business-spec",
+        "status": "CURRENT",
+        "sources": [
+          "docs/design.md",
+          "docs/phase2-compatibility-change-scope.md",
+          "docs/phase2-field-matrix.md",
+          "docs/phase2-input-save-output-spec.md",
+          "docs/phase2-schema-v1.md"
+        ]
+      },
+      {
+        "id": "digital-work-order-layout-20261001-v1",
+        "kind": "DESIGN",
+        "slot": "ui-layout",
+        "status": "CURRENT",
+        "sources": [
+          "docs/canonical/business-layout-20261001-toothchart-compact-sync-v1.json",
+          "docs/canonical/tooth-chart-sync-spec-v1.json"
+        ],
+        "visual": {
+          "designId": "digital-work-order-layout-20261001-v1",
+          "version": "2026-10-01-v1",
+          "scope": [
+            "clinic-input",
+            "tooth-chart"
+          ],
+          "baseline": "MACHINE_READABLE"
+        }
       }
     ],
     "protectedDecisions": [
@@ -50,8 +82,91 @@
   },
   "humanDecisionSync": {
     "schemaVersion": 1,
-    "decisions": [],
-    "currentState": "Human Decision Sync is enabled. No project-specific mutable human decisions were backfilled automatically; the current canonicalContract remains implementation authority.",
-    "nextAction": "Record future explicit human-confirmed mutable decisions here before implementation whenever they change project authority."
+    "decisions": [
+      {
+        "id": "U01",
+        "topic": "draft-persistence",
+        "status": "CONFIRMED",
+        "summary": "編集中フォームの下書きは端末内に保存し、タブまたはブラウザを閉じても後から再開できる。Phase 2ではactive draft 1件を扱い、発行済み受注の長期DB化とは分離する。",
+        "decidedAt": "2026-10-02",
+        "source": "EXPLICIT_HUMAN",
+        "type": "BUSINESS",
+        "replaces": null,
+        "artifactIds": [
+          "digital-work-order-phase2-business-v1"
+        ]
+      },
+      {
+        "id": "U02",
+        "topic": "issue-boundary",
+        "status": "CONFIRMED",
+        "summary": "「この内容で発行する」は受注確定とPDF作成までを意味し、技工所PCへの送信完了は意味しない。",
+        "decidedAt": "2026-10-02",
+        "source": "EXPLICIT_HUMAN",
+        "type": "BUSINESS",
+        "replaces": null,
+        "artifactIds": [
+          "digital-work-order-phase2-business-v1"
+        ]
+      },
+      {
+        "id": "U03",
+        "topic": "tooth-state-semantics",
+        "status": "CONFIRMED",
+        "summary": "歯状態は欠損と支台歯を排他とし、要注意は独立して重ねられる。",
+        "decidedAt": "2026-10-02",
+        "source": "EXPLICIT_HUMAN",
+        "type": "BUSINESS",
+        "replaces": null,
+        "artifactIds": [
+          "digital-work-order-phase2-business-v1",
+          "digital-work-order-layout-20261001-v1"
+        ]
+      },
+      {
+        "id": "U04",
+        "topic": "tooth-visual-preservation",
+        "status": "CONFIRMED",
+        "summary": "既存の歯形態と既存部品を維持し、欠損・支台歯・要注意は状態表示で区別する。承認済みの歯形態をAIが描き直さない。",
+        "decidedAt": "2026-10-02",
+        "source": "EXPLICIT_HUMAN",
+        "type": "DESIGN",
+        "replaces": null,
+        "artifactIds": [
+          "digital-work-order-layout-20261001-v1",
+          "digital-work-order-phase2-business-v1"
+        ]
+      },
+      {
+        "id": "U05",
+        "topic": "ipad-information-density",
+        "status": "CONFIRMED",
+        "summary": "iPadでは主要情報を常時表示し、細部・手書き・詳細操作はカード内の展開または拡大で扱う。",
+        "decidedAt": "2026-10-02",
+        "source": "EXPLICIT_HUMAN",
+        "type": "DESIGN",
+        "replaces": null,
+        "artifactIds": [
+          "digital-work-order-layout-20261001-v1",
+          "digital-work-order-phase2-business-v1"
+        ]
+      },
+      {
+        "id": "U06",
+        "topic": "pdf-business-output",
+        "status": "CONFIRMED",
+        "summary": "現行B5上下2面を維持し、8番歯・模型発送予定日・急ぎ料金をPDFへ反映する。既存の休日判定と料金計算式は変更しない。",
+        "decidedAt": "2026-10-02",
+        "source": "EXPLICIT_HUMAN",
+        "type": "BUSINESS",
+        "replaces": null,
+        "artifactIds": [
+          "digital-work-order-phase2-business-v1",
+          "digital-work-order-layout-20261001-v1"
+        ]
+      }
+    ],
+    "currentState": "U01〜U06はCONFIRMED。Phase 2の入力・保存・出力仕様と採用済み機械可読レイアウトをCURRENTの実装権威とする。アプリ実装は未着手。",
+    "nextAction": "CONFIRMEDのU01〜U06とCURRENT canonical artifactsを基準に、Phase 2を最小変更の段階実装で進める。未マージのメディア永続化作業は別途整合し、統合後HEADで再検証する。"
   }
 }
