@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "intakeId": "media-transfer-phase4-20261003",
+  "intent": "メディア転送ロードマップPhase 4として、Phase 3のローカル転送packageへ標準暗号・署名・ペアリング・失効・鍵更新・復号秘密鍵バックアップを追加し、Phase 5のクラウド中継前に暗号プロトコル境界をローカルで確定する。",
+  "scope": "docs/design.md §15.2〜15.10に従い、QRで運べるpairing payload、医院iPad署名鍵、技工所PC復号鍵、ECDSA P-256/SHA-256署名、ECDH P-256→HKDF-SHA-256→AES-256-GCM暗号Envelope、sender失効、医院署名鍵rotation、技工所recipient key ring、PBKDF2-HMAC-SHA256 600,000回以上 + AES-256-GCMによる復号秘密鍵の暗号化オフラインバックアップ生成/復旧、synthetic testsを実装する。外部クラウド通信、課金、実データ、PC自動受信、QR描画/カメラUIは除外する。",
+  "assumptions": [
+    "Phase 3のMediaTransferPackageを唯一のplaintext package正本として再利用し、別package形式を重複生成しない。",
+    "暗号はWeb Crypto標準APIだけを使い、新規外部依存を追加しない。",
+    "signatureは非機微のsigned descriptorへ付与し、recipient/sender key IDとplaintext package hashesを束縛する。暗号payloadはAES-GCM additionalDataでworkOrderRef/part/chunk/key IDへ束縛する。",
+    "技工所復号秘密鍵は生成時に暗号化offline backupも同時生成し、通常利用用private keyはnon-extractableとして再importする。",
+    "QRはpairing payloadのtransport表現までをPhase 4 coreとし、画像生成・カメラ読取UIはPC receiver/UIが存在する段階で接続する。",
+    "技工所recipient鍵更新は新鍵をactive、旧鍵をdecrypt-onlyとして保持し、in-flightが0と確認できるまで旧鍵を破棄しない。医院署名鍵の通常rotationは旧active鍵の署名で新鍵を認証し、紛失時は旧鍵をrevokedとして再pairingする。"
+  ],
+  "humanQuestions": [],
+  "solutionReview": {
+    "options": [
+      {
+        "id": "webcrypto-local-envelope",
+        "decision": "MINIMAL_CHANGE",
+        "summary": "Web Crypto標準だけでPhase 3 packageを署名・暗号Envelope化し、pairing/key lifecycleをpure helperとして追加する。",
+        "assessment": {
+          "safety": "外部通信・実データ・secretsのrepository保存を増やさず、署名・AEAD・失効・backupをfail-closedで追加できる。",
+          "accuracy": "既存Phase 3 hash/chunk情報をそのまま署名・暗号境界へ束縛し、重複したpackage正本を作らない。",
+          "simplicity": "新規dependency、クラウド、daemon、QR libraryを増やさない。",
+          "humanOperations": "Phase 4 coreでは日常操作UIを追加せず、将来のpairing UIが利用するprotocolだけを固定する。",
+          "maintenance": "標準Web Crypto APIのみで保守対象を抑える。",
+          "reversibility": "Phase 4 module/script wiringを戻せばPhase 3状態へ戻せる。",
+          "existingOverlap": "MediaTransferPackageと既存workOrderRefを再利用する。"
+        }
+      },
+      {
+        "id": "third-party-crypto-stack",
+        "decision": "EXTEND_REQUIRED",
+        "summary": "libsodium等の追加crypto libraryと独自key storeを導入する。",
+        "assessment": {
+          "safety": "成熟library自体は有力だが、今の要件ではdependency/supply-chain/配布面が増える。",
+          "accuracy": "要件は満たせるが既存Web Cryptoで満たせる範囲と重複する。",
+          "simplicity": "新規dependencyとbuild/distribution境界が増える。",
+          "humanOperations": "追加更新管理が必要になる。",
+          "maintenance": "library更新とcompatibility追従が増える。",
+          "reversibility": "依存除去が必要になり変更面が広い。",
+          "existingOverlap": "ブラウザ標準APIと機能重複する。"
+        }
+      }
+    ],
+    "selectedOptionId": "webcrypto-local-envelope",
+    "extendRationale": null
+  },
+  "riskSignals": {
+    "protectedOrPatientData": false,
+    "externalCommunication": false,
+    "addedCostOrPaidUsage": false,
+    "authOrIdentity": true,
+    "productionImpact": false,
+    "realDataImpact": false
+  },
+  "status": "APPROVED",
+  "decisionId": "U08"
+}
