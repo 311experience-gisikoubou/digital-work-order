@@ -439,6 +439,17 @@ function submitOrder() {
     return;
   }
 
+  let visualSnapshot = null;
+  try {
+    visualSnapshot = typeof freezeVisualSnapshot === 'function' ? freezeVisualSnapshot() : null;
+  } catch (_) {
+    visualSnapshot = null;
+  }
+  if (!visualSnapshot) {
+    showToast('歯式・クラスプ・手書きの表示状態を固定できないため、受注一覧への反映を中止しました', 'error');
+    return;
+  }
+
   try {
     data.workOrderRef = generateWorkOrderRef();
   } catch (error) {
@@ -446,6 +457,11 @@ function submitOrder() {
     showToast('安全な指示書IDを生成できないため、送信を中止しました', 'error');
     return;
   }
+
+  // Compatibility fields are derived from the same frozen visual snapshot.
+  data.selectedTeeth = JSON.parse(JSON.stringify(visualSnapshot.selectedTeeth));
+  data.memoStrokes = JSON.parse(JSON.stringify(visualSnapshot.drawing.memoStrokes));
+  data.visualSnapshot = visualSnapshot;
 
   // Reflect to the page order list and same-tab session only; no external transmission.
   state.orders.unshift(data);
