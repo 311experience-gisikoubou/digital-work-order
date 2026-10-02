@@ -584,8 +584,14 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml, chartHtml2, memoHt
     sect(R, '補綴物指示');
     row(R, '床種類', order.bedType);
     if (order.devices && order.devices.length) row(R, '装置', order.devices.join(' / '));
-    row(R, 'クラスプ', order.claspType);
-    if (order.barType) row(R, 'バー', order.barType + 'バー');
+    var orderClaspTypes = Array.isArray(order.claspTypes) && order.claspTypes.length
+      ? order.claspTypes
+      : (order.claspType ? [order.claspType] : []);
+    var orderBarTypes = Array.isArray(order.barTypes) && order.barTypes.length
+      ? order.barTypes
+      : (order.barType ? [order.barType] : []);
+    if (orderClaspTypes.length) row(R, 'クラスプ', orderClaspTypes.join(' / '));
+    if (orderBarTypes.length) row(R, 'バー', orderBarTypes.join(' / '));
 
     var items = [];
     var orderClaspState = order.visualSnapshot && order.visualSnapshot.claspState
@@ -642,6 +648,8 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml, chartHtml2, memoHt
       return '<span class="inline-item"><span class="inline-lbl">' + esc(label) + '</span><span class="inline-val">' + esc(value) + '</span></span>';
     }
     gridRow(compactR, '床種', order.bedType);
+    gridRow(compactR, 'クラスプ', orderClaspTypes.join(' / '));
+    gridRow(compactR, 'バー', orderBarTypes.join(' / '));
     gridRow(compactR, '模型発送予定日', order.shippingDate ? formatMonthDay(order.shippingDate) : '');
     var expediteFee = Number(order.expediteFeeYen);
     var expediteText = Number.isFinite(expediteFee)
@@ -662,10 +670,11 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml, chartHtml2, memoHt
       castBarCount = (order.castBarJaws.upper ? 1 : 0) + (order.castBarJaws.lower ? 1 : 0);
     }
     if (castBarCount > 0) deviceCountItems.push('キャストバー ×' + castBarCount);
-    var isCastBarType = order.barType === '鋳造バー' || order.barType === 'キャストバー';
-    if (order.barType && !(castBarCount > 0 && isCastBarType)) {
-      deviceCountItems.push(order.barType + (order.barType.indexOf('バー') === -1 ? 'バー' : '') + ' ×1');
-    }
+    orderBarTypes.forEach(function(barType) {
+      var isCastBarType = barType === '鋳造バー' || barType === 'キャストバー';
+      if (castBarCount > 0 && isCastBarType) return;
+      deviceCountItems.push(barType + ' ×1');
+    });
     var reinforcementWireCount = Number.parseInt(order.reinforcementWireCount, 10) || 0;
     if (reinforcementWireCount > 0) deviceCountItems.push('補強線 ×' + reinforcementWireCount);
     if (deviceCountItems.length) {

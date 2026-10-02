@@ -269,10 +269,14 @@ function collectFormData() {
       .map(c => c.value);
   }
 
-  // トグルボタン（単一選択）
+  // トグルボタン。multiクラスのグループは複数activeを保持する。
+  function getToggleVals(group) {
+    return [...document.querySelectorAll(`.toggle-btn[data-group="${group}"].active`)]
+      .map(el => el.dataset.val || el.textContent.trim())
+      .filter(Boolean);
+  }
   function getToggleVal(group) {
-    const el = document.querySelector(`.toggle-btn[data-group="${group}"].active`);
-    return el ? (el.dataset.val || el.textContent.trim()) : null;
+    return getToggleVals(group)[0] ?? null;
   }
 
   // 発注形態
@@ -282,11 +286,13 @@ function collectFormData() {
   const deviceGroup = ins === 'insurance' ? 'device-insurance' : 'device-jishi';
   const devices = getChecked(deviceGroup);
 
-  // クラスプ
-  const claspType = ins === 'insurance' ? getToggleVal('clasp-ins') : getToggleVal('clasp-jishi');
+  // クラスプ（配列を正本、旧単一値は先頭要素から派生）
+  const claspTypes = ins === 'insurance' ? getToggleVals('clasp-ins') : getToggleVals('clasp-jishi');
+  const claspType = claspTypes[0] ?? null;
 
-  // バー
-  const barType = ins === 'insurance' ? getToggleVal('bar-ins') : getToggleVal('bar-jishi');
+  // バー（配列を正本、旧単一値は先頭要素から派生）
+  const barTypes = ins === 'insurance' ? getToggleVals('bar-ins') : getToggleVals('bar-jishi');
+  const barType = barTypes[0] ?? null;
   const castBarSelected = [...document.querySelectorAll(`.toggle-btn[data-group="bar-${insKey}"].active`)]
     .some(el => ['鋳造バー', 'キャストバー'].includes(el.dataset.val || el.textContent.trim()));
   function getCastBarCount(jaw) {
@@ -361,7 +367,9 @@ function collectFormData() {
     bedType:      getToggleVal(ins === 'insurance' ? 'bed-insurance' : 'bed-jishi'),
     devices,
     claspType,
+    claspTypes,
     barType,
+    barTypes,
     castBarJaws,
     castBarCounts,
     reinforcementWireCount,
