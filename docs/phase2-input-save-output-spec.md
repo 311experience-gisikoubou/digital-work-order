@@ -3,7 +3,7 @@
 ## 1. 位置づけ
 
 - 対象Repo: `311experience-gisikoubou/digital-work-order`
-- 状態: **仕様確定。アプリ実装は未着手。**
+- 状態: **仕様確定・実装完了。2026-10-02にmain統合と公開runtimeのsynthetic smokeまで確認済み。**
 - 基準: 2026-10-02 時点の `origin/main` と、確定済み業務判断 U01〜U06。
 - 新しいアプリ・別システムは作らず、既存入力、既存PDF、既存描画、既存保存、既存JSON出力を最大限再利用する。
 - 本文の詳細schemaは `docs/phase2-schema-v1.md`、項目単位の反映先は `docs/phase2-field-matrix.md` を正本とする。
@@ -29,7 +29,7 @@
 - 画面上の入力値、歯式、クラスプ、手書き、座標を編集中の状態。
 - 「下書き保存」で端末内へ保存する。
 - 保存キーは新規の `dwo_form_draft_v1` 1個に限定する。
-- メディア本体をlocalStorageへ入れない。PR #120を再利用する場合、メディアはOPFS、metadataはIndexedDBの既存案を使う。
+- メディア本体をlocalStorageへ入れない。PR #120で実装済みのとおり、メディアはOPFS、metadataはIndexedDBを使う。
 - 下書きとメディアで別々のdraft IDを作らず、同一の `draftRef` を共有する。
 
 ### 3.2 発行済み受注
@@ -115,16 +115,17 @@
 5. secure `workOrderRef` を1回生成する。
 6. 既存B5/A4用紙選択を表示する。キャンセル時は発行しない。
 7. **固定済み受注snapshotから**PDF Blobを作成する。
-8. 添付がある場合、PR #120の方式を再利用して同じ `draftRef` から `workOrderRef` へ紐付ける。保存不能・不整合はfail closedとする。
-9. `state.orders` へ受注を追加し、既存session保存を同期する。
-10. 発行成功後に `dwo_form_draft_v1` を削除し、フォームを初期化する。
-11. 作成済みPDFを表示する。
+8. `state.orders` へ受注を一時追加し、既存session保存が成功したことを確認する。保存できない場合は一時受注をrollbackする。
+9. 添付がある場合、PR #120の方式で同じ `draftRef` から `workOrderRef` へownerを確定する。保存不能・不整合はfail closedとし、一時受注もrollbackする。
+10. 発行の重要処理が完了した後に `dwo_form_draft_v1` を削除する。削除失敗時は、可能ならメディアownerを元のdraftへ補償rollbackし、一時受注も戻す。
+11. 受注一覧を更新し、フォームを初期化する。
+12. 作成済みPDFを表示する。
 
-PDF作成、添付紐付け、必須検証のいずれかが失敗した場合は「発行完了」と表示せず、入力・下書きを消さない。
+必須検証、PDF作成、session保存、添付紐付け、下書き削除のいずれかが失敗した場合は「発行完了」と表示せず、可能な限り発行前状態へrollbackし、入力・下書きを保持する。添付の補償rollback自体に失敗した場合だけ、添付との整合を優先して確定済み受注を残し、再発行しないよう案内する。
 
 ## 7. 受注ごとの表示snapshot
 
-現行はPDFが「現在画面の歯式/クラスプ」を参照し得るため、発行済み受注ごとに固定snapshotを持つ。
+Phase 2着手前はPDFが「現在画面の歯式/クラスプ」を参照し得たため、Phase 2で発行済み受注ごとの固定snapshotへ移行した。
 
 `visualSnapshot` に最低限含めるもの:
 
@@ -163,10 +164,9 @@ PDF、詳細、再印刷は対象受注のsnapshotから描画する。他受注
 
 ## 10. PR #120との境界
 
-- PR #120は**未マージ**であり、main実装として数えない。
-- Phase 2では、そのOPFS/IndexedDB・fail-closed・draft→workOrderRef再紐付け設計を再利用候補とする。
-- フォーム下書きの `draftRef` とメディアのactive draftを一本化する。
-- PR #120を取り込むときは最新mainへrebase/再適用相当の整合確認を行い、過去の140 PASS/16 checksを現在HEADのテスト証拠として再利用しない。
+- PR #120はmainへ統合済みで、OPFS（Blob本体）+ IndexedDB（metadata）のローカルメディア永続化をPhase 2で再利用する。
+- フォーム下書きの `draftRef` とメディアownerは一本化済みで、`FormDraftManager` をdraft authorityとする。
+- 正式発行では `ReferenceMediaManager.commitCurrentDraft(workOrderRef)` によりdraft ownerをworkOrder ownerへ確定し、後工程失敗時の補償rollback経路も持つ。
 - 添付のない受注はメディア機能の有無で発行不能にしない。
 - 添付があるのに安全な永続化ができない場合は、黙って添付を落とさず発行を止める。
 
