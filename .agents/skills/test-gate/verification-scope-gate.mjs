@@ -32,12 +32,14 @@ const ESCALATION_REASONS = new Set([
 ]);
 
 const DOC_RE = /(^|\/)(docs?|documentation)(\/|$)|\.(md|mdx|txt|rst)$/i;
-const GOVERNANCE_RE = /(^|\/)\.agents\/|(^|\/)templates\/\.claude\/skills\/|(^|\/)(AGENTS(?:\.local)?\.md|OPERATIONS\.md|CORE\.md|PROJECT_COMPLETION\.md|PROJECT_CONTEXT\.json|CURRENT_STATUS\.md|STATUS\.md|CHANGELOG\.md|VERSION)$|(^|\/)tools\/portfolio-governance-audit(?:-selftest)?\.mjs$/i;
+const GOVERNANCE_RE = /(^|\/)\.agents\/|(^|\/)templates\/(?:AGENTS\.index\.md\.template$|\.claude\/skills\/|ui-reference\/reproduction\/)|(^|\/)(AGENTS(?:\.local)?\.md|OPERATIONS\.md|CORE\.md|PROJECT_COMPLETION\.md|PROJECT_CONTEXT\.json|CURRENT_STATUS\.md|STATUS\.md|CHANGELOG\.md|VERSION)$|(^|\/)tools\/portfolio-governance-audit(?:-selftest)?\.mjs$/i;
 const DEPENDENCY_RE = /(^|\/)(package(?:-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|Cargo\.(?:toml|lock)|pyproject\.toml|poetry\.lock|uv\.lock|requirements[^/]*\.txt|Pipfile(?:\.lock)?|go\.(?:mod|sum)|composer\.(?:json|lock)|pom\.xml|build\.gradle(?:\.kts)?|gradle\.lockfile)$/i;
 const FRONTEND_DEPENDENCY_RE = /(^|\/)(package(?:-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?)$/i;
 const BACKEND_DEPENDENCY_RE = /(^|\/)(Cargo\.(?:toml|lock)|pyproject\.toml|poetry\.lock|uv\.lock|requirements[^/]*\.txt|Pipfile(?:\.lock)?|go\.(?:mod|sum)|composer\.(?:json|lock)|pom\.xml|build\.gradle(?:\.kts)?|gradle\.lockfile)$/i;
 const MIGRATION_RE = /(^|\/)(migrations?|schema|database|db)(\/|$)|\.sql$/i;
 const FRONTEND_RE = /(^|\/)(src|app|web|frontend|ui|components?|pages?|views?|styles?)(\/|$).+\.(ts|tsx|js|jsx|mjs|cjs|vue|svelte|css|scss|sass|less|html)$/i;
+const ROOT_INDEX_HTML_RE = /^index\.html$/i;
+const FRONTEND_VERIFICATION_SCRIPT_RE = /^scripts\/(?=[^/]*\.(?:ts|js|mjs)$)(?=[^/]*(?:frontend|ui|browser|render|layout|visual|home-stage|home-invoice))(?=[^/]*(?:verify|verification|selftest|test|smoke|check|scale))[^/]+\.(?:ts|js|mjs)$/i;
 const BACKEND_RE = /(^|\/)(src-tauri|backend|server|api|services?|domain|repositories?)(\/|$)|\.(rs|go|py|java|kt|cs|rb|php)$/i;
 
 function unique(values) {
@@ -88,7 +90,7 @@ export function classifyFiles(changedFiles) {
       flags.backend = true;
       continue;
     }
-    if (FRONTEND_RE.test(file)) {
+    if (ROOT_INDEX_HTML_RE.test(file) || FRONTEND_VERIFICATION_SCRIPT_RE.test(file) || FRONTEND_RE.test(file)) {
       flags.frontend = true;
       continue;
     }

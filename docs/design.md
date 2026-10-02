@@ -450,21 +450,28 @@ Phase 0の境界（15.1〜15.11）は変更しない。Phase 1は医院側「参
 - 「送信完了までこの画面を閉じないでください」は非表示要素として用意のみ。送信処理はPhase 5。
 - iPad Safariの実機確認（カメラ/動画capture、マイク権限、録音再生、見た目）は未確認。
 
-### 15.13 Phase 2の実装事実（Issue #119）
 
-Phase 0の境界（15.1〜15.11）と15.12のUI仕様は変更しない。15.12の「永続化しない」はPhase 1時点の記述で、Phase 2で下記のローカル永続化を追加した。外部通信・暗号化・署名・SHA-256・manifest・chunk・クラウド・PC受信は実装していない。
+## 16. 全体入力・保存・出力 Phase 2（2026-10-02 確定仕様）
 
-- 実装は新規 `media-storage.js`（`globalThis.ReferenceMediaStorage`。永続化・metadata・owner管理）と `media.js`（UI・録音・Object URL・`ReferenceMediaManager.commitCurrentDraft` / `hasAttachments`）。`index.html` は `media-storage.js` を `media.js` の前に1回読み込む。
-- Blob本体はOPFSの固定パス `dwo-media-v1/blobs/<attachmentId>` に保存する。`attachmentId` は `att-<uuid-v4>` の非機微なランダムIDで、元ファイル名・患者・医院・workOrderRefを物理パスに使わない。owner変更でファイルは移動しない。
-- metadataはIndexedDB `dwo_media_v1`（version 1）。`attachments`（keyPath `attachmentId`、index `ownerRef`）と `settings`（keyPath `key`、`activeDraft`）。metadataは `schemaVersion` `attachmentId` `ownerType` `ownerRef` `status` `source` `kind` `name` `mime` `size` `createdAt` `opfsName` の12項目のみで、Blob・Object URL・患者名・医院名などの未知プロパティは不正として扱う（fail closed）。
-- statusは `unsent / sending / cloud_uploaded / lab_receipt_pending / lab_received / deletable` の6種のみ有効で、不明値は拒否する。Phase 2で作る新規添付は `unsent`（未送信）のみ。状態遷移UI・送信処理はない。
-- 受注確定前の所有者は `draft:<uuid-v4>`（active draft。IndexedDB `settings` に保存し、`crypto` で生成。生成できなければ永続化不可として安全側に倒す）。
-- 追加は「OPFS書込 → metadata書込」の順。OPFS失敗時はmetadataを作らず、metadata失敗時はOPFSをbest-effortでrollbackする。保存成功後にだけ一覧へ出す。
-- 削除は「metadata削除 → OPFS削除（best-effort）」。OPFS削除に失敗したファイルはorphanとして残り得るが、metadataが無いため復元・送信対象にならない。端末元ファイルには触れない。
-- 起動時は active draft の添付だけを復元する。metadataは厳密検証し、OPFSファイルが欠落したmetadataは削除して一覧に出さず、要求ownerの不正metadata・OPFSファイルのsize不一致は「破損した端末内添付」として metadata削除 → OPFS削除（best-effort）で掃除し（不正metadataは生のattachmentIdをkeyに削除し、安全なidならOPFSも消す）、metadataのないOPFS orphanは復元しない。復元後も表示はPhase 1と同じカード。
-- 受注確定（`app.js` の送信処理）は、validate → `workOrderRef` 生成（既存順序を維持）→ `await ReferenceMediaManager.commitCurrentDraft(workOrderRef)` → `state.orders.unshift` の順。commitは1つのIndexedDB transactionで、draft所有の全metadataを `ownerType='work-order'` / `ownerRef=workOrderRef` へ更新し、active draftを新規draftへ更新する。添付が1件以上あり保存未完了・失敗・非対応の場合は受注へ反映せず、フォームと添付を保持して日本語エラーを表示する。添付0件の受注は従来どおり反映できる。保存済みの添付を画面の一覧へ出せなかった場合（Object URL生成失敗等）は、永続データを消さず、そのセッションでは可視項目が0件でも受注反映を止める。ページを再読み込みすると復元を再試行する。commit成功後の `state.orders` 反映は例外を出さない既存best-effort処理を前提とし、rollback receiptは設けない（documented invariant）。送信処理中の二重クリックは `submitInFlight` で無視する。
-- OPFS（メインスレッドの `createWritable`）またはIndexedDBが使えない環境では、Phase 1同様にメモリ内添付だけ使える。ただし添付が1件以上ある場合は「このブラウザでは添付を安全に保存できないため受注へ反映できません」を表示して受注確定をfail closedにする。
-- `pagehide` はObject URLと録音trackだけを解放し、OPFS・metadataは消さない。
-- fail closed（監査指摘対応）: 保存に失敗した添付は未保存項目として画面内に残し（persistedIdsへ入れない）、受注確定は拒否する。削除するか再追加すれば進める。active draftに不正metadata（未知status・未知プロパティ・形式不正・owner不一致）が1件でもあれば `MEDIA_STORAGE_INVALID` で中止し、valid行の移動もactive draftの更新も行わない。OPFSファイルの欠落・sizeとmetadata.sizeの不一致も紐付け前に中止する。復元時は要求ownerの不正metadata・size不一致・欠落を掃除して {items, missing, invalid, corrupt} を返し、いずれかが1件以上なら「保存できなかった添付を除外しました。必要な資料は再追加してください。」を既存のメディアエラー欄に表示する（ファイル名等は出さず、掃除成功だけでは永続化を無効化しない）。metadata自体を削除できない場合は掃除成功を装わず復元を失敗させる。永続化可能なら添付0件でも紐付け処理を呼びactive draftを更新する。永続化不可で添付0件なら従来フロー、添付ありならfail closed。
-- 参考資料カードの案内文は「この端末内に一時保存されます。外部には送信されません。」へ更新した。
-- 自動確認: `tests/media-storage.test.js`（Node。memory adapter）と `tools/media-storage-e2e.mjs`（headless ChromeでOPFS+IndexedDBの追加→再読込→復元→削除→commitを確認）。iPad Safariでの実機確認（OPFS書込対応を含む）は未実施。
+全体機能棚卸しと業務判断 U01〜U06 の確定を受け、入力・保存・発行・PDF・歯式の統合仕様を次の文書へ正本化する。
+
+- `docs/phase2-input-save-output-spec.md` — 業務フローと保存/発行/PDF仕様
+- `docs/phase2-field-matrix.md` — 各入力項目の下書き・発行・PDF・JSON反映先
+- `docs/phase2-schema-v1.md` — draft / visual snapshot / 互換schema
+- `docs/phase2-compatibility-change-scope.md` — 保護対象、変更予定範囲、実装順序
+- `docs/canonical/business-layout-20261001-toothchart-compact-sync-v1.json` — 採用済みカード配置
+- `docs/canonical/tooth-chart-sync-spec-v1.json` — 採用済み32歯FDI番号・座標・同期基準
+
+確定事項:
+
+- 下書きは端末内に1件保存し、タブ/ブラウザ終了後も再開できる。これは「編集中フォーム」の保存であり、現行の発行済み `state.orders` のsessionStorage境界を自動的に長期DBへ変更するものではない。
+- 「この内容で発行する」は受注確定とPDF作成まで。技工所PC送信完了を意味しない。
+- 歯状態は `baseState = normal | missing | abutment` と独立 `caution` を正本とする。既存 `selectedTeeth` はmissing集合の互換派生値として維持する。
+- 発行時に歯式、クラスプ、手書き、座標を受注ごとの `visualSnapshot` として固定し、PDFは現在画面のグローバル状態ではなく対象受注snapshotから描画する。
+- 現行B5上下2面を維持し、8番歯、模型発送予定日、急ぎ料金をPDFへ反映する。休日判定・営業日数・急ぎ料金式は変更しない。
+- PR #120は未マージの再利用候補であり、main実装として数えない。統合時はフォームdraftとメディアdraftの `draftRef` を一本化する。
+- 採用済み歯形態を描き直さず、canonical JSONと現行の歯部品・座標を再利用する。
+
+第12.1節の「localStorage / IndexedDBは今回は採用しない」はIssue #82当時の**一時受注再読込復元**の境界である。2026-10-02のU01確定後は、編集中フォームの明示的な下書き保存についてのみ `dwo_form_draft_v1` の端末内永続化を許可する。発行済み受注の長期DB化はこのPhase 2に含めない。
+
+本節は仕様確定であり、アプリ実装完了を意味しない。

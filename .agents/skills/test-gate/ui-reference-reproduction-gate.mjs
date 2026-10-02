@@ -7,6 +7,9 @@ import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import { normalizeCanonicalContract } from '../handoff/canonical-contract-gate.mjs';
 import { normalizeUiReferenceRegistry, referencesForArtifact, UI_REFERENCE_REGISTRY } from '../handoff/ui-reference-registry.mjs';
+import {
+  runVisualDiff, runVisualRegionDiff, verifyVisualDiffEvidenceStructure, verifyFixedShapeDiffEvidenceStructure,
+} from './visual-diff-engine.mjs';
 
 const MAX_INPUT_BYTES = 256 * 1024;
 const STATE_ID_RE = /^(?:git|remote):[0-9a-f]{40}$|^(?:worktree|artifact):[0-9a-f]{64}$/u;
@@ -19,9 +22,16 @@ const PHASES = ['EARLY_CHECK', 'MILESTONE_CHECK', 'FINAL_REALITY_CHECK'];
 const PHASE_RANK = new Map(PHASES.map((x, i) => [x, i]));
 const CATEGORIES = new Set(['POSITION', 'SIZE', 'SPACING', 'FONT', 'COLOR']);
 const MODES = new Set(['ABSOLUTE', 'EXACT']);
+const APP_WINDOW_STATES = new Set(['MAXIMIZED', 'FULLSCREEN', 'FIXED_WINDOWED']);
+const CANONICAL_SHAPE_KINDS = new Set(['IMAGE', 'SVG']);
+const CANONICALIZATION_COVERAGE = new Set(['MEASURED', 'NOT_APPLICABLE']);
+const CANONICALIZATION_AREAS = ['layoutGeometry', 'spacing', 'typography', 'colors', 'fixedShapes'];
+const SHAPE_IMAGE_ASSET_RE = /\.(?:png|jpe?g|webp)$/iu;
+const SHAPE_SVG_ASSET_RE = /\.svg$/iu;
 
 function stop(code, detail = {}) { return { schemaVersion: 1, result: 'STOP', code, ...detail }; }
 function fail(code, detail = {}) { return { schemaVersion: 1, result: 'FAIL', code, ...detail }; }
+function obj(v) { return Boolean(v) && typeof v === 'object' && !Array.isArray(v); }
 function exactKeys(obj, keys) {
   return obj && typeof obj === 'object' && !Array.isArray(obj) &&
     Object.keys(obj).length === keys.length && Object.keys(obj).every(k => keys.includes(k));
@@ -76,21 +86,80 @@ function verifyReceiptHash(receipt) {
 }
 
 function normalizeConfig(raw) {
+  if (!obj(raw) || ![2, 3].includes(raw.schemaVersion) || raw.overlayVerified !== true) return null;
   const keys = [
     'schemaVersion', 'artifactId', 'viewId', 'referenceVersion', 'overlayVerified',
+    ...(raw.schemaVersion === 3 ? ['canonicalizationFile'] : []),
     'dimensionsFile', 'thresholdsFile', 'inspectionScript', 'displayConditionsFile',
-    'dummyDataFile', 'overlayProofFile',
+    'dummyDataFile', 'overlayProofFile', 'finalVisualDiffThresholdsFile', 'fixedShapeRegistryFile',
   ];
-  if (!exactKeys(raw, keys) || raw.schemaVersion !== 1 || raw.overlayVerified !== true) return null;
+  if (!exactKeys(raw, keys)) return null;
   if (!ID_RE.test(raw.artifactId ?? '') || !VIEW_RE.test(raw.viewId ?? '') || !boundedText(raw.referenceVersion, 80)) return null;
-  const pathFields = ['dimensionsFile', 'thresholdsFile', 'inspectionScript', 'displayConditionsFile', 'dummyDataFile', 'overlayProofFile'];
-  const normalized = { ...raw };
+  const pathFields = [
+    ...(raw.schemaVersion === 3 ? ['canonicalizationFile'] : []),
+    'dimensionsFile', 'thresholdsFile', 'inspectionScript', 'displayConditionsFile',
+    'dummyDataFile', 'overlayProofFile', 'finalVisualDiffThresholdsFile',
+  ];
+  const normalized = { ...raw, canonicalizationFile: null };
   for (const key of pathFields) {
     const p = repoPath(raw[key]);
     if (!p) return null;
     normalized[key] = p;
   }
+  const fixedShapeRegistryFile = repoPath(raw.fixedShapeRegistryFile);
+  if (!fixedShapeRegistryFile) return null;
+  normalized.fixedShapeRegistryFile = fixedShapeRegistryFile;
   return normalized;
+}
+
+function normalizeFinalVisualDiffThresholds(raw) {
+  if (!exactKeys(raw, ['schemaVersion', 'pixelDeltaThreshold', 'maxChangedRatio']) || raw.schemaVersion !== 1) return null;
+  if (!Number.isInteger(raw.pixelDeltaThreshold) || raw.pixelDeltaThreshold < 0 || raw.pixelDeltaThreshold > 255) return null;
+  if (!Number.isFinite(raw.maxChangedRatio) || raw.maxChangedRatio < 0 || raw.maxChangedRatio > 1) return null;
+  return { pixelDeltaThreshold: raw.pixelDeltaThreshold, maxChangedRatio: raw.maxChangedRatio };
+}
+
+function normalizeTargetRegion(raw) {
+  if (!exactKeys(raw, ['x', 'y', 'width', 'height'])) return null;
+  if (!Number.isInteger(raw.x) || !Number.isInteger(raw.y) || !Number.isInteger(raw.width) || !Number.isInteger(raw.height) ||
+      raw.x < 0 || raw.y < 0 || raw.width < 4 || raw.height < 4 || raw.width > 10000 || raw.height > 10000) return null;
+  return { x: raw.x, y: raw.y, width: raw.width, height: raw.height };
+}
+
+function normalizeFixedShapeComponent(raw) {
+  if (!obj(raw) || !CANONICAL_SHAPE_KINDS.has(raw.canonicalKind)) return null;
+  const keys = [
+    'componentId', 'targetRegion', 'canonicalKind', 'canonicalAsset', 'version', 'sha256',
+    'pixelDeltaThreshold', 'maxChangedRatio',
+  ];
+  if (!exactKeys(raw, keys) || !ID_RE.test(raw.componentId ?? '') || !SHA256_RE.test(raw.sha256 ?? '')) return null;
+  const targetRegion = normalizeTargetRegion(raw.targetRegion);
+  if (!targetRegion) return null;
+  const canonicalAsset = repoPath(raw.canonicalAsset);
+  const assetRe = raw.canonicalKind === 'SVG' ? SHAPE_SVG_ASSET_RE : SHAPE_IMAGE_ASSET_RE;
+  if (!canonicalAsset || !assetRe.test(canonicalAsset) || !boundedText(raw.version, 80)) return null;
+  if (!Number.isInteger(raw.pixelDeltaThreshold) || raw.pixelDeltaThreshold < 0 || raw.pixelDeltaThreshold > 255) return null;
+  if (!Number.isFinite(raw.maxChangedRatio) || raw.maxChangedRatio < 0 || raw.maxChangedRatio > 1) return null;
+  return {
+    componentId: raw.componentId, targetRegion, canonicalKind: raw.canonicalKind,
+    canonicalAsset, version: raw.version, sha256: raw.sha256,
+    pixelDeltaThreshold: raw.pixelDeltaThreshold, maxChangedRatio: raw.maxChangedRatio,
+  };
+}
+
+function normalizeFixedShapeRegistry(raw, config) {
+  if (!exactKeys(raw, ['schemaVersion', 'artifactId', 'viewId', 'referenceVersion', 'components']) || raw.schemaVersion !== 1) return null;
+  if (raw.artifactId !== config.artifactId || raw.viewId !== config.viewId || raw.referenceVersion !== config.referenceVersion) return null;
+  if (!Array.isArray(raw.components) || raw.components.length > 50) return null;
+  const components = [];
+  const ids = new Set();
+  for (const item of raw.components) {
+    const c = normalizeFixedShapeComponent(item);
+    if (!c || ids.has(c.componentId)) return null;
+    ids.add(c.componentId);
+    components.push(c);
+  }
+  return components.sort((a, b) => a.componentId.localeCompare(b.componentId));
 }
 
 function normalizeDimensions(raw, config) {
@@ -108,6 +177,44 @@ function normalizeDimensions(raw, config) {
     checks.push({ ...row });
   }
   return checks;
+}
+
+function normalizeCanonicalization(raw, config) {
+  const keys = [
+    'schemaVersion', 'artifactId', 'viewId', 'referenceVersion', 'status',
+    'measurementMethod', 'unresolvedAmbiguities', 'coverage',
+  ];
+  if (!exactKeys(raw, keys) || raw.schemaVersion !== 1) return null;
+  if (raw.artifactId !== config.artifactId || raw.viewId !== config.viewId || raw.referenceVersion !== config.referenceVersion) return null;
+  if (raw.status !== 'COMPLETE' || raw.measurementMethod !== 'REFERENCE_IMAGE_MEASURED') return null;
+  if (!Array.isArray(raw.unresolvedAmbiguities) || raw.unresolvedAmbiguities.length !== 0) return null;
+  if (!exactKeys(raw.coverage, CANONICALIZATION_AREAS)) return null;
+  for (const area of CANONICALIZATION_AREAS) {
+    if (!CANONICALIZATION_COVERAGE.has(raw.coverage[area])) return null;
+  }
+  if (raw.coverage.layoutGeometry !== 'MEASURED' || raw.coverage.spacing !== 'MEASURED') return null;
+  return {
+    status: raw.status,
+    measurementMethod: raw.measurementMethod,
+    unresolvedAmbiguities: [],
+    coverage: { ...raw.coverage },
+  };
+}
+
+function canonicalizationCoverageMatches(canonicalization, dimensions, fixedShapes) {
+  const categories = new Set(dimensions.map(x => x.category));
+  if (!categories.has('POSITION') || !categories.has('SIZE') || !categories.has('SPACING')) return false;
+  const optional = [
+    ['typography', 'FONT'],
+    ['colors', 'COLOR'],
+  ];
+  for (const [area, category] of optional) {
+    const has = categories.has(category);
+    if ((canonicalization.coverage[area] === 'MEASURED') !== has) return false;
+  }
+  const shapesMeasured = fixedShapes.length > 0;
+  if ((canonicalization.coverage.fixedShapes === 'MEASURED') !== shapesMeasured) return false;
+  return true;
 }
 
 function normalizeThresholds(raw, dimensions) {
@@ -129,12 +236,15 @@ function normalizeThresholds(raw, dimensions) {
 }
 
 function normalizeDisplay(raw) {
-  if (!exactKeys(raw, ['schemaVersion', 'viewport', 'osScalePercent', 'appZoomPercent', 'referenceScale', 'fontFamily']) || raw.schemaVersion !== 1) return null;
+  const keys = ['schemaVersion', 'viewport', 'osScalePercent', 'appZoomPercent', 'referenceScale', 'devicePixelRatio', 'appWindowState', 'fontFamily'];
+  if (!exactKeys(raw, keys) || raw.schemaVersion !== 2) return null;
   const v = raw.viewport;
   if (!exactKeys(v, ['width', 'height']) || !Number.isInteger(v.width) || !Number.isInteger(v.height) || v.width < 200 || v.height < 200 || v.width > 10000 || v.height > 10000) return null;
   if (!Number.isFinite(raw.osScalePercent) || raw.osScalePercent <= 0 || raw.osScalePercent > 500) return null;
   if (!Number.isFinite(raw.appZoomPercent) || raw.appZoomPercent <= 0 || raw.appZoomPercent > 500) return null;
   if (!Number.isFinite(raw.referenceScale) || raw.referenceScale <= 0 || raw.referenceScale > 8) return null;
+  if (!Number.isFinite(raw.devicePixelRatio) || raw.devicePixelRatio <= 0 || raw.devicePixelRatio > 8) return null;
+  if (!APP_WINDOW_STATES.has(raw.appWindowState)) return null;
   if (!boundedText(raw.fontFamily, 300)) return null;
   return raw;
 }
@@ -153,6 +263,7 @@ function loadPreparation(root, configPath) {
   if (cfgRaw.error) return stop(cfgRaw.error);
   const config = normalizeConfig(cfgRaw.value);
   if (!config) return stop('UI_REPRO_CONFIG_INVALID');
+  if (config.schemaVersion !== 3 || !config.canonicalizationFile) return stop('UI_REPRO_CANONICALIZATION_REQUIRED');
 
   const context = readJson(resolve(root, 'PROJECT_CONTEXT.json'), 'PROJECT_CONTEXT_INVALID');
   if (context.error) return stop(context.error);
@@ -181,12 +292,15 @@ function loadPreparation(root, configPath) {
     config: cfgRel,
     registry: registryRel,
     referenceImage: reference.image,
+    canonicalization: config.canonicalizationFile,
     dimensions: config.dimensionsFile,
     thresholds: config.thresholdsFile,
     inspectionScript: config.inspectionScript,
     displayConditions: config.displayConditionsFile,
     dummyData: config.dummyDataFile,
     overlayProof: config.overlayProofFile,
+    finalVisualDiffThresholds: config.finalVisualDiffThresholdsFile,
+    fixedShapeRegistry: config.fixedShapeRegistryFile,
   };
   const hashes = {};
   for (const [name, rel] of Object.entries(files)) {
@@ -196,6 +310,11 @@ function loadPreparation(root, configPath) {
     if (!hash) return stop('UI_REPRO_FIXED_FILE_INVALID', { name, path: rel });
     hashes[name] = hash;
   }
+
+  const canonicalizationRaw = readJson(inside(root, files.canonicalization), 'UI_REPRO_CANONICALIZATION_INVALID');
+  if (canonicalizationRaw.error) return stop(canonicalizationRaw.error);
+  const canonicalization = normalizeCanonicalization(canonicalizationRaw.value, config);
+  if (!canonicalization) return stop('UI_REPRO_CANONICALIZATION_INCOMPLETE');
 
   const dimsRaw = readJson(inside(root, files.dimensions), 'UI_REPRO_DIMENSIONS_INVALID');
   if (dimsRaw.error) return stop(dimsRaw.error);
@@ -214,14 +333,51 @@ function loadPreparation(root, configPath) {
   if (!reference.viewport || reference.viewport.width !== display.viewport.width || reference.viewport.height !== display.viewport.height) {
     return stop('UI_REPRO_VIEWPORT_MISMATCH', { registryViewport: reference.viewport, displayViewport: display.viewport });
   }
+  if (reference.browserZoom !== display.appZoomPercent || reference.devicePixelRatio !== display.devicePixelRatio ||
+      reference.fontFamily !== display.fontFamily) {
+    return stop('UI_REPRO_CAPTURE_AUTHORITY_MISMATCH', {
+      registry: { browserZoom: reference.browserZoom, devicePixelRatio: reference.devicePixelRatio, fontFamily: reference.fontFamily },
+      display: { appZoomPercent: display.appZoomPercent, devicePixelRatio: display.devicePixelRatio, fontFamily: display.fontFamily },
+    });
+  }
 
   const dummyRaw = readJson(inside(root, files.dummyData), 'UI_REPRO_DUMMY_DATA_INVALID');
   if (dummyRaw.error) return stop(dummyRaw.error);
   const dummy = normalizeDummyData(dummyRaw.value);
   if (!dummy) return stop('UI_REPRO_DUMMY_DATA_INVALID');
 
+  const visualRaw = readJson(inside(root, files.finalVisualDiffThresholds), 'UI_REPRO_FINAL_VISUAL_THRESHOLDS_INVALID');
+  if (visualRaw.error) return stop(visualRaw.error);
+  const finalVisualDiffThresholds = normalizeFinalVisualDiffThresholds(visualRaw.value);
+  if (!finalVisualDiffThresholds) return stop('UI_REPRO_FINAL_VISUAL_THRESHOLDS_INVALID');
+
+  const shapeRaw = readJson(inside(root, files.fixedShapeRegistry), 'UI_REPRO_FIXED_SHAPE_REGISTRY_INVALID');
+  if (shapeRaw.error) return stop(shapeRaw.error);
+  const fixedShapes = normalizeFixedShapeRegistry(shapeRaw.value, config);
+  if (!fixedShapes) return stop('UI_REPRO_FIXED_SHAPE_REGISTRY_INVALID');
+  if (!canonicalizationCoverageMatches(canonicalization, dimensions, fixedShapes)) {
+    return stop('UI_REPRO_CANONICALIZATION_COVERAGE_MISMATCH');
+  }
+  for (const component of fixedShapes) {
+    const r = component.targetRegion;
+    if (r.x + r.width > display.viewport.width || r.y + r.height > display.viewport.height) {
+      return stop('UI_REPRO_FIXED_SHAPE_REGION_OUT_OF_BOUNDS', { componentId: component.componentId });
+    }
+    const abs = inside(root, component.canonicalAsset);
+    if (!abs || !tracked(root, component.canonicalAsset)) {
+      return stop('UI_REPRO_FIXED_SHAPE_CANONICAL_NOT_TRACKED', { componentId: component.componentId, path: component.canonicalAsset });
+    }
+    const hash = fileSha256(abs);
+    if (!hash || hash !== component.sha256) {
+      return stop('UI_REPRO_FIXED_SHAPE_CANONICAL_HASH_MISMATCH', { componentId: component.componentId, path: component.canonicalAsset });
+    }
+    files['fixedShape:' + component.componentId] = component.canonicalAsset;
+    hashes['fixedShape:' + component.componentId] = hash;
+  }
+
   return {
-    ok: true, config, artifact, reference, files, hashes, dimensions, thresholds, display, dummy,
+    ok: true, config, artifact, reference, files, hashes, canonicalization, dimensions, thresholds, display, dummy,
+    finalVisualDiffThresholds, fixedShapes,
     protectedPaths: [...new Set(Object.values(files))].sort(),
   };
 }
@@ -247,7 +403,12 @@ export function preflight(input) {
     referenceImage: prepared.reference.image,
     referenceImageSha256: prepared.hashes.referenceImage,
     displayConditions: prepared.display,
+    canonicalizationStatus: prepared.canonicalization.status,
+    canonicalizationMethod: prepared.canonicalization.measurementMethod,
+    canonicalizationCoverage: prepared.canonicalization.coverage,
     checkCount: prepared.dimensions.length,
+    fixedShapeCount: prepared.fixedShapes.length,
+    finalVisualDiffThresholds: prepared.finalVisualDiffThresholds,
     protectedPaths: prepared.protectedPaths,
     protectedHashes: prepared.hashes,
     configPath: repoPath(input.configPath),
@@ -258,6 +419,10 @@ export function preflight(input) {
 export function verifyPreflightReceipt(receipt) {
   if (!receipt || receipt.receiptType !== 'UI_REPRODUCTION_PREFLIGHT_V1' || receipt.result !== 'PASS' || receipt.code !== 'UI_REPRODUCTION_PREFLIGHT_PASS') return false;
   if (!SHA40_RE.test(receipt.baseHead ?? '') || !SHA256_RE.test(receipt.referenceImageSha256 ?? '') || !Array.isArray(receipt.protectedPaths)) return false;
+  if (receipt.canonicalizationStatus !== 'COMPLETE' || receipt.canonicalizationMethod !== 'REFERENCE_IMAGE_MEASURED' ||
+      !exactKeys(receipt.canonicalizationCoverage, CANONICALIZATION_AREAS)) return false;
+  if (receipt.canonicalizationCoverage.layoutGeometry !== 'MEASURED' || receipt.canonicalizationCoverage.spacing !== 'MEASURED' ||
+      CANONICALIZATION_AREAS.some(area => !CANONICALIZATION_COVERAGE.has(receipt.canonicalizationCoverage[area]))) return false;
   return verifyReceiptHash(receipt);
 }
 
@@ -354,11 +519,87 @@ export function evaluate(input) {
 
   const checks = evaluateChecks(requiredChecks, prepared.thresholds, measurement);
   const failedIds = checks.filter(x => x.status === 'FAIL').map(x => x.id);
+  const isFinal = input.phase === 'FINAL_REALITY_CHECK';
+  let finalEvidence = {};
+
+  if (isFinal) {
+    const actualRel = repoPath(input.actualScreenshot);
+    const actualAbs = actualRel ? inside(root, actualRel) : null;
+    const actualSha256 = actualAbs ? fileSha256(actualAbs) : null;
+    if (!actualRel || !actualAbs || !actualSha256) return stop('UI_REPRO_ACTUAL_SCREENSHOT_INVALID');
+    if (actualRel === prepared.files.overlayProof || actualSha256 === prepared.hashes.overlayProof) {
+      return stop('UI_REPRO_OVERLAY_NOT_ACTUAL_SCREENSHOT');
+    }
+
+    const captureConditions = normalizeDisplay(input.captureConditions);
+    if (!captureConditions) return stop('UI_REPRO_CAPTURE_CONDITIONS_INVALID');
+    if (JSON.stringify(captureConditions) !== JSON.stringify(prepared.display)) {
+      return stop('UI_REPRO_CAPTURE_CONDITIONS_MISMATCH', { expected: prepared.display, actual: captureConditions });
+    }
+
+    const referenceAbs = inside(root, prepared.reference.image);
+    const visualComparison = runVisualDiff({
+      baselinePath: referenceAbs,
+      actualPath: actualAbs,
+      pixelDeltaThreshold: prepared.finalVisualDiffThresholds.pixelDeltaThreshold,
+      maxChangedRatio: prepared.finalVisualDiffThresholds.maxChangedRatio,
+      expectedViewport: prepared.display.viewport,
+      actualViewport: captureConditions.viewport,
+      stateId: measurement.stateId,
+    });
+    const visualStructure = verifyVisualDiffEvidenceStructure(visualComparison, measurement.stateId);
+    if (!visualStructure.ok) return stop('UI_REPRO_FINAL_VISUAL_EVIDENCE_INVALID', { reason: visualStructure.code });
+
+    const shapeChecks = [];
+    for (const component of prepared.fixedShapes) {
+      const shape = runVisualRegionDiff({
+        baselinePath: referenceAbs,
+        actualPath: actualAbs,
+        region: component.targetRegion,
+        pixelDeltaThreshold: component.pixelDeltaThreshold,
+        maxChangedRatio: component.maxChangedRatio,
+        stateId: measurement.stateId,
+        componentId: component.componentId,
+      });
+      const shapeStructure = verifyFixedShapeDiffEvidenceStructure(shape, measurement.stateId, component.componentId);
+      if (!shapeStructure.ok) {
+        return stop('UI_REPRO_FIXED_SHAPE_EVIDENCE_INVALID', { componentId: component.componentId, reason: shapeStructure.code });
+      }
+      shapeChecks.push({
+        ...shape,
+        version: component.version,
+        canonicalKind: component.canonicalKind,
+        canonicalAsset: component.canonicalAsset,
+        canonicalSha256: component.sha256,
+      });
+    }
+    const failedShapeIds = shapeChecks.filter(x => x.result !== 'PASS').map(x => x.componentId);
+    const fixedShapeComparison = {
+      result: failedShapeIds.length === 0 ? 'PASS' : 'FAIL',
+      code: failedShapeIds.length === 0 ? 'FIXED_SHAPES_PASS' : 'FIXED_SHAPES_FAIL',
+      componentCount: shapeChecks.length,
+      failedShapeIds,
+      checks: shapeChecks,
+    };
+    finalEvidence = {
+      captureConditionsMatched: true,
+      actualScreenshot: actualRel,
+      actualScreenshotSha256: actualSha256,
+      visualComparison,
+      fixedShapeComparison,
+    };
+  }
+
+  const finalVisualFail = isFinal && finalEvidence.visualComparison?.result !== 'PASS';
+  const finalShapeFail = isFinal && finalEvidence.fixedShapeComparison?.result !== 'PASS';
+  const passed = failedIds.length === 0 && !finalVisualFail && !finalShapeFail;
   const core = {
     schemaVersion: 1,
     receiptType: 'UI_MEASUREMENT_V1',
-    result: failedIds.length === 0 ? 'PASS' : 'FAIL',
-    code: failedIds.length === 0 ? 'UI_MEASUREMENT_PASS' : 'UI_MEASUREMENT_FAIL',
+    result: passed ? 'PASS' : 'FAIL',
+    code: isFinal
+      ? (passed ? 'UI_REPRODUCTION_FINAL_PASS' : 'UI_REPRODUCTION_FINAL_FAIL')
+      : (failedIds.length === 0 ? 'UI_MEASUREMENT_PASS' : 'UI_MEASUREMENT_FAIL'),
     phase: input.phase,
     stateId: measurement.stateId,
     artifactId: input.preflightReceipt.artifactId,
@@ -368,6 +609,7 @@ export function evaluate(input) {
     protectedFilesUnchanged: true,
     checks,
     failedIds,
+    ...finalEvidence,
   };
   const receipt = { ...core, receiptId: canonicalHash(core) };
 
@@ -375,7 +617,6 @@ export function evaluate(input) {
     const counts = consecutiveFailures(failedIds, prior);
     const repeated = [...counts.entries()].filter(([, count]) => count >= 3).map(([id, count]) => ({ id, count }));
     if (repeated.length > 0) return stop('REPEATED_CHECK_FAILURE', { repeated, measurementReceipt: receipt });
-    return receipt;
   }
   return receipt;
 }
@@ -383,6 +624,11 @@ export function evaluate(input) {
 export function verifyStagedEvidence(receipt, expectedStateId) {
   if (!verifyMeasurementReceipt(receipt) || receipt.result !== 'PASS' || receipt.stateId !== expectedStateId || receipt.protectedFilesUnchanged !== true) {
     return { ok: false, code: 'UI_REPRODUCTION_RECEIPT_INVALID' };
+  }
+  if (receipt.phase === 'FINAL_REALITY_CHECK' &&
+      (receipt.captureConditionsMatched !== true || receipt.visualComparison?.result !== 'PASS' ||
+       receipt.fixedShapeComparison?.result !== 'PASS')) {
+    return { ok: false, code: 'UI_REPRODUCTION_FINAL_VISUAL_EVIDENCE_INVALID' };
   }
   return { ok: true, code: 'UI_REPRODUCTION_RECEIPT_VALID', receiptId: receipt.receiptId };
 }

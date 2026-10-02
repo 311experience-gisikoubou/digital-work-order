@@ -669,12 +669,28 @@
 
     
 <!-- 歯式図インタラクション -->
+<style id="tooth-state-stage2-style">
+  .mode-btn[data-mode="abutment"] .dot { background:#2563a8; }
+  .mode-btn[data-mode="abutment"].active { background:#2563a8; border-color:#2563a8; color:#fff; }
+  .tooth.abutment { background:rgba(37,99,168,.10); border-color:#2563a8; color:#1d4f91; box-shadow:inset 0 0 0 1px rgba(37,99,168,.18); }
+  .tooth.caution { outline:2px dashed #dd7700; outline-offset:2px; }
+  .tooth-el.abutment { fill:rgba(37,99,168,.22); stroke:#2563a8; stroke-width:2.5; }
+  .tooth-el.caution { stroke:#dd7700; stroke-width:2.5; stroke-dasharray:5 3; }
+  .tooth-el.caution:not(.missing):not(.abutment) { fill:rgba(221,119,0,.18); }
+  .tooth-el.missing.caution { fill:rgba(204,34,34,.28); }
+  .tooth-el.abutment.caution { fill:rgba(37,99,168,.22); }
+  .tooth-stamp.abutment { fill:#1d4f91; }
+  .tooth-caution-mark { font-size:15px; text-anchor:middle; dominant-baseline:middle; pointer-events:none; font-weight:900; fill:#b06010; opacity:0; }
+  .tooth-caution-mark.show { opacity:1; }
+  .rl.abutment { color:#2563a8; }
+</style>
 <div style="margin-top:16px;">
   <div style="font-size:11px;color:var(--text-secondary);letter-spacing:0.1em;margin-bottom:8px;text-align:center;">🦷 歯 式 図（クリックで記録）</div>
 
   <!-- ツールバー -->
   <div class="tooth-toolbar">
     <button class="mode-btn active" data-mode="missing"><span class="dot"></span>欠損</button>
+    <button class="mode-btn" data-mode="abutment"><span class="dot"></span>支台歯</button>
     <button class="mode-btn" data-mode="caution"><span class="dot"></span>要注意</button>
     <button class="mode-btn" data-mode="clear" id="clearBtn"><span class="dot"></span>クリア</button>
     <button class="mode-btn" data-mode="edit"><span class="dot"></span>🖊 座標修正</button>
@@ -726,6 +742,7 @@
   <div class="tooth-result-panel">
     <div class="result-title">記録された歯</div>
     <div class="result-row"><div class="rl missing">欠損</div><div id="r-missing"><span class="re">—</span></div></div>
+    <div class="result-row"><div class="rl abutment">支台歯</div><div id="r-abutment"><span class="re">—</span></div></div>
     <div class="result-row"><div class="rl caution">要注意</div><div id="r-caution"><span class="re">—</span></div></div>
     <div class="btn-row">
       <button class="btn-action btn-reset" onclick="resetAll()">全てリセット</button>
@@ -831,9 +848,12 @@
     </div>
   </div>
 
-  <!-- 受注一覧反映ボタン -->
-  <div class="submit-area">
+  <!-- 下書き / 受注一覧反映 -->
+  <div class="submit-area" style="gap:12px;flex-wrap:wrap;align-items:center;">
+    <button type="button" class="btn-secondary" id="draft-save-btn">下書き保存</button>
+    <button type="button" class="btn-secondary" id="draft-discard-btn">下書きを破棄</button>
     <button class="submit-btn" id="submit-btn">受注一覧へ反映する　→</button>
+    <span id="draft-local-note" style="font-size:12px;opacity:.72;">下書きはこの端末内に保存されます。不要になったら「下書きを破棄」で削除してください。</span>
   </div>
   </div><!-- /clinic-form-content -->
 
@@ -928,6 +948,8 @@
 <script src="tooth-chart.js"></script>
 <script src="validate.js"></script>
 <script src="app.js"></script>
+<script src="app/tooth-state.js"></script>
+<script src="app/draft-persistence.js"></script>
 <script src="delivery-intake-export.js"></script>
 <script src="orders.js"></script>
 <script src="modal.js"></script>

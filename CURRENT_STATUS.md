@@ -3,29 +3,31 @@
 このファイルは、プロジェクトの「いまどこか」を短く復元するための現在地点の正本です。
 仕様書・履歴・議事録を複製せず、製品・主要タスクの安定した現在地だけを保ちます。
 
-- Status: `IDLE`
-- Current phase: `primary completion criteria satisfied; maintenance/backlog only`
+- Status: `ACTIVE`
+- Current phase: `Phase 2 input/save/output specification canonicalized; implementation pending`
 - Active product Issue: `NONE`
-- Active product PR: `NONE`
-- Last completed product work: `Issue #119: media attachment local persistence (OPFS + IndexedDB) and workOrderRef binding`
+- Active product PR: `#120 Draft/open: media attachment local persistence Phase 2; unmerged reuse candidate`
+- Last completed product work: `Issue #117 / PR #118: iPad media attachment UI Phase 1`
 - Current blocker: `NONE`
-- Next action: `no completion-blocking work; address B/C backlog only when an explicit business need appears`
-- PC-free work: `maintenance/backlog only`
-- PC-required work: `NONE`
-- User action required: `NO`
+- Next action: `implement the Phase 2 canonical specification in minimal verified stages and reconcile PR #120 without treating it as merged`
+- PC-free work: `spec review / GitHub audit`
+- PC-required work: `implementation, automated tests, browser checks, final iPad subjective verification`
+- User action required: `NO until a genuine business choice, real-device subjective check, or merge authorization is needed`
 - Merge authorized: `NO`
-- Last product-state update: `2026-09-25`
+- Last product-state update: `2026-10-02`
 
 ## Optional short notes
 
-- 完成条件と残件A〜F分類は `docs/completion-roadmap.md` を正本とする。Issue #91の公開入口検証まで完了し、現在確認済みの完成必須A項目は0件。
-- `state.orders` is restored from same-tab `sessionStorage` only after strict validation; no long-term order persistence is added.
-- 同一タブ再読み込みでは最後に開いていた `clinic` / `lab` 画面もallowlist検証後に復元する。不正値やstorage利用不可時は `clinic` へ戻す。
-- 受注1件以上では画面内の一時受注警告を表示する。対応ブラウザでは `beforeunload` も有効化するが、iPad Safariでは標準ダイアログ表示を保証しない。
-- 紙指示書はブラウザ内ローカルOCRを補助機能として維持し、紙画像を見ながらの手入力を主経路とする。
-- OCR承認反映の4条件成立後だけ、一時画像を安全に自動破棄する。
-- 参考資料メディアはOPFS+IndexedDBへ端末内保存され、受注確定時にcanonical `workOrderRef` へ紐付く（外部送信なし）。iPad Safariで写真撮影→再読込復元→削除→再読込で非復活を実機確認済み。音声のHTTPS実機確認はRelease Gateとして保留。
-- `workOrderRef` と納品アプリ取り込み用JSON exportは実装済み。外部クラウド送信は追加していない。
+- Phase 2の入力・保存・出力正本は `docs/phase2-input-save-output-spec.md`、項目表は `docs/phase2-field-matrix.md`、schemaは `docs/phase2-schema-v1.md`、互換/変更範囲は `docs/phase2-compatibility-change-scope.md`。
+- 採用済みUI配置と歯式同期基準は `docs/canonical/` の2 JSONを正本とし、歯形態を描き直さない。
+- U01: 編集中フォームは端末内draft 1件としてタブ/ブラウザ終了後も再開可能にする仕様。**未実装**。
+- U02: 「この内容で発行する」は受注確定 + PDF作成。技工所PC送信完了ではない。
+- U03/U04: missing/abutmentは排他、cautionは独立。既存歯形態を維持する。
+- U06: B5上下2面を維持し、8番歯・模型発送予定日・急ぎ料金をPDFへ反映する。既存休日/料金式は変更しない。
+- 現行 `state.orders` は同一タブ `sessionStorage` 復元のまま。Phase 2のdraft永続化と発行済み受注の長期DB化を混同しない。
+- PR #120は未マージ。OPFS/IndexedDBによるメディア保存とdraft→workOrderRef紐付けを再利用候補とするが、統合HEADで再検証する。
+- 紙指示書は既存のブラウザ内ローカルOCR + 人間確認 + 成功後破棄を維持する。
+- stable `workOrderRef` と `digital-work-order-intake-v1` は維持する。外部クラウド送信はまだ追加しない。
 
 ## Rules
 
