@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "intakeId": "media-transfer-phase3-20261002",
+  "intent": "メディア転送ロードマップ Phase 3として、発行済み受注と添付を外部送信前にローカルで安全な転送パッケージへまとめ、完全性検証とチャンク再開状態を扱えるようにする。",
+  "scope": "docs/design.md §15.6/§15.10に従い、workOrderRef単位のwork-order.json・manifest.json・media package、SHA-256、chunk metadata、欠落/順序入替/差替え検出、最後に確認済みチャンクからの再開状態、synthetic testsを実装する。クラウド送信、暗号/署名/鍵/認証、PC自動受信、実データ、追加課金は除外する。",
+  "assumptions": [
+    "Phase 0〜2の既存実装とworkOrderRef/OPFS+IndexedDBを再利用する。",
+    "Phase 3はローカル処理のみで、ネットワーク送信APIを追加しない。",
+    "新規外部依存を追加せず、Web Crypto/標準APIと既存test環境を優先する。"
+  ],
+  "humanQuestions": [],
+  "solutionReview": {
+    "options": [
+      {
+        "id": "minimal-local-package",
+        "decision": "MINIMAL_CHANGE",
+        "summary": "既存の発行済み受注とReferenceMediaManagerを入力として再利用し、Phase 3専用の小さなローカルpackage/integrity層だけを追加する。",
+        "assessment": {
+          "safety": "外部送信・実データ・鍵・課金を増やさず、fail-closed完全性検証だけを追加する。",
+          "accuracy": "manifestとSHA-256/chunk metadataを単一生成経路に集約し、欠落・改変・順序異常を自動検出する。",
+          "simplicity": "既存保存層を変更せず、転送前の純粋なpackage層に限定する。",
+          "humanOperations": "人間の新しい日常操作は追加しない。",
+          "maintenance": "外部サービス・新規package依存・常駐processを増やさない。",
+          "reversibility": "新しいPhase 3層と呼び出し箇所だけを戻せばPhase 2状態へ戻せる。",
+          "existingOverlap": "既存workOrderRef、発行snapshot、OPFS/IndexedDB添付管理を再利用し重複保存を作らない。"
+        }
+      },
+      {
+        "id": "new-transfer-service-now",
+        "decision": "EXTEND_REQUIRED",
+        "summary": "Phase 3と同時にクラウド中継や常駐受信サービスまで作る。",
+        "assessment": {
+          "safety": "未承認の外部通信・認証・鍵・実データ境界を早期に増やすため不適。",
+          "accuracy": "Phase 3の完全性検証とPhase 4〜6の責務が混ざり切り分けが難しい。",
+          "simplicity": "構成要素が大幅に増える。",
+          "humanOperations": "初期設定・認証・運用管理が増える。",
+          "maintenance": "クラウド・常駐サービス・資格情報管理が増える。",
+          "reversibility": "複数の外部状態を持つため戻しにくい。",
+          "existingOverlap": "既存ロードマップの段階分離と重複する。"
+        }
+      }
+    ],
+    "selectedOptionId": "minimal-local-package",
+    "extendRationale": null
+  },
+  "riskSignals": {
+    "protectedOrPatientData": false,
+    "externalCommunication": false,
+    "addedCostOrPaidUsage": false,
+    "authOrIdentity": false,
+    "productionImpact": false,
+    "realDataImpact": false
+  },
+  "status": "APPROVED",
+  "decisionId": "U07"
+}

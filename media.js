@@ -586,6 +586,30 @@
       }
     });
 
+    // Phase 3: 非UIの転送パッケージ作成ヘルパー。ボタン・自動実行・送信は持たない。
+    // 既存キュー・persistence.restoreOwner(workOrderRef) を再利用し、MediaTransferPackageへ委譲する。
+    // persistence不可／restoreが欠落・不正・破損を報告した場合はfail closed（部分的なパッケージを作らない）。
+    helpers.prepareTransferPackage = (workOrder, options) => enqueue(async () => {
+      if (!persistenceReady || !persistence || typeof persistence.restoreOwner !== 'function') {
+        throw storageError('MEDIA_STORAGE_UNAVAILABLE', UNSUPPORTED_MESSAGE);
+      }
+      const transferApi = global.MediaTransferPackage;
+      if (!transferApi || typeof transferApi.buildPackage !== 'function') {
+        throw storageError('MEDIA_STORAGE_UNAVAILABLE', UNSUPPORTED_MESSAGE);
+      }
+      const workOrderRef = workOrder && workOrder.workOrderRef;
+      let restored;
+      try {
+        restored = await persistence.restoreOwner(workOrderRef);
+      } catch (error) {
+        throw storageError('MEDIA_STORAGE_RESTORE_FAILED', (error && error.userMessage) || UNRENDERED_MESSAGE);
+      }
+      if (restored.missing > 0 || restored.invalid > 0 || restored.corrupt > 0) {
+        throw storageError('MEDIA_STORAGE_RESTORE_FAILED', UNRENDERED_MESSAGE);
+      }
+      return transferApi.buildPackage(workOrderRef, workOrder, restored.items, options);
+    });
+
     render();
     if (persistenceReady) {
       enqueue(async () => {
