@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "intakeId": "media-transfer-phase8-20261003",
+  "intent": "Phase 7で技工所PCへverified local保存した指示書・写真・動画・音声を、技工所PCで安全に一覧・閲覧し、既存の納品・請求管理アプリへ重複DBを作らず引き渡せるようにする。",
+  "scope": "既存Gatewayのopaque inboxを正式な受信済みローカル保存先として再利用し、localhost限定のread-only一覧/詳細/メディア閲覧、既存digital-work-order-intake-v1の生成・引渡し、保存/保管/backup境界の文書化、synthetic testsを実装する。DWO側SQLite、新しい独立アプリ、納品・請求DBへの直接書込み、自動archive/削除、外部cloud backup、本番cloud/Windows有効化、実患者・実医院データは含めない。",
+  "assumptions": [
+    "Phase 6/7の<inboxRoot>/<opaque jobId>/をPhase 8 v1の正式な受信済みローカル保存単位として維持し、患者名・医院名・workOrderRefをdirectory/file名へ使わない。",
+    "閲覧UIはGatewayの一部として127.0.0.1へだけbindし、外部LAN/Internetへ公開しない。",
+    "digital-work-order側へSQLiteを追加せず、業務DBと重複管理はdental-delivery-billing既存SQLiteの責務とする。",
+    "納品・請求連携は既存digital-work-order-intake-v1を生成し、既存の取込・確認画面へ渡す。別RepoのDB/APIへ直接書き込まない。",
+    "Phase 8では受信済みデータを自動削除しない。保管年数・archive先・backup先とアクセス管理は本番運用ポリシーとして別途確定し、不可逆な削除を先行実装しない。",
+    "backupを行う場合は受信済みinbox全体をファイル単位で扱うが、平文の保護対象データを含むため本番backup先の採用は別の人間承認対象とする。",
+    "新しい外部dependency/serviceは追加せず、Node.js標準機能と既存コードを優先する。"
+  ],
+  "humanQuestions": [],
+  "solutionReview": {
+    "options": [
+      {
+        "id": "reuse-gateway-local-viewer-intake-handoff",
+        "decision": "MINIMAL_CHANGE",
+        "summary": "既存Gatewayへlocalhost read-only viewerを追加し、既存受信inboxとdigital-work-order-intake-v1を再利用する。",
+        "assessment": {          "safety": "平文は既存の技工所PC内に留まり、localhost限定・read-onlyで新しい外部経路や破壊操作を増やさない。",
+          "accuracy": "Phase 6/7で検証済みのreceipt/manifest/work-orderを読み、既存intake契約をそのまま使うため二重変換を避けられる。",
+          "simplicity": "新アプリ・新DB・新serviceを作らずGatewayに不足する閲覧とhandoffだけを追加する。",
+          "humanOperations": "受信後はブラウザで一覧/メディアを確認し、必要時だけ既存納品アプリ用JSONを渡す。",
+          "maintenance": "保存責務はGateway、業務DBはdental-delivery-billingに分離したまま保てる。",
+          "reversibility": "viewerを停止してもPhase 6/7の受信保存と既存JSON手渡し経路は維持できる。",
+          "existingOverlap": "Gateway local-store、workOrderRef、delivery-intake-v1、dental-delivery-billing既存intake SQLite/確認UIを再利用する。"
+        }
+      },
+      {
+        "id": "new-viewer-app-and-dwo-sqlite",
+        "decision": "EXTEND_REQUIRED",
+        "summary": "別のPC閲覧アプリとdigital-work-order専用SQLiteを新設する。",
+        "assessment": {
+          "safety": "保護データのコピーとDB境界が増え、削除・backup・権限管理の対象が増える。",
+          "accuracy": "受信inboxとDBの同期ずれ・重複登録が新たに発生しうる。",
+          "simplicity": "独立アプリとDBを追加するため最小構成ではない。",
+          "humanOperations": "追加アプリの起動・更新・障害対応が必要になる。",
+          "maintenance": "dental-delivery-billing既存SQLiteと責務が重複する。",
+          "reversibility": "移行・DB廃止作業が必要になり戻しにくい。",
+          "existingOverlap": "既存Gatewayと納品・請求DBの機能を重複実装するため採用しない。"
+        }
+      },
+      {
+        "id": "direct-cross-repo-db-api-write",
+        "decision": "EXTEND_REQUIRED",
+        "summary": "Gatewayからdental-delivery-billingのDB/APIへ自動で直接書き込む。",
+        "assessment": {          "safety": "書込み権限・跨Repo障害・誤登録時の復旧境界が増える。",
+          "accuracy": "自動化は可能だが、既存intake検証/確認フローを迂回すると業務確定前の誤取込リスクがある。",
+          "simplicity": "別プロセス間APIまたはDB接続設定が必要になり、現段階では不要な結合を増やす。",
+          "humanOperations": "平常時の手数は減るが、設定・障害時対応が複雑になる。",
+          "maintenance": "両Repoのversion互換と接続契約を継続管理する必要がある。",
+          "reversibility": "自動書込み停止時に重複/途中状態の整理が必要になる。",
+          "existingOverlap": "既存のdigital-work-order-intake-v1取込・確認画面で目的を達成できるためPhase 8 v1では採用しない。"
+        }
+      }
+    ],
+    "selectedOptionId": "reuse-gateway-local-viewer-intake-handoff",
+    "extendRationale": null
+  },
+  "riskSignals": {
+    "protectedOrPatientData": true,
+    "externalCommunication": false,
+    "addedCostOrPaidUsage": false,
+    "authOrIdentity": false,
+    "productionImpact": true,
+    "realDataImpact": true
+  },
+  "status": "APPROVED",
+  "decisionId": "U12"
+}

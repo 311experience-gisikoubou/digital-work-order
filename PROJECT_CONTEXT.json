@@ -229,9 +229,22 @@
         "artifactIds": [
           "digital-work-order-phase2-business-v1"
         ]
+      },
+      {
+        "id": "U12",
+        "topic": "project-intake:media-transfer-phase8-20261003",
+        "status": "CONFIRMED",
+        "summary": "Phase 7完了後の次マイルストーンとしてPhase 8を進める。技工所PCの既存Gatewayとopaque inboxを再利用し、localhost限定のread-only閲覧、写真・動画・音声の参照、既存digital-work-order-intake-v1による納品・請求管理アプリへの引渡しを実装する。digital-work-order側にSQLiteや独立アプリを新設せず、自動archive/削除、本番backup先、本番cloud/Windows有効化、実患者データは別工程とする。",
+        "decidedAt": "2026-10-03",
+        "source": "EXPLICIT_HUMAN",
+        "type": "BUSINESS",
+        "replaces": null,
+        "artifactIds": [
+          "digital-work-order-phase2-business-v1"
+        ]
       }
     ],
-    "currentState": "U01〜U11はCONFIRMED。Phase 6はmainへmerge済み。Issue #144でPhase 7（受領ACKとcloud暗号データ即時削除）を開始する。",
-    "nextAction": "Phase 7 intakeをgateへ通し、per-job ACK capability、retry-safe delete core、Gateway ACKをsynthetic data限定で実装する。"
+    "currentState": "U01〜U12はCONFIRMED。Phase 7はmainへmerge済み。次はPhase 8（技工所PCのローカル閲覧と納品・請求連携）を進める。",
+    "nextAction": "Phase 8 intakeをgateへ通し、既存Gatewayのlocalhost read-only viewerとdigital-work-order-intake-v1 handoffをsynthetic data限定で実装する。"
   }
 }
