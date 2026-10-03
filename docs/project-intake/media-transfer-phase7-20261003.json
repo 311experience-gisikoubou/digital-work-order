@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "intakeId": "media-transfer-phase7-20261003",
+  "intent": "Phase 6で技工所PCがverified local保存したjobだけを受領ACKし、Cloud relayの暗号objectと最小job metadataを通常経路で即時削除する。",
+  "scope": "per-job ACK capability発行/hash保存、receiver download planへのcapability追加、receiver ACK API、ready→deleting遷移、exact object delete、全object不存在確認後のjob metadata削除、Gatewayのlocal保存成功後ACK、already-stored再ACK、失敗時retry、synthetic E2E/security testsを実装する。本番deploy/billing/IAM、実patient/clinic data、Phase 8 archive、iPad元データ削除は含めない。",
+  "assumptions": [
+    "長期receiver bearer tokenだけでは削除を許可せず、download planごとに32-byte random ACK capabilityを発行しserverにはSHA-256 hashだけを最大4件保持する。",
+    "Gatewayはpersist結果がverified storedまたはreceipt整合済みalready-storedのときだけACKする。download/decrypt/signature/hash/persist失敗時はACKしない。",
+    "ACK serverはreceiver bearer auth、recipientKeyId、jobId、job専用ACK capability、statusをfail closedで確認する。",
+    "削除対象はjob.objectSpecsに記録済みのopaque exact object pathだけ。prefix列挙やbucket全体削除は行わない。",
+    "削除はreadyからdeletingへtransaction遷移してから行い、object不存在は成功扱い、全object不存在確認前にjob metadataを削除しない。",
+    "途中失敗はdeleting metadataを残し、同じACKの再試行で続行できる。unrelated objectは触らない。",
+    "30日Lifecycle Deleteは異常時の安全網として維持し、通常経路はPC ACK後の即時削除とする。",
+    "本番Cloud/DPAPI secret設定や実データは変更せず、synthetic/local fakeで検証する。"
+  ],
+  "humanQuestions": [],
+  "solutionReview": {
+    "options": [
+      {
+        "id": "capability-two-factor-ack-delete",
+        "decision": "EXTEND_REQUIRED",
+        "summary": "receiver bearer認証とjob専用ACK capabilityの二重条件で、retry-safe exact-object削除を行う。",
+        "assessment": {
+          "safety": "長期token単独では削除できず、job専用capability hashとexact path削除で誤削除範囲を狭める。",
+          "accuracy": "Phase 6 local receipt成功後だけACKし、deleting状態と不存在確認で途中失敗を安全に再試行できる。",
+          "simplicity": "既存receiver API/GatewayへACK 1経路を追加し、別認証基盤は増やさない。",
+          "humanOperations": "日常操作は増えずGatewayが自動ACKする。本番設定追加は既存receiver secretの範囲内。",
+          "maintenance": "pure ack coreとprovider adapterを分離し、Phase 5/6構造を再利用する。",
+          "reversibility": "ACKを無効化しても30日Lifecycle安全網とPhase 6受信は維持できる。",
+          "existingOverlap": "Phase 6 receiver auth、jobStore、objectSpecs、local receipt、pollingを再利用する。"
+        }
+      },
+      {
+        "id": "receiver-token-only-delete",
+        "decision": "MINIMAL_CHANGE",
+        "summary": "既存receiver bearer tokenだけでjob削除を許可する。",
+        "assessment": {
+          "safety": "長期token漏洩時にready job削除が可能になり権限が強すぎる。",
+          "accuracy": "実装は短いがjobごとのlocal保存成功との結び付きが弱い。",
+          "simplicity": "最小変更だが安全境界を弱める。",
+          "humanOperations": "追加操作はない。",
+          "maintenance": "コード量は少ない。",
+          "reversibility": "後でcapability追加が必要になる。",
+          "existingOverlap": "既存receiver authをそのまま使えるが採用しない。"
+        }
+      }
+    ],
+    "selectedOptionId": "capability-two-factor-ack-delete",
+    "extendRationale": "Cloud削除は不可逆なので、長期receiver token単独ではなく、download plan時に発行したjob専用capabilityと組み合わせてlocal保存成功後のACKへ限定する。"
+  },
+  "riskSignals": {
+    "protectedOrPatientData": true,
+    "externalCommunication": true,
+    "addedCostOrPaidUsage": true,
+    "authOrIdentity": true,
+    "productionImpact": true,
+    "realDataImpact": true
+  },
+  "status": "APPROVED",
+  "decisionId": "U11"
+}
