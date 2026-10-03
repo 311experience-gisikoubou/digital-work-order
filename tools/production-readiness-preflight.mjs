@@ -32,12 +32,18 @@ const OBVIOUS_SECRET_PATH_CANDIDATES = [
 
 const SHALLOW_SCAN_DIRS = ['.', 'cloud', 'gateway', 'gateway/windows'];
 
+// Extension-aware runtime secret/config artifact patterns.
+// These intentionally require a runtime-data extension (e.g. .json) so that
+// legitimate tracked *source* scripts whose filename merely contains a
+// secret-related word (for example gateway/windows/protect-receiver-secrets.ps1)
+// are never matched. Only actual generated/runtime artifacts are flagged.
 const SUSPICIOUS_FILENAME_PATTERNS = [
-  /service[-_]?account/i,
-  /adminsdk.*\.json$/i,
-  /\.dpapi\.json$/i,
-  /receiver-secrets/i,
-  /recipient-backup/i,
+  /^.*service[-_]?account.*\.json$/i,
+  /^.*adminsdk.*\.json$/i,
+  /^.*\.dpapi\.json$/i,
+  /^.*receiver-secrets.*\.json$/i,
+  /^.*recipient-backup.*\.json$/i,
+  /^.*credential.*\.json$/i,
 ];
 
 function pass(id, message) {

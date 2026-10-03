@@ -218,6 +218,46 @@ withTempRepo((root) => {
   record('tracked secret path produces tracked-secret-path STOP finding', Boolean(finding) && finding.status === 'STOP');
 });
 
+// ---- Case 6b: legitimate tracked source script with a secret-related
+// filename (gateway/windows/protect-receiver-secrets.ps1) must NOT be
+// flagged as a tracked secret-shaped path. ----
+
+withTempRepo((root) => {
+  buildBaselineRepo(root);
+  writeText(
+    join(root, 'gateway', 'windows', 'protect-receiver-secrets.ps1'),
+    '# reviewed source script, not a runtime secret artifact\n'
+  );
+  const result = runPreflight(root);
+  record(
+    'legitimate protect-receiver-secrets.ps1 source script does not cause STOP',
+    result.status === 'PASS',
+    JSON.stringify(result.findings.filter((f) => f.status === 'STOP'))
+  );
+  const finding = findingFor(result, 'tracked-secret-path');
+  record(
+    'legitimate protect-receiver-secrets.ps1 source script keeps tracked-secret-path PASS',
+    Boolean(finding) && finding.status === 'PASS'
+  );
+});
+
+// ---- Case 6c: an actual runtime receiver-secrets DPAPI JSON artifact must
+// still fail closed. ----
+
+withTempRepo((root) => {
+  buildBaselineRepo(root);
+  writeJson(join(root, 'gateway', 'windows', 'receiver-secrets.dpapi.json'), {
+    protectedBlob: 'not-a-real-secret-placeholder',
+  });
+  const result = runPreflight(root);
+  record('actual receiver-secrets.dpapi.json runtime artifact overall status is STOP', result.status === 'STOP');
+  const finding = findingFor(result, 'tracked-secret-path');
+  record(
+    'actual receiver-secrets.dpapi.json runtime artifact produces tracked-secret-path STOP finding',
+    Boolean(finding) && finding.status === 'STOP'
+  );
+});
+
 // ---- Case 7: missing required file fails closed ----
 
 withTempRepo((root) => {
