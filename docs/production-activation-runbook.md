@@ -53,15 +53,16 @@ Each stage below has exactly one marker:
 
 ## Stage 1 — Exact Firebase/Google Cloud project and billing identity
 
-**Marker: `HUMAN_APPROVAL_REQUIRED`, then `HUMAN_INTERACTIVE`**
+**Marker: `HUMAN_APPROVAL_REQUIRED`**
 
 - A human decides and records, outside this repository, the exact target Firebase
   project ID / Google Cloud project ID that will host the relay function, and
   confirms it is dedicated to this relay (not shared with an unrelated
   application).
-- A human confirms, by logging into the Firebase/Google Cloud console directly,
-  that Blaze billing is the intended plan for that project and is already enabled
-  or is being enabled intentionally by that human.
+- As part of recording that decision, the same human confirms it by logging into
+  the Firebase/Google Cloud console directly (a human-interactive action with no
+  separate AI-executable path) that Blaze billing is the intended plan for that
+  project and is already enabled or is being enabled intentionally by that human.
 - **Current billing fact (verified externally on 2026-10-03):** Blaze is a
   pay-as-you-go plan. Re-check the official Firebase/Google Cloud billing
   documentation immediately before activation, because plan mechanics and
@@ -72,11 +73,12 @@ Each stage below has exactly one marker:
 
 ## Stage 2 — Spend controls
 
-**Marker: `HUMAN_APPROVAL_REQUIRED`, then `HUMAN_INTERACTIVE`**
+**Marker: `HUMAN_APPROVAL_REQUIRED`**
 
-- A human configures a Google Cloud budget alert on the confirmed billing account,
-  choosing the yen amount and notification channel as a business decision. This
-  runbook does not select that amount.
+- A human decides the yen amount and notification channel, then configures the
+  resulting Google Cloud budget alert on the confirmed billing account directly
+  (a human-interactive console action with no separate AI-executable path), as a
+  business decision. This runbook does not select that amount.
 - **Current billing fact (verified externally on 2026-10-03):** budget alerts are
   notification-only; they do not stop or cap spend by themselves. Firebase does
   offer a Cloud Functions spend cap control (in Preview, as of the verification
@@ -93,17 +95,18 @@ Each stage below has exactly one marker:
 
 ## Stage 3 — Dedicated relay bucket: location, UBLA, public access prevention, soft delete, lifecycle, CORS
 
-**Marker: `HUMAN_APPROVAL_REQUIRED` for the exact bucket name, then `HUMAN_INTERACTIVE` for creation, then `AFTER_APPROVAL_AI_CAN_EXECUTE` for the remaining confirmed-bucket configuration commands**
+**Marker: `HUMAN_APPROVAL_REQUIRED`**
 
 - A human chooses and records the exact, globally unique bucket name dedicated to
   this relay (never a bucket shared with unrelated application data), and
   confirms the Tokyo (`asia-northeast1`) location requirement from
-  `cloud/README.md`.
-- A human (or, once the human has approved the exact bucket name, an AI agent
-  acting on that approval) creates the bucket using the exact command already
-  documented in `cloud/README.md` ("Bucket creation"), with
-  uniform-bucket-level-access and public-access-prevention enabled at creation
-  time.
+  `cloud/README.md`. No AI-executed command against this bucket may run until
+  this exact bucket identity is approved and recorded.
+- Once that exact bucket name is approved, bucket creation itself is a
+  human-interactive console/CLI action (or, after approval, may be performed by
+  a human); it uses the exact command already documented in `cloud/README.md`
+  ("Bucket creation"), with uniform-bucket-level-access and
+  public-access-prevention enabled at creation time.
 - **Current Cloud Storage fact (verified externally on 2026-10-03):** soft delete
   is enabled by default for newly created buckets, with a 7-day default retention
   duration. This design intentionally disables soft delete only on this one
@@ -112,8 +115,10 @@ Each stage below has exactly one marker:
   bucket. Re-check the official Cloud Storage soft-delete documentation
   immediately before activation, since default behavior and retention duration
   can change.
-- After the exact bucket is confirmed and created, an AI agent may run the
-  already-reviewed, bucket-scoped commands from `cloud/README.md` for: disabling
+- After the exact bucket is confirmed and created, as a delegable sub-action
+  (`AFTER_APPROVAL_AI_CAN_EXECUTE`, not a change to this stage's single
+  `HUMAN_APPROVAL_REQUIRED` marker), an AI agent may run the already-reviewed,
+  bucket-scoped commands from `cloud/README.md` for: disabling
   soft delete on that one bucket, applying `cloud/storage-lifecycle.json` (30-day
   emergency deletion upper bound), and applying `cloud/storage-cors.json` (GitHub
   Pages production origin, `PUT` only). No command in this stage may use a
@@ -121,13 +126,14 @@ Each stage below has exactly one marker:
 
 ## Stage 4 — Least-privilege runtime IAM
 
-**Marker: `HUMAN_APPROVAL_REQUIRED`, then `HUMAN_INTERACTIVE`**
+**Marker: `HUMAN_INTERACTIVE`**
 
-- A human selects the Cloud Functions runtime service account and grants it only
-  the narrowest practical permissions described in `cloud/README.md` ("Phase 6/7
-  receiver IAM"): `storage.objects.get`, `storage.objects.delete` scoped to the
-  dedicated relay bucket, and `iam.serviceAccounts.signBlob` on the intended
-  signing service account only.
+- A human decides and records which permissions/role are granted (see the next
+  bullet), then personally selects the Cloud Functions runtime service account
+  and grants it only the narrowest practical permissions described in
+  `cloud/README.md` ("Phase 6/7 receiver IAM"): `storage.objects.get`,
+  `storage.objects.delete` scoped to the dedicated relay bucket, and
+  `iam.serviceAccounts.signBlob` on the intended signing service account only.
 - A human explicitly decides whether a predefined role (e.g. Service Account Token
   Creator) is acceptable given its broader scope, or whether a narrower custom
   role is used instead. This is a human policy decision, not an AI default.
@@ -176,13 +182,18 @@ Each stage below has exactly one marker:
 
 ## Stage 7 — Synthetic production-path end-to-end verification
 
-**Marker: `AFTER_APPROVAL_AI_CAN_EXECUTE` for triggering a synthetic run, `HUMAN_INTERACTIVE` for the lab-PC portion**
+**Marker: `HUMAN_INTERACTIVE`**
 
 - Using only synthetic, non-real data (no patient name, no real clinic identity),
   exercise the full Phase 5-7 path once against the now-deployed relay: signed
   upload, receiver discovery/download/decrypt/verify/local-save, and ACK-triggered
   exact-object deletion, exactly as already implemented and tested in
   `cloud/relay-core.mjs`, `cloud/receiver-core.mjs`, and `gateway/receiver-core.mjs`.
+  Triggering the upload/relay portion of this synthetic run is a delegable
+  sub-action that an AI agent may perform (`AFTER_APPROVAL_AI_CAN_EXECUTE`) once
+  Stages 1-6 are complete, but this stage's single primary marker remains
+  `HUMAN_INTERACTIVE` because the stage cannot be completed without the next
+  bullet.
 - The lab-PC side of this run (invoking `gateway/windows/run-receiver.ps1 -Once`)
   requires a human present at the lab PC, consistent with Phase 8's existing
   harmless-smoke precedent described in `CURRENT_STATUS.md`.
@@ -231,13 +242,13 @@ Each stage below has exactly one marker:
 | Stage | Topic | Marker |
 |---|---|---|
 | 0 | Repo/local readiness | AI_SAFE_PREP |
-| 1 | Exact project + billing identity | HUMAN_APPROVAL_REQUIRED → HUMAN_INTERACTIVE |
-| 2 | Spend controls | HUMAN_APPROVAL_REQUIRED → HUMAN_INTERACTIVE |
-| 3 | Dedicated relay bucket config | HUMAN_APPROVAL_REQUIRED → HUMAN_INTERACTIVE → AFTER_APPROVAL_AI_CAN_EXECUTE |
-| 4 | Least-privilege runtime IAM | HUMAN_APPROVAL_REQUIRED → HUMAN_INTERACTIVE |
+| 1 | Exact project + billing identity | HUMAN_APPROVAL_REQUIRED |
+| 2 | Spend controls | HUMAN_APPROVAL_REQUIRED |
+| 3 | Dedicated relay bucket config | HUMAN_APPROVAL_REQUIRED |
+| 4 | Least-privilege runtime IAM | HUMAN_INTERACTIVE |
 | 5 | Receiver token hash/key id + DPAPI | HUMAN_INTERACTIVE |
 | 6 | Scoped deploy | AFTER_APPROVAL_AI_CAN_EXECUTE |
-| 7 | Synthetic production-path E2E | AFTER_APPROVAL_AI_CAN_EXECUTE / HUMAN_INTERACTIVE |
+| 7 | Synthetic production-path E2E | HUMAN_INTERACTIVE |
 | 8 | Scheduled Task | HUMAN_INTERACTIVE |
 | 9 | Backup/retention policy | HUMAN_APPROVAL_REQUIRED (unresolved) |
 | 10 | Real-data go-live | HUMAN_APPROVAL_REQUIRED |
