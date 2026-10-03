@@ -502,6 +502,21 @@ Phase 6で技工所PCが復号・完全性確認・atomic local保存まで成�
 - job metadata削除後にACK responseが失われても、同じjobIdへの再ACKは「既にdeleted」として副作用なしで成功扱いにできる。
 - 本番Firebase/Google Cloud deploy、bucket/IAM/billing変更、receiver secret設定、実患者/実医院データ送信はPhase 7実装作業では行わない。
 
+### 15.16 Phase 8の実装事実（intake `media-transfer-phase8-20261003`）
+
+Phase 6/7で技工所PCへverified local保存した`<inboxRoot>/<opaque jobId>/`を、Phase 8でも正式な受信済みローカル保存単位としてそのまま再利用する。新しい独立アプリ・新しいDB・新しい外部dependency・cloud backup・自動archive削除は追加しない。
+
+- `gateway/viewer-core.mjs` が読み取り専用の検証ロジックを持つ。候補ディレクトリは既存job-id契約（`job_[A-Za-z0-9_-]+`）に一致する通常ディレクトリだけを対象とし、一時ディレクトリ（`.tmp-`接頭辞）やsymlink等の通常でないファイル種別は対象外。Phase 3の既存manifest validatorを再利用し、receipt.json・manifest.json・work-order.jsonの3者（workOrderRef・attachmentCount・work-order sha256）が一致し、各添付がmanifestと一致するサイズ・SHA-256で`media/`に存在することまで再確認してからジョブを表示対象にする。不整合・壊れたエントリはfail closedで一覧から除外し、件数のみ扱う。
+- `gateway/viewer-server.mjs` がNode.js標準`http`モジュールだけでlocalhost専用read-only HTTPサーバーを実装する。bindは`127.0.0.1`に固定し、host引数そのものを関数に持たせない。一覧・詳細・メディア配信のどの経路も`inboxRoot`配下へ書き込み・削除・rename操作を行わない。
+- メディア配信は検証済みmanifestのattachmentId→ファイル名対応だけを使い、URL由来の生パスやファイル名を直接ファイルシステムへ渡さない。レスポンスには`X-Content-Type-Options: nosniff`と`Cache-Control: no-store`を付与する。
+- 詳細表示はこの技工所PC上のlocalhostが意図された平文の到達点であるため、work-order.jsonの内容（患者名・医院名含む）をブラウザ上に表示できる。ただしサーバー側コード・CLIは、そのプロセスの標準出力・標準エラーへpatient/clinic/work-order内容を一切出力しない。
+- `gateway/viewer-client.js` はブラウザ側で`textContent`と`createElement`による安全なDOM構築だけを使い、取得したJSONから直接HTML文字列を組み立てない（`innerHTML`未使用）。
+- `gateway/delivery-intake-reuse.mjs` が既存`delivery-intake-export.js`の`buildDigitalWorkOrderIntake` / `buildDeliveryIntakeFilename`をそのまま再利用し、第2のschemaを発明しない。`GET /api/jobs/<jobId>/delivery-intake.json`は既存`digital-work-order-intake-v1`形式のJSONを既存ファイル名規則（`dwo_<uuid>.json`）でダウンロードさせるだけで、dental-delivery-billing側のDB/APIへ直接書き込まない。既存の取込・確認画面への受け渡しは人間の操作に委ねる。
+- `gateway/inbox-root.mjs` に既存の既定`inboxRoot`解決ロジックを抽出し、Phase 6/7の`receiver.mjs`とPhase 8の`gateway/viewer-config.mjs`が同じ既定値・同じ解決規則を共有する。viewer側はreceiver tokenやrecipient backup passphraseを必要としない。
+- `gateway/viewer.mjs`と`gateway/windows/run-viewer.ps1`はlocalhost URL（例: `http://127.0.0.1:4850/`）だけを標準出力へ表示し、受信済みjob件数や業務データを表示しない。
+- 保存責務の境界: digital-work-order側のinboxはPhase 8時点でもv1の正式な受信済みローカル保存先であり、SQLiteを持たない。重複DBや業務確定管理はdental-delivery-billing既存SQLiteの責務のままとする。
+- Phase 8では受信済みデータの自動削除・自動archiveを実装しない。保管年数・backup先・アクセス管理は本番運用ポリシーとして別途人間が確定する。ファイルシステムbackupを行う場合、inbox全体に平文の保護対象データ（患者名・医院名等）が含まれるため、backup先の採用そのものは別の人間承認対象であり、本Phaseでは具体的なbackup先・自動化を実装・選定しない。
+- 本番cloud/Windows自動起動の有効化はPhase 8実装作業でも行わない。viewerは明示的に手動起動するローカルツールのままである。
 
 ## 16. 全体入力・保存・出力 Phase 2（2026-10-02 確定仕様）
 

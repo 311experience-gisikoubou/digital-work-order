@@ -41,7 +41,26 @@ const FRONTEND_RE = /(^|\/)(src|app|web|frontend|ui|components?|pages?|views?|st
 const ROOT_INDEX_HTML_RE = /^index\.html$/i;
 const FRONTEND_VERIFICATION_SCRIPT_RE = /^scripts\/(?=[^/]*\.(?:ts|js|mjs)$)(?=[^/]*(?:frontend|ui|browser|render|layout|visual|home-stage|home-invoice))(?=[^/]*(?:verify|verification|selftest|test|smoke|check|scale))[^/]+\.(?:ts|js|mjs)$/i;
 const ROOT_FRONTEND_JS_COMPANION_RE = /^(?!.*(?:^|[._-])(?:server|backend|api|build|config|test|tests|spec|tool|tools|script|scripts|webpack|vite|rollup|eslint|jest|playwright|cypress)(?:[._-]|$))[^/]+\.(?:js|mjs|cjs)$/i;
-const BACKEND_RE = /(^|\/)(src-tauri|backend|server|api|services?|domain|repositories?)(\/|$)|\.(rs|go|py|java|kt|cs|rb|php)$/i;
+const BACKEND_RE = /(^|\/)(src-tauri|backend|server|api|services?|domain|repositories?|gateway)(\/|$)|\.(rs|go|py|java|kt|cs|rb|php)$/i;
+
+// Narrow, reusable predicate for a dedicated gateway test/selftest/spec living
+// directly under scripts/ (not under a gateway/ directory). The filename
+// (before its final .js|.ts|.mjs extension) must contain a delimited
+// "gateway" segment AND a delimited test-semantic segment ("test",
+// "selftest", or "spec"), where segments are split on "-", "_", and ".".
+// This intentionally rejects substring matches such as "gatewayish" or
+// "contest" that merely contain the letters without being their own segment.
+const GATEWAY_SCRIPT_TEST_FILE_RE = /^scripts\/([A-Za-z0-9]+(?:[-_.][A-Za-z0-9]+)*)\.(?:js|ts|mjs)$/i;
+const GATEWAY_TEST_SEMANTIC_SEGMENTS = new Set(['test', 'selftest', 'spec']);
+
+function isGatewayDedicatedScriptTest(file) {
+  const match = GATEWAY_SCRIPT_TEST_FILE_RE.exec(file);
+  if (!match) return false;
+  const segments = match[1].split(/[-_.]/).filter(Boolean).map(part => part.toLowerCase());
+  const hasGatewaySegment = segments.includes('gateway');
+  const hasTestSemanticSegment = segments.some(segment => GATEWAY_TEST_SEMANTIC_SEGMENTS.has(segment));
+  return hasGatewaySegment && hasTestSemanticSegment;
+}
 
 function unique(values) {
   return [...new Set(values)];
@@ -57,9 +76,15 @@ function validRepoPath(value) {
 }
 
 export function classifyFiles(changedFiles) {
-  const hasStrongFrontendAnchor = changedFiles.some(file =>
-    ROOT_INDEX_HTML_RE.test(file) || FRONTEND_VERIFICATION_SCRIPT_RE.test(file) || FRONTEND_RE.test(file)
-  );
+  // Anchor candidates exclude anything already resolved as backend (a
+  // dedicated gateway script test, or any BACKEND_RE path such as a
+  // frontend-looking gateway subdirectory like gateway/ui/render.js) so a
+  // backend-classified file can never manufacture a frontend companion
+  // anchor for an otherwise-unrelated root JS file.
+  const hasStrongFrontendAnchor = changedFiles.some(file => {
+    if (isGatewayDedicatedScriptTest(file) || BACKEND_RE.test(file)) return false;
+    return ROOT_INDEX_HTML_RE.test(file) || FRONTEND_VERIFICATION_SCRIPT_RE.test(file) || FRONTEND_RE.test(file);
+  });
 
   const flags = {
     docs: false,
@@ -91,7 +116,7 @@ export function classifyFiles(changedFiles) {
       flags.docs = true;
       continue;
     }
-    if (BACKEND_RE.test(file)) {
+    if (BACKEND_RE.test(file) || isGatewayDedicatedScriptTest(file)) {
       flags.backend = true;
       continue;
     }

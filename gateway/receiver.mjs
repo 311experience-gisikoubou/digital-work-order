@@ -1,10 +1,10 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { webcrypto } from 'node:crypto';
 import { receiveOnce } from './receiver-core.mjs';
+import { resolveInboxRoot } from './inbox-root.mjs';
 
 const require = createRequire(import.meta.url);
 const Crypto = require('../media-transfer-crypto.js');
@@ -38,9 +38,7 @@ function validateConfig(config, configPath) {
     recipientBackupPaths: config.recipientBackupPaths.map(resolvePath),
     activeRecipientKeyId: config.activeRecipientKeyId || null,
     senderRegistryPath: resolvePath(config.senderRegistryPath),
-    inboxRoot: config.inboxRoot
-      ? resolvePath(config.inboxRoot)
-      : path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), '.local', 'share'), 'DigitalWorkOrderGateway', 'inbox'),
+    inboxRoot: resolveInboxRoot(config.inboxRoot, configPath),
     pollSeconds: config.pollSeconds || 60
   };
 }

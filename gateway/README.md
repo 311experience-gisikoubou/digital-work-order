@@ -1,6 +1,6 @@
-# Lab PC Gateway (Phase 6-7)
+# Lab PC Gateway (Phase 6-8)
 
-Phase 6 receives encrypted relay jobs on the dental laboratory Windows PC. Phase 7 acknowledges only verified local saves and removes the acknowledged relay copy.
+Phase 6 receives encrypted relay jobs on the dental laboratory Windows PC. Phase 7 acknowledges only verified local saves and removes the acknowledged relay copy. Phase 8 adds a localhost-only, read-only viewer over the same verified local inbox, plus a one-click export of the existing `digital-work-order-intake-v1` JSON for dental-delivery-billing.
 
 The normal sequence is:
 
@@ -24,10 +24,18 @@ If ACK delivery fails after local persistence, the verified local copy remains. 
 - receiver-core.mjs — provider-independent receive/download/reconstruct/decrypt flow.
 - local-store.mjs — verified atomic local persistence.
 - receiver.mjs — one-shot / polling daemon entry point.
+- inbox-root.mjs — the single default `inboxRoot` resolution shared by receiver.mjs and the Phase 8 viewer.
 - gateway-config.example.json — non-secret configuration example.
 - sender-registry.example.json — local sender-registry shape.
 - windows/protect-receiver-secrets.ps1 — one-time DPAPI CurrentUser protection for the receiver token and recipient-backup passphrase.
 - windows/run-receiver.ps1 — decrypts the DPAPI values only in the current user process and launches the Node receiver.
+- viewer-core.mjs — read-only job discovery/validation logic for Phase 8; it reads verified inbox files but never writes, renames, or deletes them.
+- viewer-server.mjs — localhost-only (127.0.0.1) read-only HTTP server built on Node's `http` module.
+- viewer-client.js — browser-side script served by viewer-server.mjs; builds DOM with `textContent`/`createElement` only.
+- viewer-config.mjs — loads only `inboxRoot` from the existing gateway-config.json; needs no receiver secrets.
+- viewer.mjs — Phase 8 viewer CLI entry point.
+- delivery-intake-reuse.mjs — reuses the existing `delivery-intake-export.js` `digital-work-order-intake-v1` builder/filename convention inside the viewer.
+- windows/run-viewer.ps1 — launches the viewer; needs no receiver secrets and prints only the localhost URL.
 
 ## Data boundary
 
@@ -109,3 +117,41 @@ The receiver is fail-closed:
 - unrelated bucket objects are never selected by prefix or wildcard.
 
 The relay's 30-day lifecycle remains the abandoned-job safety net. Normal Phase 7 operation deletes the acknowledged ciphertext immediately after verified local persistence.
+
+## Phase 8: localhost viewer and delivery/billing handoff
+
+Phase 8 adds a read-only viewer over the exact same verified `inboxRoot` directory tree that Phase 6/7 already write. It does not add a database, a second application, or any new external dependency.
+
+### Run it
+
+    powershell -ExecutionPolicy Bypass -File .\gateway\windows\run-viewer.ps1
+
+or directly:
+
+    node .\gateway\viewer.mjs --config=.\gateway\gateway-config.json --port=4850
+
+The script and the CLI print only the localhost URL (for example `http://127.0.0.1:4850/`) to stdout. They never print job counts, work-order fields, or patient/clinic data. `run-viewer.ps1` sets no `DWO_RECEIVER_TOKEN` / `DWO_RECIPIENT_BACKUP_PASSPHRASE` and needs no receiver secrets; it only reads `gateway-config.json` to resolve `inboxRoot` via the same `inbox-root.mjs` default used by `run-receiver.ps1`.
+
+### What it shows
+
+- A newest-first list of received jobs with enough summary for the lab operator (received time, clinic/patient name when present, delivery date, attachment counts).
+- A detail view of the intended local plaintext work-order fields, because the lab PC is the intended decryption/display endpoint for this data (see "Data boundary" above).
+- Inline playback/opening of photos, video, and audio from the verified job's `media/` directory.
+- A one-click download of the existing `digital-work-order-intake-v1` JSON (same builder and filename convention as `delivery-intake-export.js`) for manual import into dental-delivery-billing's existing intake screen. The viewer never writes to another repository's database or API directly.
+
+### What it refuses to do
+
+- Bind to anything other than `127.0.0.1`. There is no configurable non-loopback host.
+- Mutate, rename, or delete anything under `inboxRoot`.
+- Show a job whose `receipt.json` / `manifest.json` / `work-order.json` are missing, malformed, or mutually inconsistent (fail closed; such entries are excluded from the list and only counted).
+- Serve any file that is not present in the verified manifest's attachment map; URL input never maps directly to a filesystem path.
+- Infer a job or attachment from path traversal input (`..`, absolute paths, encoded slashes); job IDs and attachment IDs are validated against the existing job-id / attachment-id contracts before any filesystem access.
+- Answer any request whose `Host` header is not an exact, single match for `127.0.0.1:<port>`, where `<port>` is the actual local port of the socket that accepted this specific connection (`req.socket.localPort`) — never a cached or caller-supplied value, so it is correct whether the server was started via `startViewer` or via `createViewerServer` + `server.listen(port, '127.0.0.1')` directly. No other hostname/alias, and no missing/duplicate/extra-port/trailing-dot/userinfo variant, is accepted. The request-target must be strict origin-form (starts with `/`, not `//`); this rejects both absolute-form (`GET http://host/path HTTP/1.1`) and network-path-reference (`GET //host/path HTTP/1.1`) targets, either of which could otherwise bypass a Host-only check. `Origin` (when present) must be an exact, single match for `http://127.0.0.1:<port>`. This check reads `rawHeaders` directly — not only the normalized `req.headers` — so a duplicated `Host`/`Origin` header line cannot slip past a "first value wins" normalization. An absent `Origin` is allowed (ordinary direct browser navigation/same-origin `fetch()` does not send one); a non-matching, `null`, or duplicated `Origin` is rejected. Every route runs this check before it reads anything from the inbox, and the response is always a generic `403` with no permissive CORS header. A request that omits `Host` entirely may instead receive Node's own parser-level `400` on HTTP/1.1 before reaching this check at all; that is an equally fail-closed outcome, and HTTP/1.0 (which does not require `Host`) demonstrates this server's own `403` directly.
+- Serve any attachment's declared manifest MIME type inline unless it is on a small, explicit allowlist of already-supported image/video/audio types consistent with its declared `kind` (JPEG/PNG/WebP images; MP4/QuickTime video; the existing `audio/m4a`, `audio/mp4`, `audio/webm`, `audio/wav` audio types). Everything else — the generic `file` kind, HTML, SVG, JavaScript, XML, an unknown MIME, or a `kind`/MIME mismatch — is forced to `Content-Type: application/octet-stream` with `Content-Disposition: attachment; filename="<attachmentId>.bin"` (built only from the opaque `attachmentId`, never from request input or a patient/clinic field), `X-Content-Type-Options: nosniff`, and a restrictive `Content-Security-Policy: default-src 'none'; sandbox` as defense-in-depth, making the forced download inert if ever opened directly in a browser tab. This applies identically to `GET`, `HEAD`, and `206` Range responses. A verified manifest hash/signature proves the bytes were not altered in transit; it proves nothing about whether those bytes are safe to render or execute, so that trust is never extended to Content-Type selection.
+
+### Storage and backup boundary
+
+- The Gateway inbox remains the durable received store for digital-work-order v1. There is no SQLite in digital-work-order; duplicate business-record management and long-term intake tracking remain dental-delivery-billing's existing SQLite responsibility.
+- Phase 8 does not delete or archive received jobs automatically. Retention period, archive location, and access policy for the lab PC remain a separate human operational decision.
+- If the inbox directory is backed up at the filesystem level, that backup contains the same plaintext protected data (patient/clinic names, media) as the inbox itself. Choosing a production backup target, retention period, and access control is a separate human policy decision; Phase 8 does not select or automate one.
+- Production cloud/Windows automatic-start activation remains out of scope for Phase 8, exactly as for Phase 6/7.
