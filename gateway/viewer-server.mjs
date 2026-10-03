@@ -64,6 +64,142 @@ function decodeSegment(value) {
   }
 }
 
+// --- PHASE8-SEC-01: loopback-only Host/Origin/request-target guard ---------
+//
+// Every route is guarded before it ever reads the inbox. The guard only
+// trusts an exact, single, well-formed match against this server's own
+// bound 127.0.0.1:<port> endpoint (the same loopback endpoint printed by
+// viewer.mjs). It intentionally does not allow "localhost" or any other
+// alias: this server never prints or documents a "localhost" URL, so
+// accepting it would only widen the trusted set without a use case.
+//
+// rawHeaders (not just the normalized req.headers) is inspected so that a
+// duplicate Host or Origin header line cannot slip through as a single
+// "first value wins" normalization performed upstream of this check.
+function rawHeaderValues(rawHeaders, name) {
+  const lower = name.toLowerCase();
+  const values = [];
+  if (!Array.isArray(rawHeaders)) return values;
+  for (let i = 0; i + 1 < rawHeaders.length; i += 2) {
+    if (typeof rawHeaders[i] === 'string' && rawHeaders[i].toLowerCase() === lower) {
+      values.push(rawHeaders[i + 1]);
+    }
+  }
+  return values;
+}
+
+function hasControlChars(value) {
+  return typeof value !== 'string' || /[\u0000-\u001f\u007f]/.test(value);
+}
+
+function isExactLoopbackHost(value, expectedPort) {
+  if (typeof value !== 'string' || value === '' || hasControlChars(value)) return false;
+  return value === LOOPBACK_HOST + ':' + expectedPort;
+}
+
+function isExactLoopbackOrigin(value, expectedPort) {
+  if (typeof value !== 'string' || value === '' || hasControlChars(value)) return false;
+  return value === 'http://' + LOOPBACK_HOST + ':' + expectedPort;
+}
+
+// An absolute-form request target ("GET http://host/path HTTP/1.1") is only
+// ever used by explicit proxy-style clients, never by a browser navigating
+// or fetching a direct origin like this one. Rejecting every absolute-form
+// target unconditionally closes off a Host-header-only bypass (a request
+// whose Host header is valid but whose request-target names a different
+// authority) without needing a second authority parser.
+function isAbsoluteFormRequestTarget(rawUrl) {
+  return typeof rawUrl === 'string' && /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(rawUrl);
+}
+
+function denyForbidden(res) {
+  sendJson(res, 403, { error: 'VIEWER_FORBIDDEN' });
+}
+
+// Returns true if the request may proceed. On false it has already written
+// a generic 403 response; callers must return immediately without reading
+// the inbox. expectedPort is this process's own actual bound loopback port
+// (resolved after listen()), never a value supplied by the request.
+function enforceLoopbackGuard(req, res, expectedPort) {
+  if (!Number.isSafeInteger(expectedPort)) {
+    denyForbidden(res);
+    return false;
+  }
+  if (isAbsoluteFormRequestTarget(req.url)) {
+    denyForbidden(res);
+    return false;
+  }
+  const hostValues = rawHeaderValues(req.rawHeaders, 'host');
+  if (hostValues.length !== 1 || !isExactLoopbackHost(hostValues[0], expectedPort)) {
+    denyForbidden(res);
+    return false;
+  }
+  const originValues = rawHeaderValues(req.rawHeaders, 'origin');
+  if (originValues.length > 1) {
+    denyForbidden(res);
+    return false;
+  }
+  // Origin is optional (ordinary direct browser navigation/same-origin GET
+  // does not send one); when present it must match this same loopback
+  // endpoint exactly. This also rejects the literal "null" origin and any
+  // malformed/foreign value because none of those equal the expected string.
+  if (originValues.length === 1 && !isExactLoopbackOrigin(originValues[0], expectedPort)) {
+    denyForbidden(res);
+    return false;
+  }
+  return true;
+}
+
+// --- PHASE8-SEC-02: never serve an arbitrary manifest MIME inline ----------
+//
+// Only this exact, explicit allowlist of already-supported image/video/audio
+// MIME types (kept consistent with the kind/mime pairs local-store.mjs
+// already writes) may be served with their real Content-Type for inline
+// playback. Everything else — the generic "file" kind, HTML, SVG,
+// JavaScript, XML, unknown types, or a kind/mime mismatch — is forced to a
+// plain download. A manifest hash/signature proves the bytes were not
+// tampered with in transit; it proves nothing about whether those bytes are
+// safe for a browser to render or execute, so that trust is never extended
+// to Content-Type selection here.
+const SAFE_MIME_BY_KIND = Object.freeze({
+  image: new Set(['image/jpeg', 'image/png', 'image/webp']),
+  video: new Set(['video/mp4', 'video/quicktime']),
+  audio: new Set(['audio/m4a', 'audio/mp4', 'audio/webm', 'audio/wav'])
+});
+const FORCED_DOWNLOAD_CSP = "default-src 'none'; sandbox";
+
+function isSafeInlineAttachment(attachment) {
+  const safeSet = SAFE_MIME_BY_KIND[attachment.kind];
+  return !!safeSet && safeSet.has(attachment.mime);
+}
+
+// Builds the response headers for one media attachment. The same object is
+// reused verbatim for the 200 whole-file path, the HEAD path, and the 206
+// Range path, so a non-safe attachment gets identical download-forcing
+// protection regardless of which of those three is requested.
+function buildMediaHeaders(attachment) {
+  if (isSafeInlineAttachment(attachment)) {
+    return {
+      'Content-Type': attachment.mime,
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'no-store',
+      'Accept-Ranges': 'bytes'
+    };
+  }
+  // The filename is built only from attachmentId (already restricted to
+  // `att-[A-Za-z0-9-]{1,120}` by viewer-core's ATTACHMENT_ID contract) plus a
+  // fixed ".bin" suffix — never from request input, the original filename,
+  // or any patient/clinic field.
+  return {
+    'Content-Type': 'application/octet-stream',
+    'Content-Disposition': 'attachment; filename="' + attachment.attachmentId + '.bin"',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': FORCED_DOWNLOAD_CSP,
+    'Cache-Control': 'no-store',
+    'Accept-Ranges': 'bytes'
+  };
+}
+
 function buildIndexHtml() {
   return '<!doctype html>\n' +
     '<html lang="ja">\n' +
@@ -211,15 +347,12 @@ async function handleMedia(req, res, inboxRoot, rawJobId, rawAttachmentId) {
   }
 
   const range = parseRange(req.headers.range, stat.size);
-  const headers = {
-    'Content-Type': attachment.mime || 'application/octet-stream',
-    'X-Content-Type-Options': 'nosniff',
-    'Cache-Control': 'no-store',
-    'Accept-Ranges': 'bytes'
-  };
+  const baseHeaders = buildMediaHeaders(attachment);
   if (range) {
-    headers['Content-Range'] = 'bytes ' + range.start + '-' + range.end + '/' + stat.size;
-    headers['Content-Length'] = range.end - range.start + 1;
+    const headers = Object.assign({}, baseHeaders, {
+      'Content-Range': 'bytes ' + range.start + '-' + range.end + '/' + stat.size,
+      'Content-Length': range.end - range.start + 1
+    });
     res.writeHead(206, headers);
     if (req.method === 'HEAD') {
       res.end();
@@ -228,7 +361,7 @@ async function handleMedia(req, res, inboxRoot, rawJobId, rawAttachmentId) {
     fsSync.createReadStream(filePath, { start: range.start, end: range.end }).pipe(res);
     return;
   }
-  headers['Content-Length'] = stat.size;
+  const headers = Object.assign({}, baseHeaders, { 'Content-Length': stat.size });
   res.writeHead(200, headers);
   if (req.method === 'HEAD') {
     res.end();
@@ -237,7 +370,9 @@ async function handleMedia(req, res, inboxRoot, rawJobId, rawAttachmentId) {
   fsSync.createReadStream(filePath).pipe(res);
 }
 
-async function handleRequest(req, res, inboxRoot, clientScript, indexHtml) {
+async function handleRequest(req, res, inboxRoot, clientScript, indexHtml, boundPortState) {
+  if (!enforceLoopbackGuard(req, res, boundPortState.port)) return;
+
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     sendJson(res, 405, { error: 'VIEWER_METHOD_NOT_ALLOWED' });
     return;
@@ -294,13 +429,20 @@ export async function createViewerServer({ inboxRoot }) {
   }
   const clientScript = await fs.readFile(CLIENT_SCRIPT_PATH, 'utf8');
   const indexHtml = buildIndexHtml();
+  // The real bound port is only known after listen() resolves (startViewer
+  // may be asked for an ephemeral port 0). boundPortState is a mutable box
+  // shared with the request handler so the loopback guard above always
+  // compares against this process's actual bound endpoint, never a
+  // caller-supplied or request-supplied value.
+  const boundPortState = { port: null };
 
   const server = http.createServer((req, res) => {
-    handleRequest(req, res, inboxRoot, clientScript, indexHtml).catch(() => {
+    handleRequest(req, res, inboxRoot, clientScript, indexHtml, boundPortState).catch(() => {
       if (!res.headersSent) sendJson(res, 500, { error: 'VIEWER_INTERNAL_ERROR' });
       else res.destroy();
     });
   });
+  server.__phase8BoundPortState = boundPortState;
   return server;
 }
 
@@ -317,6 +459,7 @@ export async function startViewer({ inboxRoot, port }) {
       resolve();
     });
   });
+  server.__phase8BoundPortState.port = server.address().port;
   return server;
 }
 
