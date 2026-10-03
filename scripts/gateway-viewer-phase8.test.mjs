@@ -10,7 +10,7 @@ import {
   listVerifiedJobs,
   loadVerifiedJob
 } from '../gateway/viewer-core.mjs';
-import { startViewer } from '../gateway/viewer-server.mjs';
+import { createViewerServer, startViewer } from '../gateway/viewer-server.mjs';
 import {
   loadInboxRootFromGatewayConfig,
   validateViewerPort
@@ -347,7 +347,11 @@ test('PHASE8-SEC-01: rejects foreign/missing/malformed/duplicate/wrong-port Host
 
       const rejectCases = [
         { label: 'foreign host', headerLines: ['Host: evil.example.com'] },
-        { label: 'missing host', headerLines: [] },
+        // Node's own HTTP/1.1 parser may itself reject a missing Host with a
+        // parser-level 400 before our handler ever runs; either that or our
+        // application 403 is an acceptable fail-closed outcome here. The
+        // HTTP/1.0 case below proves the application-layer 403 directly.
+        { label: 'missing host', headerLines: [], allowParserRejection: true },
         { label: 'trailing-dot host', headerLines: ['Host: 127.0.0.1.:' + port] },
         { label: 'wrong-port host', headerLines: ['Host: 127.0.0.1:' + wrongPort] },
         { label: 'duplicate host, same value', headerLines: ['Host: ' + validHost, 'Host: ' + validHost] },
@@ -361,16 +365,39 @@ test('PHASE8-SEC-01: rejects foreign/missing/malformed/duplicate/wrong-port Host
           testCase.headerLines.map(h => h + '\r\n').join('') +
           'Connection: close\r\n\r\n';
         const response = parseRawResponse(await sendRawRequest(port, raw));
+        if (testCase.allowParserRejection) {
+          assert.ok(response.status === 400 || response.status === 403, testCase.label);
+          if (response.status === 403) {
+            assert.equal(response.headers['x-content-type-options'], 'nosniff', testCase.label);
+          }
+          continue;
+        }
         assert.equal(response.status, 403, testCase.label);
         assert.equal(response.headers['x-content-type-options'], 'nosniff', testCase.label);
         assert.equal(response.headers['access-control-allow-origin'], undefined, testCase.label);
       }
+
+      // HTTP/1.0 does not require a Host header, so Node's parser will not
+      // reject this one itself; a 403 here proves our own application guard
+      // (not Node's parser) is what rejects a missing Host.
+      const http10NoHostRaw = 'GET /api/jobs HTTP/1.0\r\nConnection: close\r\n\r\n';
+      const http10Response = parseRawResponse(await sendRawRequest(port, http10NoHostRaw));
+      assert.equal(http10Response.status, 403);
+      assert.equal(http10Response.headers['x-content-type-options'], 'nosniff');
 
       const absoluteForeign = 'GET http://evil.example.com/api/jobs HTTP/1.1\r\n' +
         'Host: ' + validHost + '\r\n' +
         'Connection: close\r\n\r\n';
       const absoluteResponse = parseRawResponse(await sendRawRequest(port, absoluteForeign));
       assert.equal(absoluteResponse.status, 403);
+
+      // Network-path reference ("//host/path") is also not origin-form and
+      // must be rejected even with an otherwise-valid Host header.
+      const networkPathForeign = 'GET //evil.example.com/api/jobs HTTP/1.1\r\n' +
+        'Host: ' + validHost + '\r\n' +
+        'Connection: close\r\n\r\n';
+      const networkPathResponse = parseRawResponse(await sendRawRequest(port, networkPathForeign));
+      assert.equal(networkPathResponse.status, 403);
 
       const validRaw = 'GET /api/jobs HTTP/1.1\r\nHost: ' + validHost + '\r\nConnection: close\r\n\r\n';
       const validResponse = parseRawResponse(await sendRawRequest(port, validRaw));
@@ -471,6 +498,112 @@ test('PHASE8-SEC-01: ordinary same-endpoint GET/HEAD/view/intake flows still wor
   });
 });
 
+test('PHASE8-SEC-01: createViewerServer + server.listen(port, \'127.0.0.1\') directly (no startViewer) enforces the guard via the accepted socket\'s own local port', async () => {
+  await withTempRoot(async root => {
+    await writeSyntheticJob(root, { jobId: JOB_NEW, receivedAt: 3000 });
+    const server = await createViewerServer({ inboxRoot: root });
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    try {
+      const port = server.address().port;
+
+      const validRaw = 'GET /api/jobs HTTP/1.1\r\nHost: 127.0.0.1:' + port + '\r\nConnection: close\r\n\r\n';
+      const validResponse = parseRawResponse(await sendRawRequest(port, validRaw));
+      assert.equal(validResponse.status, 200);
+
+      const foreignRaw = 'GET /api/jobs HTTP/1.1\r\nHost: evil.example.com\r\nConnection: close\r\n\r\n';
+      const foreignResponse = parseRawResponse(await sendRawRequest(port, foreignRaw));
+      assert.equal(foreignResponse.status, 403);
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
+  });
+});
+
+test('PHASE8-SEC-02: serves all nine explicit allowlisted image/video/audio kind/mime pairs inline for GET/HEAD/Range with synthetic (not real decodable) bytes', async () => {
+  await withTempRoot(async root => {
+    const safeSpecs = [
+      { letter: 'N', kind: 'image', mime: 'image/jpeg' },
+      { letter: 'O', kind: 'image', mime: 'image/png' },
+      { letter: 'P', kind: 'image', mime: 'image/webp' },
+      { letter: 'Q', kind: 'video', mime: 'video/mp4' },
+      { letter: 'R', kind: 'video', mime: 'video/quicktime' },
+      { letter: 'S', kind: 'audio', mime: 'audio/m4a' },
+      { letter: 'T', kind: 'audio', mime: 'audio/mp4' },
+      { letter: 'U', kind: 'audio', mime: 'audio/webm' },
+      { letter: 'V', kind: 'audio', mime: 'audio/wav' }
+    ];
+
+    const fixtures = [];
+    for (const spec of safeSpecs) {
+      // Synthetic placeholder bytes only — these are not real/decodable
+      // image/video/audio data, just a distinct byte sequence per MIME used
+      // to prove the server streams the exact bytes through unmodified.
+      const mediaBytes = Buffer.from('synthetic-' + spec.mime + '-bytes-0123456789');
+      const jobId = 'job_' + spec.letter.repeat(43);
+      fixtures.push({
+        spec,
+        jobId,
+        fixture: await writeSyntheticJob(root, {
+          jobId,
+          receivedAt: 6000,
+          attachmentKind: spec.kind,
+          attachmentMime: spec.mime,
+          mediaBytes
+        })
+      });
+    }
+
+    const before = await snapshotTree(root);
+    const server = await startViewer({ inboxRoot: root, port: 0 });
+    try {
+      const address = server.address();
+      const base = 'http://127.0.0.1:' + address.port;
+
+      for (const { spec, jobId, fixture } of fixtures) {
+        const detailResponse = await fetch(base + '/api/jobs/' + encodeURIComponent(jobId));
+        assert.equal(detailResponse.status, 200, spec.mime);
+        const detail = await detailResponse.json();
+        const mediaUrl = base + detail.attachments[0].url;
+
+        const getResponse = await fetch(mediaUrl);
+        assert.equal(getResponse.status, 200, spec.mime + ' GET');
+        assert.equal(getResponse.headers.get('content-type'), spec.mime, spec.mime + ' GET content-type');
+        assert.equal(getResponse.headers.get('content-disposition'), null, spec.mime + ' GET disposition');
+        assert.equal(getResponse.headers.get('content-security-policy'), null, spec.mime + ' GET csp');
+        assert.deepEqual(Buffer.from(await getResponse.arrayBuffer()), fixture.mediaBytes, spec.mime + ' GET bytes');
+
+        const headResponse = await fetch(mediaUrl, { method: 'HEAD' });
+        assert.equal(headResponse.status, 200, spec.mime + ' HEAD');
+        assert.equal(headResponse.headers.get('content-type'), spec.mime, spec.mime + ' HEAD content-type');
+        assert.equal(headResponse.headers.get('content-disposition'), null, spec.mime + ' HEAD disposition');
+        assert.equal(Number(headResponse.headers.get('content-length')), fixture.mediaBytes.length, spec.mime + ' HEAD length');
+
+        const rangeResponse = await fetch(mediaUrl, { headers: { Range: 'bytes=1-3' } });
+        assert.equal(rangeResponse.status, 206, spec.mime + ' range');
+        assert.equal(rangeResponse.headers.get('content-type'), spec.mime, spec.mime + ' range content-type');
+        assert.equal(rangeResponse.headers.get('content-disposition'), null, spec.mime + ' range disposition');
+        assert.deepEqual(
+          Buffer.from(await rangeResponse.arrayBuffer()),
+          fixture.mediaBytes.subarray(1, 4),
+          spec.mime + ' range bytes'
+        );
+
+        const rangeHeadResponse = await fetch(mediaUrl, { method: 'HEAD', headers: { Range: 'bytes=1-3' } });
+        assert.equal(rangeHeadResponse.status, 206, spec.mime + ' range HEAD');
+        assert.equal(rangeHeadResponse.headers.get('content-type'), spec.mime, spec.mime + ' range HEAD content-type');
+      }
+
+      const after = await snapshotTree(root);
+      assert.deepEqual(after, before);
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
+  });
+});
+
 test('PHASE8-SEC-02: forces safe download headers (never inline) for HTML/SVG/JS/unknown/mismatched-kind attachments on GET/HEAD/range, and keeps real video safely playable including Range', async () => {
   await withTempRoot(async root => {
     const unsafeSpecs = [
@@ -480,7 +613,11 @@ test('PHASE8-SEC-02: forces safe download headers (never inline) for HTML/SVG/JS
       { jobId: 'job_' + 'K'.repeat(43), attachmentKind: 'file', attachmentMime: 'application/x-totally-unknown', bytes: Buffer.from([1, 2, 3]) },
       // Declared kind says "image" but the manifest mime is HTML: the kind/mime
       // pair must still fail the exact allowlist and be forced to download.
-      { jobId: 'job_' + 'L'.repeat(43), attachmentKind: 'image', attachmentMime: 'text/html', bytes: Buffer.from('<script>alert(1)</script>') }
+      { jobId: 'job_' + 'L'.repeat(43), attachmentKind: 'image', attachmentMime: 'text/html', bytes: Buffer.from('<script>alert(1)</script>') },
+      { jobId: 'job_' + 'W'.repeat(43), attachmentKind: 'file', attachmentMime: 'application/xml', bytes: Buffer.from('<?xml version="1.0"?><a/>') },
+      // Generic "file" kind is never in SAFE_MIME_BY_KIND even when the
+      // declared mime looks like an otherwise-allowlisted image type.
+      { jobId: 'job_' + 'X'.repeat(43), attachmentKind: 'file', attachmentMime: 'image/jpeg', bytes: Buffer.from([1, 2, 3, 4]) }
     ];
 
     const unsafeFixtures = [];
