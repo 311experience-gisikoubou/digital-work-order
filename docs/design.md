@@ -469,6 +469,25 @@ Phase 3のパッケージ完全性とPhase 4の暗号Envelope・送信端末署�
 - 開発・テストは架空データのみ。実患者・実医院データ、本番project ID、bucket名、token、service-account credentialはrepoへ保存しない。
 
 
+### 15.14 Phase 6の実装事実（Issue #142）
+
+Phase 5のready暗号ジョブを技工所Windows PCが自動発見し、download、復号、Phase 3/4完全性確認、ローカル保存まで行う受信経路を実装する。Phase 6では本番Firebase/Google Cloudへのdeploy・課金操作・実患者データ送信・Phase 7のACK/deleteは行わない。
+
+- Phase 5のprivacy boundaryを維持するため、Phase 4 envelopeのheader / descriptor / signature / 各暗号partのIV対応表はrecipientだけが読める receiver bootstrap として別途暗号化する。bootstrapはfresh ECDH P-256 → HKDF-SHA-256 → AES-256-GCMを使用する。
+- cloudに保存するbootstrap情報はrecipientKeyId、ephemeral public JWK、HKDF salt、IV、ciphertext SHA-256 / sizeのみとし、workOrderRef、患者名、医院名、attachment ID、元ファイル名を保存しない。
+- relay transport planの先頭ordinal 0をreceiver-bootstrap、ordinal 1をmanifest、ordinal 2をwork-order、その後をdescriptor順のattachment chunkとする。plan全体は既存Phase 4 sender署名によるrelay authorizationへ含めて改ざんをfail closedで検出する。
+- receiver APIは256-bit相当のrandom bearer tokenを使い、Cloud runtimeへはSHA-256 hashとrecipientKeyIdだけを設定する。plaintext tokenはrepo / Firestore / cloud logsへ保存しない。
+- ready job discoveryはrecipientKeyId + status=ready + readyAt降順のFirestore複合indexを使い、Phase 7前に既受信jobが残っても新着jobを優先して取得する。
+- download URLはCloud Storage V4 read-only signed URLとし、標準5分、1〜15分に制限する。URL自体は秘密情報としてログ・永続化しない。
+- 技工所PC Gatewayは全ciphertextのsize / SHA-256を復号前に照合し、bootstrapを復号して元Envelopeを再構成する。その後MediaTransferCrypto.decryptEnvelopeでsender署名検証・復号を行い、Phase 3 verifyPackageを再実行する。
+- local sender registryはPhase 4のpublic sender registryだけを保持し、private keyや患者情報を含めない。senderがunknown / revoked / signature mismatchなら保存しない。
+- ローカル保存はjobIdだけのopaque directoryを使う。一時directoryへmanifest / work-order / media / receiptを書き、各hashを再照合してからatomic renameする。患者名・医院名・workOrderRefをpathやfilenameへ使わない。
+- receiver tokenとrecipient backup passphraseはWindows DPAPI CurrentUserで保護するsetup/run wrapperを用意する。自動起動は本番設定と実機synthetic E2E確認後の別工程とする。
+- 同一jobを再受信した場合、既存receiptが一致すればalready-storedとして冪等に扱う。失敗時は完成directoryを残さずcloud objectも削除しない。
+- Phase 6はlocal persistence成功まで。技工所PCからの受領ACK、cloud ciphertext/job metadataの即時削除はPhase 7で実装する。
+- 開発検証はsynthetic data / local fake relayのみ。本番project・bucket・billing・IAM・receiver secret・Windows Scheduled Taskは変更していない。
+
+
 ## 16. 全体入力・保存・出力 Phase 2（2026-10-02 確定仕様）
 
 全体機能棚卸しと業務判断 U01〜U06 の確定を受け、入力・保存・発行・PDF・歯式の統合仕様を次の文書へ正本化する。

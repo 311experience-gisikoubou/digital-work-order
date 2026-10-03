@@ -1,0 +1,14 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "relayJobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "recipientKeyId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "readyAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

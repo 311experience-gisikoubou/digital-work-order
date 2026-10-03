@@ -3,6 +3,12 @@ import { initializeApp, getApps } from 'firebase-admin/app';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { Storage } from '@google-cloud/storage';
 import { completeRelayJob, createRelayJob, relayError } from './relay-core.mjs';
+import {
+  RECEIVER_API_VERSION,
+  authenticateReceiver,
+  createReceiverDownloadPlan,
+  listReadyReceiverJobs
+} from './receiver-core.mjs';
 
 if (getApps().length === 0) initializeApp();
 
@@ -29,6 +35,16 @@ function bucketName() {
   return value;
 }
 
+function receiverAuthConfig() {
+  const tokenSha256 = process.env.DWO_RECEIVER_TOKEN_SHA256;
+  const recipientKeyId = process.env.DWO_RECEIVER_KEY_ID;
+  if (!/^[0-9a-f]{64}$/.test(tokenSha256 || '') ||
+      !/^rk_[A-Za-z0-9_-]+$/.test(recipientKeyId || '')) {
+    throw runtimeError('RECEIVER_AUTH_CONFIG_INVALID');
+  }
+  return { tokenSha256, recipientKeyId };
+}
+
 function applyCors(req, res) {
   const origin = req.get('origin');
   const allowed = allowedOrigin();
@@ -36,7 +52,7 @@ function applyCors(req, res) {
   if (origin === allowed) {
     res.set('Access-Control-Allow-Origin', allowed);
     res.set('Vary', 'Origin');
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.set('Access-Control-Max-Age', '600');
   }
@@ -53,7 +69,10 @@ function sendError(res, error) {
     'RELAY_SENDER_UNKNOWN', 'RELAY_SENDER_REVOKED', 'RELAY_SENDER_MISMATCH',
     'RELAY_INVALID_REGISTRY', 'RELAY_IDEMPOTENCY_CONFLICT',
     'RELAY_INVALID_COMPLETE_REQUEST', 'RELAY_JOB_NOT_FOUND', 'RELAY_JOB_STATE_INVALID',
-    'RELAY_CAPABILITY_INVALID', 'RELAY_OBJECT_INCOMPLETE', 'RELAY_OBJECT_METADATA_MISMATCH'
+    'RELAY_CAPABILITY_INVALID', 'RELAY_OBJECT_INCOMPLETE', 'RELAY_OBJECT_METADATA_MISMATCH',
+    'RECEIVER_AUTH_REQUIRED', 'RECEIVER_AUTH_INVALID', 'RECEIVER_AUTH_CONFIG_INVALID',
+    'RECEIVER_JOB_ID_INVALID', 'RECEIVER_JOB_NOT_FOUND', 'RECEIVER_JOB_NOT_COMPATIBLE',
+    'RECEIVER_INVALID_REQUEST', 'RECEIVER_INVALID_LIMIT', 'RECEIVER_DOWNLOAD_TTL_INVALID'
   ]);
   const status = clientCodes.has(code) ? 400 : 500;
   res.status(status).json({ error: code });
@@ -81,6 +100,15 @@ function firestoreAdapters(db) {
       async get(jobId) {
         const snapshot = await db.collection(JOB_COLLECTION).doc(jobId).get();
         return snapshot.exists ? snapshot.data() : null;
+      },
+      async listReady(recipientKeyId, limit) {
+        const snapshot = await db.collection(JOB_COLLECTION)
+          .where('recipientKeyId', '==', recipientKeyId)
+          .where('status', '==', 'ready')
+          .orderBy('readyAt', 'desc')
+          .limit(limit)
+          .get();
+        return snapshot.docs.map(doc => doc.data());
       },
       async setUploads(jobId, uploads, capabilityHash) {
         const ref = db.collection(JOB_COLLECTION).doc(jobId);
@@ -143,6 +171,15 @@ function storageAdapter(storage, name, origin) {
         if (error && Number(error.code) === 404) return { exists: false, size: 0, metadata: {} };
         throw error;
       }
+    },
+    async createReadUrl(spec) {
+      const file = bucket.file(spec.objectName);
+      const [url] = await file.getSignedUrl({
+        version: 'v4',
+        action: 'read',
+        expires: Date.now() + spec.ttlMs
+      });
+      return url;
     }
   };
 }
@@ -158,6 +195,16 @@ function buildDeps() {
 function parseCompletePath(pathname) {
   const match = /^\/v1\/jobs\/(job_[A-Za-z0-9_-]+)\/complete$/.exec(pathname);
   return match ? match[1] : null;
+}
+
+function parseReceiverDownloadPath(pathname) {
+  const match = /^\/v1\/receiver\/jobs\/(job_[A-Za-z0-9_-]+):download$/.exec(pathname);
+  return match ? match[1] : null;
+}
+
+function requireReceiverAuth(req) {
+  const config = receiverAuthConfig();
+  return authenticateReceiver(req.get('authorization'), config.tokenSha256, config.recipientKeyId);
 }
 
 async function handleRequest(req, res) {
@@ -176,6 +223,26 @@ async function handleRequest(req, res) {
 
   const deps = buildDeps();
   try {
+    if (req.path === '/v1/receiver/jobs:list') {
+      const auth = requireReceiverAuth(req);
+      const body = req.body || {};
+      if (body.version !== RECEIVER_API_VERSION ||
+          (body.limit !== undefined && !Number.isSafeInteger(body.limit))) {
+        throw runtimeError('RECEIVER_INVALID_REQUEST');
+      }
+      const result = await listReadyReceiverJobs(auth.recipientKeyId, deps, { limit: body.limit });
+      res.status(200).json(result);
+      return;
+    }
+    const receiverJobId = parseReceiverDownloadPath(req.path);
+    if (receiverJobId) {
+      const auth = requireReceiverAuth(req);
+      const body = req.body || {};
+      if (body.version !== RECEIVER_API_VERSION) throw runtimeError('RECEIVER_INVALID_REQUEST');
+      const result = await createReceiverDownloadPlan(receiverJobId, auth.recipientKeyId, deps);
+      res.status(200).json(result);
+      return;
+    }
     if (req.path === '/v1/jobs') {
       const result = await createRelayJob(req.body, deps);
       res.status(200).json(result);
