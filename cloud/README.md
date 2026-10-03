@@ -1,4 +1,4 @@
-# Phase 5 cloud relay setup
+# Cloud relay setup (Phase 5-7)
 
 This directory contains the production-shaped relay implementation for encrypted media-transfer envelopes.
 It is intentionally not deployed by repository tests or by the application itself.
@@ -66,7 +66,7 @@ gcloud storage buckets update gs://BUCKET_NAME \
 ```
 
 The 30-day lifecycle rule is an emergency upper bound, not the normal deletion path.
-Normal deletion after the lab PC has received, decrypted, hash-verified, and locally saved the case belongs to Phase 7.
+Phase 7 implements the normal deletion path: after the lab PC has received, decrypted, hash-verified, and atomically saved the case, it ACKs the job and the relay immediately deletes that job's ciphertext objects and metadata.
 Cloud Storage lifecycle actions are asynchronous, so applications must not depend on deletion occurring at an exact timestamp.
 
 ## Browser upload CORS
@@ -107,7 +107,7 @@ Optional:
 DWO_RELAY_ALLOWED_ORIGIN=https://311experience-gisikoubou.github.io
 ```
 
-Phase 6 receiver authentication is also runtime-only configuration:
+Phase 6/7 receiver authentication is also runtime-only configuration:
 
 ```text
 DWO_RECEIVER_KEY_ID=rk_...
@@ -118,11 +118,12 @@ DWO_RECEIVER_TOKEN_SHA256=<64 lowercase hex characters>
 
 Do not place these values in source if the deployment environment provides managed configuration.
 
-## Phase 6 signed-download IAM
+## Phase 6/7 receiver IAM
 
 The Phase 6 receiver endpoint returns short-lived V4 signed URLs for **read-only** access to the exact opaque relay objects. The Cloud Functions runtime identity therefore needs:
 
-- permission to read relay objects (`storage.objects.get`; a bucket-scoped Storage Object Viewer role is a standard predefined option), and
+- permission to read relay objects (`storage.objects.get`),
+- permission to delete the exact acknowledged relay objects (`storage.objects.delete`), and
 - permission to sign blobs as the signing service account (`iam.serviceAccounts.signBlob`).
 
 Prefer the narrowest IAM grant available in the target organization. If a predefined role is used for signing, Service Account Token Creator includes `iam.serviceAccounts.signBlob` but also grants additional token/signing capabilities, so grant it only on the intended service account and only when a narrower custom role is not practical.
@@ -131,12 +132,20 @@ Do not create or download a service-account JSON private key for signed URLs. Th
 
 The read URLs default to five minutes and are bounded by the receiver core to 1–15 minutes. Possession of a live signed URL is sufficient to read that one object until expiry, so URLs must never be logged or persisted.
 
-Phase 6 ready-job discovery uses a composite Firestore index on recipientKeyId + status + readyAt (descending), defined in firestore.indexes.json. This prevents old, already-local jobs from hiding newer jobs while Phase 7 acknowledgement/deletion is not yet implemented. Apply that index only to the intended relay project:
+Phase 6/7 pending-job discovery uses the composite Firestore index on recipientKeyId + status + readyAt (descending), defined in firestore.indexes.json. The receiver queries both ready and deleting states; deleting jobs are resumed before new downloads. Apply that index only to the intended relay project:
 
     cd cloud
     firebase deploy --only firestore:indexes --config firebase.json
 
 This is a production configuration action and is not executed by repository tests.
+
+## Phase 7 ACK and immediate deletion
+
+A ready job can be deleted only after the lab Gateway has completed local verification and persistence. Deletion start requires all of the following: the authenticated receiver bearer token, a short-lived per-job ACK capability whose SHA-256 hash is stored in the job document, and a decrypt-derived ACK proof. The proof is computed from the opaque job ID, descriptor SHA-256 and the high-entropy workOrderRef after successful envelope decryption; Firestore stores only a second SHA-256 verifier, not the workOrderRef or plaintext proof.
+
+The ACK transition is `ready` to `deleting` in a Firestore transaction. After that transition the ACK capability hashes are removed. Only the exact object names already recorded in `objectSpecs` are deleted; the implementation never lists a prefix or performs bucket-wide deletion. Each delete treats a missing object as success, then every object is checked for nonexistence before the Firestore job document is removed.
+
+If deletion fails partway through, the job remains `deleting`. The next receiver poll returns deleting jobs first and the Gateway resumes deletion without re-downloading ciphertext. Because the initial transition already validated the capability and decrypt-derived proof, deletion-resume does not require those ephemeral values again. The long-lived receiver bearer token can finish an already-authorized deletion but cannot initiate deletion of a `ready` job by itself.
 
 ## Sender registry
 
@@ -169,7 +178,7 @@ Sender registration/revocation must be performed from an authenticated lab-admin
 
 ## Deployment
 
-Deployment is a human-authenticated production operation and is intentionally not executed by Phase 5/6 tests.
+Deployment is a human-authenticated production operation and is intentionally not executed by Phase 5/6/7 tests.
 
 After the safety checks above, use `cloud/` as the Firebase project directory. Deploy the relay function by itself first; do not use an unscoped deploy command against a project that may contain unrelated Firebase resources:
 
@@ -189,6 +198,6 @@ Phase 5: signed upload to temporary cloud relay.
 
 Phase 6: lab PC automatic discovery/download/decryption/local save.
 
-Phase 7: receiver acknowledgement and immediate cloud deletion after successful local persistence.
+Phase 7: verified receiver acknowledgement and immediate exact-object cloud deletion after successful local persistence. Implemented in source; production deployment is still intentionally unexecuted.
 
 The 30-day lifecycle rule remains a fail-safe for abandoned relay objects.

@@ -487,6 +487,21 @@ Phase 5のready暗号ジョブを技工所Windows PCが自動発見し、downloa
 - Phase 6はlocal persistence成功まで。技工所PCからの受領ACK、cloud ciphertext/job metadataの即時削除はPhase 7で実装する。
 - 開発検証はsynthetic data / local fake relayのみ。本番project・bucket・billing・IAM・receiver secret・Windows Scheduled Taskは変更していない。
 
+### 15.15 Phase 7の実装事実（Issue #144）
+
+Phase 6で技工所PCが復号・完全性確認・atomic local保存まで成功したjobだけを受領ACKし、Cloud Storage上の暗号objectとFirestore job metadataを通常経路で即時削除する。30日Lifecycle Deleteは異常時の安全網として残す。
+
+- download plan発行時に32byte randomのjob専用ACK capabilityを生成し、Cloud側にはSHA-256 hashだけを最大4件保持する。plaintext capabilityはFirestore・ログ・ローカルreceiptへ保存しない。
+- 長期receiver bearer tokenだけで削除を開始できない。relay upload時に jobId + descriptorSha256 + workOrderRef から受領proofを導出し、Cloud job metadataにはproofの二重SHA-256 verifierだけを保存する。
+- GatewayはEnvelope復号後に同じ受領proofを計算できるため、ACK開始条件はreceiver bearer認証 + job専用ACK capability + 復号後proofの3条件になる。receiver tokenだけを取得してもready jobを削除開始できない。
+- Gatewayはlocal persistence結果が stored またはreceipt整合済み already-stored の場合だけACKする。download、ciphertext hash、bootstrap復号、sender署名、Phase 3完全性、local writeのいずれかが失敗した場合はACKしない。
+- serverはvalid ACKを受けるとFirestore transactionで ready → deleting へ遷移し、deletion nonceと開始時刻を固定する。この遷移後はACK capability hashを削除する。
+- 削除対象は job.objectSpecs に既に記録された relay/v1/<jobId>/o/<ordinal>.bin だけ。prefix list・bucket-wide delete・患者/医院識別子からのpath生成は行わない。
+- object削除は404/不存在を成功扱いする冪等処理とし、全objectが不存在であることを再確認してからFirestore job documentを削除する。途中失敗ではjob metadataを残す。
+- deleting jobは次回pollでready jobより先に返し、Gatewayはciphertextを再downloadせず削除処理だけを再開する。削除開始済みなので再開時はjob専用capability/proofの再送を要求しない。
+- job metadata削除後にACK responseが失われても、同じjobIdへの再ACKは「既にdeleted」として副作用なしで成功扱いにできる。
+- 本番Firebase/Google Cloud deploy、bucket/IAM/billing変更、receiver secret設定、実患者/実医院データ送信はPhase 7実装作業では行わない。
+
 
 ## 16. 全体入力・保存・出力 Phase 2（2026-10-02 確定仕様）
 

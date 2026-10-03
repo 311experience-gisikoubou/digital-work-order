@@ -5,6 +5,7 @@ import { Storage } from '@google-cloud/storage';
 import { completeRelayJob, createRelayJob, relayError } from './relay-core.mjs';
 import {
   RECEIVER_API_VERSION,
+  acknowledgeReceiverJob,
   authenticateReceiver,
   createReceiverDownloadPlan,
   listReadyReceiverJobs
@@ -72,7 +73,8 @@ function sendError(res, error) {
     'RELAY_CAPABILITY_INVALID', 'RELAY_OBJECT_INCOMPLETE', 'RELAY_OBJECT_METADATA_MISMATCH',
     'RECEIVER_AUTH_REQUIRED', 'RECEIVER_AUTH_INVALID', 'RECEIVER_AUTH_CONFIG_INVALID',
     'RECEIVER_JOB_ID_INVALID', 'RECEIVER_JOB_NOT_FOUND', 'RECEIVER_JOB_NOT_COMPATIBLE',
-    'RECEIVER_INVALID_REQUEST', 'RECEIVER_INVALID_LIMIT', 'RECEIVER_DOWNLOAD_TTL_INVALID'
+    'RECEIVER_INVALID_REQUEST', 'RECEIVER_INVALID_LIMIT', 'RECEIVER_DOWNLOAD_TTL_INVALID',
+    'RECEIVER_ACK_CAPABILITY_INVALID', 'RECEIVER_DELETE_STATE_INVALID'
   ]);
   const status = clientCodes.has(code) ? 400 : 500;
   res.status(status).json({ error: code });
@@ -109,6 +111,80 @@ function firestoreAdapters(db) {
           .limit(limit)
           .get();
         return snapshot.docs.map(doc => doc.data());
+      },
+      async listPending(recipientKeyId, limit) {
+        const query = status => db.collection(JOB_COLLECTION)
+          .where('recipientKeyId', '==', recipientKeyId)
+          .where('status', '==', status)
+          .orderBy('readyAt', 'desc')
+          .limit(limit)
+          .get();
+        const [ready, deleting] = await Promise.all([query('ready'), query('deleting')]);
+        return [...deleting.docs, ...ready.docs].map(doc => doc.data()).slice(0, limit);
+      },
+      async issueAckCapability(jobId, recipientKeyId, capabilityHash) {
+        const ref = db.collection(JOB_COLLECTION).doc(jobId);
+        return db.runTransaction(async transaction => {
+          const snapshot = await transaction.get(ref);
+          if (!snapshot.exists) throw runtimeError('RECEIVER_JOB_NOT_FOUND');
+          const data = snapshot.data();
+          if (data.status !== 'ready' || data.recipientKeyId !== recipientKeyId) {
+            throw runtimeError('RECEIVER_JOB_NOT_COMPATIBLE');
+          }
+          const hashes = Array.isArray(data.ackCapabilityHashes) ? data.ackCapabilityHashes.slice() : [];
+          if (!hashes.includes(capabilityHash)) hashes.push(capabilityHash);
+          transaction.update(ref, {
+            ackCapabilityHashes: hashes.slice(-4),
+            updatedAt: Date.now()
+          });
+          return { issued: true };
+        });
+      },
+      async beginDelete(jobId, recipientKeyId, capabilityHash, ackProofHash, deletionNonce, startedAt) {
+        const ref = db.collection(JOB_COLLECTION).doc(jobId);
+        return db.runTransaction(async transaction => {
+          const snapshot = await transaction.get(ref);
+          if (!snapshot.exists) return { missing: true };
+          const data = snapshot.data();
+          if (data.recipientKeyId !== recipientKeyId) throw runtimeError('RECEIVER_JOB_NOT_COMPATIBLE');
+          if (data.status === 'deleting') return { record: data };
+          if (data.status !== 'ready') throw runtimeError('RECEIVER_DELETE_STATE_INVALID');
+          const hashes = Array.isArray(data.ackCapabilityHashes) ? data.ackCapabilityHashes : [];
+          if (typeof capabilityHash !== 'string' || !hashes.includes(capabilityHash) ||
+              typeof ackProofHash !== 'string' || data.receiverAckProofHash !== ackProofHash) {
+            throw runtimeError('RECEIVER_ACK_CAPABILITY_INVALID');
+          }
+          const record = {
+            ...data,
+            status: 'deleting',
+            deletionNonce,
+            deletionStartedAt: startedAt,
+            updatedAt: startedAt
+          };
+          transaction.update(ref, {
+            status: 'deleting',
+            deletionNonce,
+            deletionStartedAt: startedAt,
+            ackCapabilityHashes: FieldValue.delete(),
+            updatedAt: startedAt
+          });
+          delete record.ackCapabilityHashes;
+          return { record };
+        });
+      },
+      async finalizeDelete(jobId, recipientKeyId, deletionNonce) {
+        const ref = db.collection(JOB_COLLECTION).doc(jobId);
+        return db.runTransaction(async transaction => {
+          const snapshot = await transaction.get(ref);
+          if (!snapshot.exists) return { missing: true };
+          const data = snapshot.data();
+          if (data.status !== 'deleting' || data.recipientKeyId !== recipientKeyId ||
+              data.deletionNonce !== deletionNonce) {
+            throw runtimeError('RECEIVER_DELETE_STATE_INVALID');
+          }
+          transaction.delete(ref);
+          return { deleted: true };
+        });
       },
       async setUploads(jobId, uploads, capabilityHash) {
         const ref = db.collection(JOB_COLLECTION).doc(jobId);
@@ -180,6 +256,16 @@ function storageAdapter(storage, name, origin) {
         expires: Date.now() + spec.ttlMs
       });
       return url;
+    },
+    async deleteObject(objectName) {
+      const file = bucket.file(objectName);
+      try {
+        await file.delete();
+      } catch (error) {
+        if (error && Number(error.code) === 404) return { deleted: false, alreadyMissing: true };
+        throw error;
+      }
+      return { deleted: true, alreadyMissing: false };
     }
   };
 }
@@ -199,6 +285,11 @@ function parseCompletePath(pathname) {
 
 function parseReceiverDownloadPath(pathname) {
   const match = /^\/v1\/receiver\/jobs\/(job_[A-Za-z0-9_-]+):download$/.exec(pathname);
+  return match ? match[1] : null;
+}
+
+function parseReceiverAckPath(pathname) {
+  const match = /^\/v1\/receiver\/jobs\/(job_[A-Za-z0-9_-]+):ack$/.exec(pathname);
   return match ? match[1] : null;
 }
 
@@ -240,6 +331,25 @@ async function handleRequest(req, res) {
       const body = req.body || {};
       if (body.version !== RECEIVER_API_VERSION) throw runtimeError('RECEIVER_INVALID_REQUEST');
       const result = await createReceiverDownloadPlan(receiverJobId, auth.recipientKeyId, deps);
+      res.status(200).json(result);
+      return;
+    }
+    const receiverAckJobId = parseReceiverAckPath(req.path);
+    if (receiverAckJobId) {
+      const auth = requireReceiverAuth(req);
+      const body = req.body || {};
+      if (body.version !== RECEIVER_API_VERSION ||
+          (body.ackCapability !== undefined && typeof body.ackCapability !== 'string') ||
+          (body.ackProof !== undefined && typeof body.ackProof !== 'string')) {
+        throw runtimeError('RECEIVER_INVALID_REQUEST');
+      }
+      const result = await acknowledgeReceiverJob(
+        receiverAckJobId,
+        auth.recipientKeyId,
+        body.ackCapability,
+        body.ackProof,
+        deps
+      );
       res.status(200).json(result);
       return;
     }

@@ -1,21 +1,23 @@
-# Lab PC Gateway (Phase 6)
+# Lab PC Gateway (Phase 6-7)
 
-Phase 6 receives encrypted relay jobs on the dental laboratory Windows PC.
+Phase 6 receives encrypted relay jobs on the dental laboratory Windows PC. Phase 7 acknowledges only verified local saves and removes the acknowledged relay copy.
 
 The normal sequence is:
 
-1. list ready jobs with the receiver-only API;
-2. request short-lived read-only download URLs;
-3. download every ciphertext object;
-4. verify ciphertext size and SHA-256 before any decryption;
-5. decrypt the receiver bootstrap with the lab recipient ECDH private key;
-6. reconstruct the original Phase 4 envelope;
-7. verify the registered clinic sender signature and decrypt with MediaTransferCrypto.decryptEnvelope;
-8. re-run the Phase 3 package integrity checks;
-9. write to an opaque temporary local directory;
-10. atomically rename the verified directory to the final inbox location.
+1. list pending jobs with the receiver-only API;
+2. resume any already-authorized deleting job before starting a new download;
+3. for a ready job, request short-lived read-only download URLs and a per-job ACK capability;
+4. download every ciphertext object;
+5. verify ciphertext size and SHA-256 before any decryption;
+6. decrypt the receiver bootstrap with the lab recipient ECDH private key;
+7. reconstruct the original Phase 4 envelope;
+8. verify the registered clinic sender signature and decrypt with MediaTransferCrypto.decryptEnvelope;
+9. re-run the Phase 3 package integrity checks;
+10. write to an opaque temporary local directory and atomically rename the verified directory;
+11. after stored or receipt-verified already-stored only, compute the decrypt-derived ACK proof and send ACK;
+12. the relay transitions ready to deleting, deletes only the exact recorded ciphertext objects, verifies they are absent, then deletes the job metadata.
 
-Phase 6 stops after successful local persistence. It does not acknowledge or delete cloud objects. That is Phase 7.
+If ACK delivery fails after local persistence, the verified local copy remains. A later poll safely retries. If the server already entered deleting before a crash, the next poll resumes deletion without re-downloading ciphertext.
 
 ## Files
 
@@ -45,6 +47,8 @@ Local final directories use only the opaque relay jobId:
         <opaque-attachment-id>.<mime-derived-extension>
 
 No patient or clinic name is used in a directory or filename.
+
+The per-job ACK capability is not written to the local inbox or logs. A second ACK proof is computed only after successful decryption from the opaque job ID, descriptor SHA-256 and workOrderRef. The cloud stores only a second SHA-256 verifier for that proof. A stolen long-lived receiver token by itself therefore cannot initiate deletion of a ready job.
 
 ## Recipient private key
 
@@ -97,7 +101,11 @@ The receiver is fail-closed:
 - ciphertext size/hash mismatch → no decryption/local commit;
 - sender registry missing/revoked/signature mismatch → no local commit;
 - Phase 3 package mismatch → no local commit;
-- local write failure → temporary directory is removed;
-- existing matching final receipt → safe already-stored result.
+- local write failure → temporary directory is removed and no ACK is sent;
+- existing matching final receipt → safe already-stored result, then ACK can be retried;
+- wrong ACK capability or decrypt-derived proof → no cloud deletion;
+- ACK network failure after local persistence → local data is retained and the next poll retries safely;
+- deletion failure after ready → deleting transition → job metadata remains and the next poll resumes exact-object deletion without downloading again;
+- unrelated bucket objects are never selected by prefix or wildcard.
 
-A failed Phase 6 receive does not delete the cloud copy. The relay's 30-day lifecycle remains the abandoned-job safety net until Phase 7 implements explicit acknowledgement and deletion.
+The relay's 30-day lifecycle remains the abandoned-job safety net. Normal Phase 7 operation deletes the acknowledged ciphertext immediately after verified local persistence.
