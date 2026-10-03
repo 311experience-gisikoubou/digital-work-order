@@ -4,15 +4,15 @@
 仕様書・履歴・議事録を複製せず、製品・主要タスクの安定した現在地だけを保ちます。
 
 - Status: `ACTIVE`
-- Current phase: `Media transfer Phase 7 receiver ACK and immediate relay deletion implemented and verified; production cloud/Windows deployment remains intentionally unexecuted`
+- Current phase: `Media transfer Phase 8 localhost viewer and delivery/billing JSON handoff implemented and locally verified; production cloud/Windows activation remains intentionally unexecuted`
 - Active product Issue: `NONE`
 - Active product PR: `NONE`
-- Last completed product work: `Media transfer Phase 7: verified-local-save ACK, decrypt-derived ACK proof, per-job capability, retry-safe exact-object deletion, deleting-state recovery, and final job-metadata deletion are implemented and verified`
+- Last completed product work: `Media transfer Phase 8: verified inbox reuse, localhost-only read-only viewer, manifest/receipt/work-order/media revalidation, safe media playback, and existing digital-work-order-intake-v1 export are implemented and locally verified`
 - Current blocker: `NONE`
-- Next action: `After Phase 7 merge, proceed to Phase 8 production PC archive/viewer and delivery/billing integration planning; production cloud/Windows activation remains a separate authenticated operation`
-- PC-free work: `Phase 7 PR review / GitHub audit / Phase 8 archive-integration design`
-- PC-required work: `real lab-PC synthetic setup verification and, separately, human-authenticated Firebase/Google Cloud production activation when authorized`
-- User action required: `NO for code preparation; explicit merge authorization is required for the Phase 7 PR, and production cloud/IAM/DPAPI setup remains a separate authenticated human action`
+- Next action: `After Phase 8 merge, perform a harmless synthetic startup/viewer check on the actual lab PC when needed; production Firebase/Google Cloud, receiver secret, Scheduled Task, backup target/retention, and real-data activation remain separate human-authenticated operations`
+- PC-free work: `Phase 8 PR review / GitHub audit / production-operation planning without real data`
+- PC-required work: `harmless synthetic viewer/startup verification on the actual lab PC and, separately, human-authenticated production cloud/DPAPI/Scheduled Task activation when authorized`
+- User action required: `NO for code preparation; merge requires explicit human authorization, and production cloud/IAM/DPAPI/backup policy setup remains a separate authenticated human action`
 - Merge authorized: `NO`
 - Last product-state update: `2026-10-03`
 
@@ -32,6 +32,7 @@
 - Phase 5はPhase 4暗号Envelopeだけを署名検証済みrelayへ送るtransportを追加した。本番Firebase/Google Cloudへのデプロイ・課金有効化・実データ送信は未実施。通常削除はPhase 7、30日Lifecycleは異常時の上限。
 - Phase 6はreceiver bootstrap・pending-job discovery・短寿命download URL・Windows Gatewayを追加し、ciphertext照合 → bootstrap復号 → Phase 4署名/復号 → Phase 3完全性確認 → atomic local保存まで実装した。
 - Phase 7はverified local保存後だけACKする。receiver bearer + job専用capability + 復号後に計算できるACK proofを要求し、ready→deleting遷移後にexact objectだけを冪等削除、全object不存在確認後にjob metadataを削除する。途中失敗は次pollでdeleting状態から再開する。本番cloud/Windows設定は未実施。
+- Phase 8は既存Gateway inboxをそのまま正式な受信済み保存先として再利用し、`127.0.0.1`限定のread-only viewerで指示書・写真・動画・音声を閲覧できる。DWO側にSQLiteは追加せず、既存`digital-work-order-intake-v1`をダウンロードしてdental-delivery-billingの既存取込へ渡す。自動archive/削除・本番backup先/保管期間・production activationは未実施。
 
 ## Rules
 
