@@ -107,8 +107,9 @@ export async function runOnce(configPath, overrides = {}) {
 function summarize(result) {
   const stored = result.results.filter(item => item.status === 'stored').length;
   const already = result.results.filter(item => item.status === 'already-stored').length;
+  const resumed = result.results.filter(item => item.status === 'delete-resumed').length;
   const failed = result.results.filter(item => item.status === 'failed').length;
-  return { checked: result.checked, stored, already, failed };
+  return { checked: result.checked, stored, already, resumed, failed };
 }
 
 async function main() {
@@ -128,7 +129,8 @@ async function main() {
     });
     const summary = summarize(result);
     process.stdout.write('[gateway] checked=' + summary.checked + ' stored=' + summary.stored +
-      ' already=' + summary.already + ' failed=' + summary.failed + '\n');
+      ' already=' + summary.already + ' delete-resumed=' + summary.resumed +
+      ' failed=' + summary.failed + '\n');
   };
 
   if (!watch) {

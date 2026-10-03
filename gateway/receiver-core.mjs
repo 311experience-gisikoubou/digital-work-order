@@ -78,6 +78,7 @@ export async function listReadyJobs(options) {
   }
   value.jobs.forEach(job => {
     if (!isObject(job) || !JOB_ID.test(job.jobId || '') ||
+        (job.status !== 'ready' && job.status !== 'deleting') ||
         !Number.isSafeInteger(job.totalBytes) || job.totalBytes <= 0 ||
         !Number.isSafeInteger(job.objectCount) || job.objectCount < 3 ||
         !Number.isSafeInteger(job.readyAt)) {
@@ -105,8 +106,41 @@ export async function getDownloadPlan(jobId, options) {
   return value;
 }
 
+export async function acknowledgeJob(jobId, ackCapability, ackProof, options) {
+  const opts = options || {};
+  if (!JOB_ID.test(jobId || '')) throw gatewayError('GATEWAY_INVALID_JOB_ID');
+  if (ackCapability !== undefined && ackCapability !== null &&
+      (typeof ackCapability !== 'string' || !/^[A-Za-z0-9_-]{40,200}$/.test(ackCapability))) {
+    throw gatewayError('GATEWAY_INVALID_ACK_CAPABILITY');
+  }
+  if (ackProof !== undefined && ackProof !== null &&
+      (typeof ackProof !== 'string' || !HEX64.test(ackProof))) {
+    throw gatewayError('GATEWAY_INVALID_ACK_PROOF');
+  }
+  const endpoint = normalizeEndpoint(opts.endpoint);
+  const token = validateToken(opts.token);
+  const fetchApi = opts.fetch || globalThis.fetch;
+  if (typeof fetchApi !== 'function') throw gatewayError('GATEWAY_FETCH_UNAVAILABLE');
+  const body = { version: API_VERSION };
+  if (ackCapability) body.ackCapability = ackCapability;
+  if (ackProof) body.ackProof = ackProof;
+  const value = await postJson(
+    fetchApi,
+    endpoint + '/v1/receiver/jobs/' + encodeURIComponent(jobId) + ':ack',
+    token,
+    body,
+    'GATEWAY_ACK_FAILED'
+  );
+  if (!isObject(value) || value.version !== API_VERSION ||
+      value.jobId !== jobId || value.status !== 'deleted') {
+    throw gatewayError('GATEWAY_INVALID_ACK_RESPONSE');
+  }
+  return value;
+}
+
 function validateDownloadPlan(value, expectedJobId) {
   if (!isObject(value) || value.version !== API_VERSION || value.jobId !== expectedJobId ||
+      typeof value.ackCapability !== 'string' || !/^[A-Za-z0-9_-]{40,200}$/.test(value.ackCapability) ||
       !isObject(value.bootstrap) || !Array.isArray(value.objects) ||
       value.objects.length < 3 || value.objects.length > MAX_OBJECTS) {
     throw gatewayError('GATEWAY_INVALID_DOWNLOAD_PLAN');
@@ -130,6 +164,16 @@ function validateDownloadPlan(value, expectedJobId) {
 
 function sha256Buffer(buffer) {
   return createHash('sha256').update(buffer).digest('hex');
+}
+
+export function computeAckProof(jobId, descriptorSha256, workOrderRef) {
+  if (!JOB_ID.test(jobId || '') || !HEX64.test(descriptorSha256 || '') ||
+      typeof workOrderRef !== 'string' || !workOrderRef.startsWith('dwo:')) {
+    throw gatewayError('GATEWAY_INVALID_ACK_PROOF_INPUT');
+  }
+  return createHash('sha256')
+    .update('dwo-receiver-ack-v1|' + jobId + '|' + descriptorSha256 + '|' + workOrderRef, 'utf8')
+    .digest('hex');
 }
 
 async function downloadOne(fetchApi, item, maxAttempts) {
@@ -263,12 +307,23 @@ export async function processReadyJob(jobId, options) {
     },
     { root: opts.inboxRoot, now: opts.now }
   );
+  if (!stored || (stored.status !== 'stored' && stored.status !== 'already-stored')) {
+    throw gatewayError('GATEWAY_PERSIST_RESULT_INVALID');
+  }
+  const ackProof = computeAckProof(jobId, envelope.header.descriptorSha256, decrypted.workOrderRef);
+  const ack = await acknowledgeJob(jobId, plan.ackCapability, ackProof, opts);
   return {
     jobId,
     status: stored.status,
+    cloudStatus: ack.status,
     workOrderRef: decrypted.workOrderRef,
     directory: stored.directory
   };
+}
+
+export async function resumeDeletingJob(jobId, options) {
+  const ack = await acknowledgeJob(jobId, null, null, options);
+  return { jobId, status: 'delete-resumed', cloudStatus: ack.status };
 }
 
 export async function receiveOnce(options) {
@@ -276,7 +331,9 @@ export async function receiveOnce(options) {
   const results = [];
   for (const job of jobs) {
     try {
-      results.push(await processReadyJob(job.jobId, options));
+      results.push(job.status === 'deleting'
+        ? await resumeDeletingJob(job.jobId, options)
+        : await processReadyJob(job.jobId, options));
     } catch (error) {
       results.push({ jobId: job.jobId, status: 'failed', errorCode: error && error.code ? error.code : 'GATEWAY_UNKNOWN_ERROR' });
     }

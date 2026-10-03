@@ -216,9 +216,22 @@
         "artifactIds": [
           "digital-work-order-phase2-business-v1"
         ]
+      },
+      {
+        "id": "U11",
+        "topic": "project-intake:media-transfer-phase7-20261003",
+        "status": "CONFIRMED",
+        "summary": "Phase 6完了後の次マイルストーンとしてPhase 7を進める。技工所PCで受信・復号・完全性確認・atomic local保存が成功したjobだけをACKし、receiver bearer認証に加えてjob専用ACK capabilityを要求して、Cloud Storage暗号objectをexact pathで冪等削除し、全object不存在確認後にjob metadataを削除する。本番cloud deploy/billing/IAM操作・実患者データは扱わない。",
+        "decidedAt": "2026-10-03",
+        "source": "EXPLICIT_HUMAN",
+        "type": "BUSINESS",
+        "replaces": null,
+        "artifactIds": [
+          "digital-work-order-phase2-business-v1"
+        ]
       }
     ],
-    "currentState": "U01〜U10はCONFIRMED。Phase 5はmainへmerge済み。Issue #142でメディア転送Phase 6（技工所PC自動受信・復号・完全性確認・ローカル保存）を開始する。",
-    "nextAction": "Phase 6 intakeをproject-intake gateへ通し、receiver bootstrap・ready job discovery/download API・Windows Gatewayをsynthetic data限定で実装する。"
+    "currentState": "U01〜U11はCONFIRMED。Phase 6はmainへmerge済み。Issue #144でPhase 7（受領ACKとcloud暗号データ即時削除）を開始する。",
+    "nextAction": "Phase 7 intakeをgateへ通し、per-job ACK capability、retry-safe delete core、Gateway ACKをsynthetic data限定で実装する。"
   }
 }

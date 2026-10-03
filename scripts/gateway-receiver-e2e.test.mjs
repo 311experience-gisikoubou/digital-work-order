@@ -8,11 +8,12 @@ import { createRequire } from 'node:module';
 
 import { completeRelayJob, createRelayJob } from '../cloud/relay-core.mjs';
 import {
+  acknowledgeReceiverJob,
   authenticateReceiver,
   createReceiverDownloadPlan,
   listReadyReceiverJobs
 } from '../cloud/receiver-core.mjs';
-import { receiveOnce } from '../gateway/receiver-core.mjs';
+import { computeAckProof, receiveOnce } from '../gateway/receiver-core.mjs';
 
 const require = createRequire(import.meta.url);
 const T = require('../media-transfer-package.js');
@@ -86,6 +87,51 @@ function makeRelayState(cloudRegistry) {
         .filter(job => job.recipientKeyId === recipientKeyId && job.status === 'ready')
         .slice(0, limit);
     },
+    async listPending(recipientKeyId, limit) {
+      return [...jobs.values()]
+        .filter(job => job.recipientKeyId === recipientKeyId && (job.status === 'ready' || job.status === 'deleting'))
+        .slice(0, limit);
+    },
+    async issueAckCapability(jobId, recipientKeyId, capabilityHash) {
+      const job = jobs.get(jobId);
+      if (!job || job.status !== 'ready' || job.recipientKeyId !== recipientKeyId) {
+        throw Object.assign(new Error('incompatible'), { code: 'RECEIVER_JOB_NOT_COMPATIBLE' });
+      }
+      const hashes = Array.isArray(job.ackCapabilityHashes) ? job.ackCapabilityHashes : [];
+      if (!hashes.includes(capabilityHash)) hashes.push(capabilityHash);
+      job.ackCapabilityHashes = hashes.slice(-4);
+      return { issued: true };
+    },
+    async beginDelete(jobId, recipientKeyId, capabilityHash, ackProofHash, deletionNonce, startedAt) {
+      const job = jobs.get(jobId);
+      if (!job) return { missing: true };
+      if (job.recipientKeyId !== recipientKeyId) {
+        throw Object.assign(new Error('incompatible'), { code: 'RECEIVER_JOB_NOT_COMPATIBLE' });
+      }
+      if (job.status === 'deleting') return { record: job };
+      if (job.status !== 'ready') {
+        throw Object.assign(new Error('bad state'), { code: 'RECEIVER_DELETE_STATE_INVALID' });
+      }
+      if (!Array.isArray(job.ackCapabilityHashes) || !job.ackCapabilityHashes.includes(capabilityHash) ||
+          job.receiverAckProofHash !== ackProofHash) {
+        throw Object.assign(new Error('bad cap'), { code: 'RECEIVER_ACK_CAPABILITY_INVALID' });
+      }
+      job.status = 'deleting';
+      job.deletionNonce = deletionNonce;
+      job.deletionStartedAt = startedAt;
+      job.updatedAt = startedAt;
+      delete job.ackCapabilityHashes;
+      return { record: job };
+    },
+    async finalizeDelete(jobId, recipientKeyId, deletionNonce) {
+      const job = jobs.get(jobId);
+      if (!job) return { missing: true };
+      if (job.status !== 'deleting' || job.recipientKeyId !== recipientKeyId || job.deletionNonce !== deletionNonce) {
+        throw Object.assign(new Error('bad state'), { code: 'RECEIVER_DELETE_STATE_INVALID' });
+      }
+      jobs.delete(jobId);
+      return { deleted: true };
+    },
     async setUploads(jobId, uploads, capabilityHash) {
       const job = jobs.get(jobId);
       if (!job.uploads) job.uploads = structuredClone(uploads);
@@ -116,6 +162,10 @@ function makeRelayState(cloudRegistry) {
     },
     async createReadUrl(spec) {
       return 'https://download.test/' + encodeURIComponent(spec.objectName);
+    },
+    async deleteObject(objectName) {
+      objects.delete(objectName);
+      return { deleted: true };
     }
   };
 
@@ -143,7 +193,9 @@ async function uploadBuiltParts(state, built, created) {
   }
 }
 
-function makeFetch(state, recipientKeyId, tamperOrdinal = null) {
+function makeFetch(state, recipientKeyId, behavior = {}) {
+  const tamperOrdinal = behavior.tamperOrdinal === undefined ? null : behavior.tamperOrdinal;
+  let failAckRemaining = behavior.failAckOnce ? 1 : 0;
   return async (url, options = {}) => {
     if (url === 'https://relay.test/v1/receiver/jobs:list') {
       authenticateReceiver(options.headers.Authorization, TOKEN_HASH, recipientKeyId);
@@ -156,6 +208,24 @@ function makeFetch(state, recipientKeyId, tamperOrdinal = null) {
       authenticateReceiver(options.headers.Authorization, TOKEN_HASH, recipientKeyId);
       const jobId = decodeURIComponent(url.slice(prefix.length, -':download'.length));
       const result = await createReceiverDownloadPlan(jobId, recipientKeyId, state.deps, { ttlMs: 120000 });
+      return { ok: true, status: 200, async json() { return result; } };
+    }
+    if (url.startsWith(prefix) && url.endsWith(':ack')) {
+      authenticateReceiver(options.headers.Authorization, TOKEN_HASH, recipientKeyId);
+      if (failAckRemaining > 0) {
+        failAckRemaining -= 1;
+        throw new Error('simulated ack network failure');
+      }
+      const jobId = decodeURIComponent(url.slice(prefix.length, -':ack'.length));
+      const body = JSON.parse(options.body);
+      const result = await acknowledgeReceiverJob(
+        jobId,
+        recipientKeyId,
+        body.ackCapability,
+        body.ackProof,
+        state.deps,
+        { now: () => 2700 }
+      );
       return { ok: true, status: 200, async json() { return result; } };
     }
     if (url.startsWith('https://download.test/')) {
@@ -175,7 +245,7 @@ function makeFetch(state, recipientKeyId, tamperOrdinal = null) {
   };
 }
 
-test('synthetic Phase6 end-to-end receives, verifies, decrypts and atomically stores without cloud plaintext identifiers', async () => {
+test('synthetic Phase7 end-to-end stores locally, ACKs, then deletes cloud ciphertext and job metadata', async () => {
   const fixture = await buildFixture();
   const state = makeRelayState(fixture.cloudRegistry);
   const created = await createRelayJob(fixture.built.request, state.deps, { crypto: webcrypto, now: () => 2300 });
@@ -202,6 +272,7 @@ test('synthetic Phase6 end-to-end receives, verifies, decrypts and atomically st
     const first = await receiveOnce(options);
     assert.equal(first.checked, 1);
     assert.equal(first.results[0].status, 'stored');
+    assert.equal(first.results[0].cloudStatus, 'deleted');
     assert.equal(first.results[0].workOrderRef, REF);
 
     const finalDir = path.join(root, created.jobId);
@@ -223,9 +294,12 @@ test('synthetic Phase6 end-to-end receives, verifies, decrypts and atomically st
     assert.equal(receipt.workOrderRef, REF);
     assert.equal(receipt.receivedAt, 2500);
 
+    assert.equal(state.jobs.has(created.jobId), false);
+    assert.equal(state.objects.size, 0);
+
     const second = await receiveOnce(options);
-    assert.equal(second.results[0].status, 'already-stored');
-    assert.ok(state.objects.size > 0, 'Phase 6 must not delete cloud ciphertext before Phase 7');
+    assert.equal(second.checked, 0);
+    assert.deepEqual(second.results, []);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -243,7 +317,7 @@ test('ciphertext tamper fails before local persistence and leaves no completed j
     const result = await receiveOnce({
       endpoint: 'https://relay.test',
       token: TOKEN,
-      fetch: makeFetch(state, fixture.recipient.recipientKeyId, 1),
+      fetch: makeFetch(state, fixture.recipient.recipientKeyId, { tamperOrdinal: 1 }),
       recipientKeyRingOrIdentity: fixture.recipient,
       senderRegistries: { version: 'dwo-gateway-sender-registry-v1', senders: [fixture.fullRegistry] },
       inboxRoot: root,
@@ -253,6 +327,106 @@ test('ciphertext tamper fails before local persistence and leaves no completed j
     assert.equal(result.results[0].status, 'failed');
     assert.equal(result.results[0].errorCode, 'GATEWAY_OBJECT_HASH_MISMATCH');
     await assert.rejects(() => fs.access(path.join(root, created.jobId)));
+    assert.equal(state.jobs.get(created.jobId).status, 'ready');
+    assert.ok(state.objects.size > 0);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('ACK network failure keeps verified local data; next poll reuses receipt and completes cloud delete', async () => {
+  const fixture = await buildFixture();
+  const state = makeRelayState(fixture.cloudRegistry);
+  const created = await createRelayJob(fixture.built.request, state.deps, { crypto: webcrypto, now: () => 2300 });
+  await uploadBuiltParts(state, fixture.built, created);
+  await completeRelayJob(created.jobId, created.uploadCapability, state.deps, { crypto: webcrypto, now: () => 2400 });
+
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dwo-gateway-ack-retry-'));
+  try {
+    const fetch = makeFetch(state, fixture.recipient.recipientKeyId, { failAckOnce: true });
+    const options = {
+      endpoint: 'https://relay.test',
+      token: TOKEN,
+      fetch,
+      recipientKeyRingOrIdentity: fixture.recipient,
+      senderRegistries: { version: 'dwo-gateway-sender-registry-v1', senders: [fixture.fullRegistry] },
+      inboxRoot: root,
+      crypto: webcrypto,
+      now: () => 2800
+    };
+
+    const first = await receiveOnce(options);
+    assert.equal(first.checked, 1);
+    assert.equal(first.results[0].status, 'failed');
+    assert.equal(first.results[0].errorCode, 'GATEWAY_ACK_FAILED');
+    await fs.access(path.join(root, created.jobId, 'receipt.json'));
+    assert.equal(state.jobs.get(created.jobId).status, 'ready');
+    assert.ok(state.objects.size > 0);
+
+    const second = await receiveOnce(options);
+    assert.equal(second.checked, 1);
+    assert.equal(second.results[0].status, 'already-stored');
+    assert.equal(second.results[0].cloudStatus, 'deleted');
+    assert.equal(state.jobs.has(created.jobId), false);
+    assert.equal(state.objects.size, 0);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('deleting job resumes on next poll without re-downloading ciphertext', async () => {
+  const fixture = await buildFixture();
+  const state = makeRelayState(fixture.cloudRegistry);
+  const created = await createRelayJob(fixture.built.request, state.deps, { crypto: webcrypto, now: () => 2300 });
+  await uploadBuiltParts(state, fixture.built, created);
+  await completeRelayJob(created.jobId, created.uploadCapability, state.deps, { crypto: webcrypto, now: () => 2400 });
+
+  const plan = await createReceiverDownloadPlan(
+    created.jobId,
+    fixture.recipient.recipientKeyId,
+    state.deps,
+    { ttlMs: 120000 }
+  );
+  const ackProof = computeAckProof(created.jobId, fixture.built.request.envelopeHeader.descriptorSha256, REF);
+  const capabilityHash = createHash('sha256').update(plan.ackCapability).digest('hex');
+  const proofHash = createHash('sha256').update(ackProof).digest('hex');
+  await state.deps.jobStore.beginDelete(
+    created.jobId,
+    fixture.recipient.recipientKeyId,
+    capabilityHash,
+    proofHash,
+    'del_' + 'R'.repeat(22),
+    2900
+  );
+
+  const firstObjectName = state.jobs.get(created.jobId).objectSpecs[0].objectName;
+  state.objects.delete(firstObjectName);
+
+  let downloadCalls = 0;
+  const baseFetch = makeFetch(state, fixture.recipient.recipientKeyId);
+  const fetch = async (url, options) => {
+    if (url.startsWith('https://download.test/')) downloadCalls += 1;
+    return baseFetch(url, options);
+  };
+
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dwo-gateway-delete-resume-'));
+  try {
+    const result = await receiveOnce({
+      endpoint: 'https://relay.test',
+      token: TOKEN,
+      fetch,
+      recipientKeyRingOrIdentity: fixture.recipient,
+      senderRegistries: { version: 'dwo-gateway-sender-registry-v1', senders: [fixture.fullRegistry] },
+      inboxRoot: root,
+      crypto: webcrypto,
+      now: () => 3000
+    });
+    assert.equal(result.checked, 1);
+    assert.equal(result.results[0].status, 'delete-resumed');
+    assert.equal(result.results[0].cloudStatus, 'deleted');
+    assert.equal(downloadCalls, 0);
+    assert.equal(state.jobs.has(created.jobId), false);
+    assert.equal(state.objects.size, 0);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

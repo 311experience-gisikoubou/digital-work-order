@@ -309,6 +309,12 @@ async function deriveJobId(descriptorSha256, cryptoApi) {
   return 'job_' + base64urlEncode(digest);
 }
 
+async function deriveReceiverAckProofHash(jobId, descriptorSha256, workOrderRef, cryptoApi) {
+  const material = 'dwo-receiver-ack-v1|' + jobId + '|' + descriptorSha256 + '|' + workOrderRef;
+  const proof = await sha256Hex(new TextEncoder().encode(material), cryptoApi);
+  return sha256Hex(new TextEncoder().encode(proof), cryptoApi);
+}
+
 function generateCapability(cryptoApi) {
   const bytes = new Uint8Array(32);
   cryptoApi.getRandomValues(bytes);
@@ -372,6 +378,12 @@ export async function createRelayJob(request, deps, options = {}) {
   const capability = generateCapability(cryptoApi);
   const capHash = await capabilityHash(capability, cryptoApi);
   const objectSpecs = buildObjectSpecs(jobId, request.plan);
+  const receiverAckProofHash = await deriveReceiverAckProofHash(
+    jobId,
+    validated.descriptorSha256,
+    request.descriptor.workOrderRef,
+    cryptoApi
+  );
   const createdAt = now();
   const baseRecord = {
     version: RELAY_PROTOCOL_VERSION,
@@ -385,6 +397,7 @@ export async function createRelayJob(request, deps, options = {}) {
     totalBytes: request.plan.totalBytes,
     objectSpecs,
     receiverBootstrap: receiverBootstrapFromPlan(request.plan),
+    receiverAckProofHash,
     capabilityHashes: [capHash],
     createdAt,
     expiresAt: createdAt + 30 * 24 * 60 * 60 * 1000
@@ -392,7 +405,9 @@ export async function createRelayJob(request, deps, options = {}) {
 
   const reservation = await deps.jobStore.reserve(jobId, baseRecord);
   const record = reservation && reservation.record ? reservation.record : baseRecord;
-  if (!sameJobRequest(record, validated, request)) throw relayError('RELAY_IDEMPOTENCY_CONFLICT');
+  if (!sameJobRequest(record, validated, request) || record.receiverAckProofHash !== receiverAckProofHash) {
+    throw relayError('RELAY_IDEMPOTENCY_CONFLICT');
+  }
   if (record.status === 'ready') {
     return { jobId, status: 'ready', uploads: [] };
   }
