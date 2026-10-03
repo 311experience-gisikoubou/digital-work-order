@@ -171,12 +171,25 @@
     return envelope;
   }
 
-  function enumerateCipherParts(envelope) {
+  function enumerateCipherParts(envelope, receiverBootstrap) {
     validateEnvelope(envelope);
-    const parts = [
+    const parts = [];
+    if (receiverBootstrap) {
+      if (!receiverBootstrap.header || !(receiverBootstrap.ciphertext instanceof Blob)) {
+        throw relayError('RELAY_INVALID_RECEIVER_BOOTSTRAP');
+      }
+      parts.push({
+        slot: 'receiver-bootstrap',
+        kind: 'receiver-bootstrap',
+        iv: receiverBootstrap.header.iv,
+        blob: receiverBootstrap.ciphertext,
+        bootstrapHeader: receiverBootstrap.header
+      });
+    }
+    parts.push(
       { slot: 'manifest', kind: 'manifest', iv: envelope.parts.manifest.iv, blob: envelope.parts.manifest.ciphertext },
       { slot: 'work-order', kind: 'work-order', iv: envelope.parts.workOrder.iv, blob: envelope.parts.workOrder.ciphertext }
-    ];
+    );
     envelope.descriptor.attachments.forEach(entry => {
       const source = envelope.parts.attachments[entry.attachmentId];
       source.chunks.forEach(chunk => {
@@ -195,7 +208,8 @@
 
   async function buildTransportPlan(envelope, options) {
     const cryptoApi = resolveCrypto(options);
-    const parts = enumerateCipherParts(envelope);
+    const receiverBootstrap = options && options.receiverBootstrap ? options.receiverBootstrap : null;
+    const parts = enumerateCipherParts(envelope, receiverBootstrap);
     const entries = [];
     let totalBytes = 0;
     for (const part of parts) {
@@ -210,6 +224,15 @@
       if (part.kind === 'attachment') {
         entry.attachmentId = part.attachmentId;
         entry.index = part.index;
+      } else if (part.kind === 'receiver-bootstrap') {
+        const h = part.bootstrapHeader;
+        entry.bootstrapVersion = h.version;
+        entry.recipientKeyId = h.recipientKeyId;
+        entry.ephemeralPublicJwk = h.ephemeralPublicJwk;
+        entry.hkdfSalt = h.hkdfSalt;
+        if (h.ciphertextSize !== entry.size || h.ciphertextSha256 !== entry.ciphertextSha256) {
+          throw relayError('RELAY_INVALID_RECEIVER_BOOTSTRAP');
+        }
       }
       entries.push(entry);
       totalBytes += bytes.byteLength;
@@ -253,12 +276,28 @@
   }
 
   async function buildCreateRequest(envelope, senderIdentity, options) {
-    const cryptoApi = resolveCrypto(options);
+    const opts = options || {};
+    const cryptoApi = resolveCrypto(opts);
     validateEnvelope(envelope);
     const descriptorSha256 = await sha256Json(envelope.descriptor, cryptoApi);
     if (descriptorSha256 !== envelope.header.descriptorSha256) throw relayError('RELAY_DESCRIPTOR_HASH_MISMATCH');
-    const plan = await buildTransportPlan(envelope, options);
-    const authorization = await buildRelayAuthorization(envelope, plan, senderIdentity, options);
+
+    let receiverBootstrap = opts.receiverBootstrap || null;
+    if (!receiverBootstrap && opts.recipientPublicInfo) {
+      const bootstrapApi = opts.bootstrapApi || global.MediaReceiverBootstrap;
+      if (!bootstrapApi || typeof bootstrapApi.createReceiverBootstrap !== 'function') {
+        throw relayError('RELAY_RECEIVER_BOOTSTRAP_UNAVAILABLE');
+      }
+      receiverBootstrap = await bootstrapApi.createReceiverBootstrap(
+        envelope,
+        opts.recipientPublicInfo,
+        { crypto: cryptoApi }
+      );
+    }
+
+    const planOptions = Object.assign({}, opts, { receiverBootstrap });
+    const plan = await buildTransportPlan(envelope, planOptions);
+    const authorization = await buildRelayAuthorization(envelope, plan, senderIdentity, opts);
     return {
       request: {
         version: RELAY_PROTOCOL_VERSION,
@@ -269,7 +308,7 @@
         authorization: authorization.body,
         authorizationSignature: authorization.signature
       },
-      parts: enumerateCipherParts(envelope)
+      parts: enumerateCipherParts(envelope, receiverBootstrap)
     };
   }
 

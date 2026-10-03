@@ -640,7 +640,8 @@
           cryptoOptions: opts.cryptoOptions
         }
       );
-      return relayApi.uploadEnvelope(envelope, senderIdentity, opts.relayOptions);
+      const relayOptions = Object.assign({}, opts.relayOptions || {}, { recipientPublicInfo });
+      return relayApi.uploadEnvelope(envelope, senderIdentity, relayOptions);
     };
 
     render();

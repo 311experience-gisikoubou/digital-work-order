@@ -224,10 +224,17 @@ test('index load order and media helper are wired without automatic sending', ()
   const index = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   const media = fs.readFileSync(path.join(__dirname, '..', 'media.js'), 'utf8');
   const cryptoIndex = index.indexOf('<script src="media-transfer-crypto.js"></script>');
+  const bootstrapIndex = index.indexOf('<script src="media-receiver-bootstrap.js"></script>');
   const relayIndex = index.indexOf('<script src="media-relay.js"></script>');
   const mediaIndex = index.indexOf('<script src="media.js"></script>');
-  assert.ok(cryptoIndex >= 0 && cryptoIndex < relayIndex && relayIndex < mediaIndex);
+  assert.ok(
+    cryptoIndex >= 0 &&
+    cryptoIndex < bootstrapIndex &&
+    bootstrapIndex < relayIndex &&
+    relayIndex < mediaIndex
+  );
   assert.match(media, /helpers\.uploadEncryptedTransferEnvelope\s*=/);
-  assert.match(media, /relayApi\.uploadEnvelope\(envelope, senderIdentity, opts\.relayOptions\)/);
+  assert.match(media, /Object\.assign\(\{\}, opts\.relayOptions \|\| \{\}, \{ recipientPublicInfo \}\)/);
+  assert.match(media, /relayApi\.uploadEnvelope\(envelope, senderIdentity, relayOptions\)/);
   assert.equal(index.includes('DWO_RELAY_ENDPOINT'), false);
 });

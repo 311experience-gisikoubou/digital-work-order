@@ -107,7 +107,36 @@ Optional:
 DWO_RELAY_ALLOWED_ORIGIN=https://311experience-gisikoubou.github.io
 ```
 
-Do not place those values in source if the deployment environment provides managed configuration.
+Phase 6 receiver authentication is also runtime-only configuration:
+
+```text
+DWO_RECEIVER_KEY_ID=rk_...
+DWO_RECEIVER_TOKEN_SHA256=<64 lowercase hex characters>
+```
+
+`DWO_RECEIVER_TOKEN_SHA256` is the SHA-256 digest of the random receiver bearer token. The plaintext token must never be stored in this repository, Firestore, deployment logs, or shell history. On the lab PC, use `gateway/windows/protect-receiver-secrets.ps1` so the plaintext token and recipient-backup passphrase are protected with Windows DPAPI CurrentUser.
+
+Do not place these values in source if the deployment environment provides managed configuration.
+
+## Phase 6 signed-download IAM
+
+The Phase 6 receiver endpoint returns short-lived V4 signed URLs for **read-only** access to the exact opaque relay objects. The Cloud Functions runtime identity therefore needs:
+
+- permission to read relay objects (`storage.objects.get`; a bucket-scoped Storage Object Viewer role is a standard predefined option), and
+- permission to sign blobs as the signing service account (`iam.serviceAccounts.signBlob`).
+
+Prefer the narrowest IAM grant available in the target organization. If a predefined role is used for signing, Service Account Token Creator includes `iam.serviceAccounts.signBlob` but also grants additional token/signing capabilities, so grant it only on the intended service account and only when a narrower custom role is not practical.
+
+Do not create or download a service-account JSON private key for signed URLs. The runtime must continue using its attached managed identity / Application Default Credentials.
+
+The read URLs default to five minutes and are bounded by the receiver core to 1–15 minutes. Possession of a live signed URL is sufficient to read that one object until expiry, so URLs must never be logged or persisted.
+
+Phase 6 ready-job discovery uses a composite Firestore index on recipientKeyId + status + readyAt (descending), defined in firestore.indexes.json. This prevents old, already-local jobs from hiding newer jobs while Phase 7 acknowledgement/deletion is not yet implemented. Apply that index only to the intended relay project:
+
+    cd cloud
+    firebase deploy --only firestore:indexes --config firebase.json
+
+This is a production configuration action and is not executed by repository tests.
 
 ## Sender registry
 
@@ -140,7 +169,7 @@ Sender registration/revocation must be performed from an authenticated lab-admin
 
 ## Deployment
 
-Deployment is a human-authenticated production operation and is intentionally not executed by Phase 5 tests.
+Deployment is a human-authenticated production operation and is intentionally not executed by Phase 5/6 tests.
 
 After the safety checks above, use `cloud/` as the Firebase project directory. Deploy the relay function by itself first; do not use an unscoped deploy command against a project that may contain unrelated Firebase resources:
 

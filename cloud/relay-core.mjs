@@ -158,11 +158,15 @@ function validateDescriptor(descriptor) {
   });
 }
 
-function expectedLogicalEntries(descriptor) {
-  const out = [
+function expectedLogicalEntries(descriptor, plan) {
+  const out = [];
+  if (plan && Array.isArray(plan.entries) && plan.entries[0] && plan.entries[0].kind === 'receiver-bootstrap') {
+    out.push({ slot: 'receiver-bootstrap', kind: 'receiver-bootstrap' });
+  }
+  out.push(
     { slot: 'manifest', kind: 'manifest' },
     { slot: 'work-order', kind: 'work-order' }
-  ];
+  );
   descriptor.attachments.forEach(entry => {
     entry.chunks.forEach(chunk => {
       out.push({
@@ -183,7 +187,7 @@ function validatePlan(plan, descriptor, limits) {
   if (!Number.isSafeInteger(plan.totalBytes) || plan.totalBytes <= 0 || !Array.isArray(plan.entries)) {
     throw relayError('RELAY_INVALID_PLAN');
   }
-  const expected = expectedLogicalEntries(descriptor);
+  const expected = expectedLogicalEntries(descriptor, plan);
   if (plan.entries.length !== expected.length || plan.entries.length > limits.maxObjects) throw relayError('RELAY_INVALID_PLAN');
   let total = 0;
   const ivs = new Set();
@@ -191,11 +195,23 @@ function validatePlan(plan, descriptor, limits) {
     const logical = expected[i];
     const keys = logical.kind === 'attachment'
       ? ['slot', 'kind', 'attachmentId', 'index', 'iv', 'size', 'ciphertextSha256']
-      : ['slot', 'kind', 'iv', 'size', 'ciphertextSha256'];
+      : logical.kind === 'receiver-bootstrap'
+        ? ['slot', 'kind', 'bootstrapVersion', 'recipientKeyId', 'ephemeralPublicJwk', 'hkdfSalt', 'iv', 'size', 'ciphertextSha256']
+        : ['slot', 'kind', 'iv', 'size', 'ciphertextSha256'];
     if (!exactKeys(entry, keys)) throw relayError('RELAY_INVALID_PLAN');
     if (entry.slot !== logical.slot || entry.kind !== logical.kind) throw relayError('RELAY_PLAN_DESCRIPTOR_MISMATCH');
     if (logical.kind === 'attachment' && (entry.attachmentId !== logical.attachmentId || entry.index !== logical.index)) {
       throw relayError('RELAY_PLAN_DESCRIPTOR_MISMATCH');
+    }
+    if (logical.kind === 'receiver-bootstrap') {
+      if (entry.bootstrapVersion !== 'dwo-receiver-bootstrap-v1' ||
+          entry.recipientKeyId !== descriptor.recipientKeyId ||
+          !isPlainObject(entry.ephemeralPublicJwk) ||
+          entry.ephemeralPublicJwk.kty !== 'EC' || entry.ephemeralPublicJwk.crv !== 'P-256' ||
+          typeof entry.ephemeralPublicJwk.x !== 'string' || typeof entry.ephemeralPublicJwk.y !== 'string' ||
+          typeof entry.hkdfSalt !== 'string' || !BASE64URL.test(entry.hkdfSalt)) {
+        throw relayError('RELAY_INVALID_RECEIVER_BOOTSTRAP');
+      }
     }
     if (typeof entry.iv !== 'string' || !BASE64URL.test(entry.iv) || ivs.has(entry.iv)) throw relayError('RELAY_INVALID_PLAN');
     ivs.add(entry.iv);
@@ -312,6 +328,20 @@ function buildObjectSpecs(jobId, plan) {
   }));
 }
 
+function receiverBootstrapFromPlan(plan) {
+  const entry = plan && Array.isArray(plan.entries) ? plan.entries[0] : null;
+  if (!entry || entry.kind !== 'receiver-bootstrap') return null;
+  return {
+    version: entry.bootstrapVersion,
+    recipientKeyId: entry.recipientKeyId,
+    ephemeralPublicJwk: entry.ephemeralPublicJwk,
+    hkdfSalt: entry.hkdfSalt,
+    iv: entry.iv,
+    ciphertextSha256: entry.ciphertextSha256,
+    ciphertextSize: entry.size
+  };
+}
+
 function sameJobRequest(record, validated, request) {
   return record && record.descriptorSha256 === validated.descriptorSha256 &&
     record.planSha256 === validated.planSha256 &&
@@ -354,6 +384,7 @@ export async function createRelayJob(request, deps, options = {}) {
     recipientKeyId: request.descriptor.recipientKeyId,
     totalBytes: request.plan.totalBytes,
     objectSpecs,
+    receiverBootstrap: receiverBootstrapFromPlan(request.plan),
     capabilityHashes: [capHash],
     createdAt,
     expiresAt: createdAt + 30 * 24 * 60 * 60 * 1000

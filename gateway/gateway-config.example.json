@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "relayEndpoint": "https://REPLACE_WITH_RELAY_FUNCTION_URL",
+  "recipientBackupPaths": [
+    "recipient-backup.json"
+  ],
+  "activeRecipientKeyId": null,
+  "senderRegistryPath": "sender-registry.json",
+  "inboxRoot": null,
+  "pollSeconds": 60
+}
