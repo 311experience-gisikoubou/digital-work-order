@@ -4,17 +4,17 @@
 仕様書・履歴・議事録を複製せず、製品・主要タスクの安定した現在地だけを保ちます。
 
 - Status: `ACTIVE`
-- Current phase: `Phase 2 input/save/output implementation complete on main and verified on the deployed GitHub Pages runtime`
+- Current phase: `Media transfer Phase 5 encrypted cloud-relay transport implemented and verified; production cloud deployment remains intentionally unexecuted`
 - Active product Issue: `NONE`
 - Active product PR: `NONE`
-- Last completed product work: `Phase 2 complete: persistent active draft, unified draft/media ownership, two-axis tooth state, per-order visualSnapshot, B5/A4 PDF reflection, formal issue flow, and multi-select clasp/bar preservation are merged and verified`
+- Last completed product work: `Media transfer Phase 5: signed encrypted relay plan, active-sender verification, opaque resumable Cloud Storage upload sessions, 30-day lifecycle fail-safe, and no-direct-client-access rules are implemented and verified`
 - Current blocker: `NONE`
-- Next action: `Phase 2 is closed; select the next product milestone from the roadmap without reopening completed Phase 2 work unless a new requirement or regression is identified`
-- PC-free work: `spec review / GitHub audit`
-- PC-required work: `next product implementation, automated tests, browser checks, and any genuinely subjective real-device verification`
-- User action required: `NO until a genuine business choice, real-device subjective check, or merge authorization is needed`
+- Next action: `After Phase 5 merge and the separate human-authenticated provider setup/deployment, proceed to Phase 6 lab-PC automatic receive/download/decrypt/local-save implementation`
+- PC-free work: `Phase 5 PR review / GitHub audit / cloud setup documentation review`
+- PC-required work: `Phase 6 receiver implementation and, separately, human-authenticated Firebase/Google Cloud production setup when authorized`
+- User action required: `NO for code preparation; explicit merge authorization is required for the Phase 5 PR, and production Blaze/project/bucket deployment remains a separate authenticated human action`
 - Merge authorized: `NO`
-- Last product-state update: `2026-10-02`
+- Last product-state update: `2026-10-03`
 
 ## Optional short notes
 
@@ -28,7 +28,8 @@
 - メディア永続化（`media-storage.js` / `media.js`）はOPFS（Blob本体）+ IndexedDB（metadata）で実装済み。`persistAttachment` / `restoreOwner` / `removeOwner` / `commitDraftToWorkOrder` は呼び出し側が渡す明示的な `draftRef` / `ownerRef` だけで動作し、media-storage自身は独立したactive draftを生成・補修・ローテーションしない。IndexedDBの `settings` オブジェクトストアはschema互換のためだけに残し、authorityとしては使わない。
 - `ReferenceMediaManager.commitCurrentDraft(workOrderRef)` は正式発行フローから使用され、添付を `draftRef` から `workOrderRef` へ確定する。後工程失敗時の補償用rollbackも実装済み。
 - 紙指示書は既存のブラウザ内ローカルOCR + 人間確認 + 成功後破棄を維持する。
-- 複数クラスプ/バーは配列で発行受注・session・詳細・PDFへ保持し、`digital-work-order-intake-v1` の旧単一値互換は維持する。stable `workOrderRef` も維持し、外部クラウド送信は追加していない。
+- 複数クラスプ/バーは配列で発行受注・session・詳細・PDFへ保持し、`digital-work-order-intake-v1` の旧単一値互換は維持する。stable `workOrderRef` も維持する。
+- Phase 5はPhase 4暗号Envelopeだけを署名検証済みrelayへ送るtransportを追加した。本番Firebase/Google Cloudへのデプロイ・課金有効化・実データ送信は未実施。通常削除はPhase 7、30日Lifecycleは異常時の上限。
 
 ## Rules
 
