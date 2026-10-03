@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // production-readiness-preflight-selftest.mjs
 //
-// Dependency-free selftest for tools/production-readiness-preflight.mjs.
+// Dependency-free selftest for gateway/ops/production-readiness-preflight.mjs.
 // Uses only synthetic temporary fixtures created under the OS temp directory.
 // No network, no cloud, no auth, no real repository paths are read or written.
 // Every fixture directory created by this selftest is removed before exit,

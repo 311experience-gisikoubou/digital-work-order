@@ -380,7 +380,7 @@ function main() {
 
 function defaultRepoRoot() {
   const here = dirname(fileURLToPath(import.meta.url));
-  return resolve(here, '..');
+  return resolve(here, '..', '..');
 }
 
 const isDirectRun = (() => {

@@ -42,9 +42,9 @@ Each stage below has exactly one marker:
 
 **Marker: `AI_SAFE_PREP`**
 
-- Run `node tools/production-readiness-preflight.mjs --repo-root <repo>` (optionally
+- Run `node gateway/ops/production-readiness-preflight.mjs --repo-root <repo>` (optionally
   `--pretty`) and confirm the result is `PASS`.
-- Run `node tools/production-readiness-preflight-selftest.mjs` and confirm all
+- Run `node gateway/ops/production-readiness-preflight-selftest.mjs` and confirm all
   selftest cases pass.
 - Review `cloud/README.md` and `gateway/README.md` in full; this runbook does not
   restate their exact commands or safety invariants.
