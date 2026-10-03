@@ -1,0 +1,23 @@
+{
+  "functions": {
+    "source": ".",
+    "codebase": "relay",
+    "runtime": "nodejs22",
+    "ignore": [
+      ".git",
+      ".runtimeconfig.json",
+      "firebase-debug.log",
+      "firebase-debug.*.log",
+      "node_modules",
+      "README.md",
+      "storage-lifecycle.json",
+      "storage-cors.json"
+    ]
+  },
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  }
+}

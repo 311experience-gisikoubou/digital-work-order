@@ -623,6 +623,26 @@
       return cryptoApi.encryptPackage(pkg, senderIdentity, recipientPublicInfo, opts.cryptoOptions);
     };
 
+    // Phase 5: 暗号Envelopeだけを明示的なrelay endpointへ送る非UIヘルパー。
+    // 自動送信・endpoint固定・credential保持は行わず、呼び出し側が明示したoptionsだけを使う。
+    helpers.uploadEncryptedTransferEnvelope = async (workOrder, senderIdentity, recipientPublicInfo, options) => {
+      const relayApi = global.MediaRelayTransport;
+      if (!relayApi || typeof relayApi.uploadEnvelope !== 'function') {
+        throw storageError('MEDIA_STORAGE_UNAVAILABLE', UNSUPPORTED_MESSAGE);
+      }
+      const opts = options || {};
+      const envelope = await helpers.prepareEncryptedTransferEnvelope(
+        workOrder,
+        senderIdentity,
+        recipientPublicInfo,
+        {
+          packageOptions: opts.packageOptions,
+          cryptoOptions: opts.cryptoOptions
+        }
+      );
+      return relayApi.uploadEnvelope(envelope, senderIdentity, opts.relayOptions);
+    };
+
     render();
     if (persistenceReady) {
       enqueue(async () => {

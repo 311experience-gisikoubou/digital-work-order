@@ -1,0 +1,16 @@
+[
+  {
+    "origin": [
+      "https://311experience-gisikoubou.github.io"
+    ],
+    "method": [
+      "PUT"
+    ],
+    "responseHeader": [
+      "Content-Type",
+      "Range",
+      "X-Goog-Hash"
+    ],
+    "maxAgeSeconds": 600
+  }
+]

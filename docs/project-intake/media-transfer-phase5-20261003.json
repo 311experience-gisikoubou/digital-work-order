@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "intakeId": "media-transfer-phase5-20261003",
+  "intent": "メディア転送ロードマップPhase 5として、Phase 4で生成済みの暗号Envelopeだけを医院iPadから一時クラウド中継へ送れるようにし、Phase 6の技工所PC自動受信へ接続できる安全な配送境界を確定する。",
+  "scope": "docs/design.md §15.2〜15.10に従い、暗号Envelopeのupload transport、Phase 4 sender署名をcloud側で検証するrelay API、active sender registry、Google Cloud Storageのresumable upload session、最小配送metadata、retry/idempotency、30日Lifecycle削除設定、synthetic testsを実装する。通常の受領後即時削除はPhase 7、PC自動受信はPhase 6とし、本番patient/clinic dataとrepository内secretは扱わない。",
+  "assumptions": [
+    "Phase 4のMediaTransferCrypto envelopeを唯一の送信payload正本として再利用し、plaintextのwork orderやmediaをcloud transportが受け取らない。",
+    "ブラウザからStorageへ直接credentialを持たせず、server-side relayがPhase 4 sender署名とactive registryを検証してからopaque resumable upload sessionを発行する。",
+    "relay object pathはrandom job/object IDだけで構成し、患者名・医院名・ファイル名を含めない。配送metadataはworkOrderRef、opaque sender/recipient key ID、part/chunk ID、size等の必要最小限に限定する。",
+    "Storage objectは暗号文のみ。通常削除はPhase 7のPC受領確認後、Lifecycle 30日は異常時の上限として設定する。",
+    "保存リージョンは日本向けにasia-northeast1を優先する。料金はBlaze従量課金だが、想定約15ケース/日で運用し、実際のbilling/project有効化は認証済み人間境界で行う。",
+    "本番provider secret、service-account key、tokenはrepositoryへ保存しない。Cloud runtimeはApplication Default Credentials / managed identityを使う。"
+  ],
+  "humanQuestions": [],
+  "solutionReview": {
+    "options": [
+      {
+        "id": "signed-relay-resumable-storage",
+        "decision": "EXTEND_REQUIRED",
+        "summary": "Phase 4 sender署名を検証する小さなserver-side relayを追加し、検証済みsenderだけにCloud Storage resumable upload sessionを発行する。",
+        "assessment": {
+          "safety": "Storage client credentialをiPadへ持たせず、Phase 4の登録済みsender署名・失効状態をcloud入口でもfail-closedで適用できる。cloudへ置くのは暗号文と最小metadataだけ。",
+          "accuracy": "既存Phase 3 chunkとPhase 4 envelopeを変更せずtransportだけ追加でき、retry/idempotencyをworkOrderRefではなくopaque job/object IDで管理できる。",
+          "simplicity": "小さなrelay backendは増えるが、Firebase client Authやclinic別password運用をiPadへ追加せず日常操作を増やさない。",
+          "humanOperations": "初回provider設定とpairing後のpublic sender registry同期だけが管理作業。日常送信は既存画面から自動化できる。",
+          "maintenance": "relay coreをprovider-independentなpure logicにし、Google Cloud adapterを薄く保つ。runtime secretファイルを管理しない。",
+          "reversibility": "Phase 5 module/backend設定を外せばPhase 4 local-only状態へ戻せる。plaintext保存形式は変更しない。",
+          "existingOverlap": "Phase 3 package/hash/chunk、Phase 4署名/recipient/sender ID、既存workOrderRefを再利用する。"
+        }
+      },
+      {
+        "id": "direct-firebase-client-upload",
+        "decision": "MINIMAL_CHANGE",
+        "summary": "iPadブラウザからFirebase Storage SDKへ直接アップロードする。",
+        "assessment": {
+          "safety": "Storage RulesだけではPhase 4独自ECDSA sender署名を検証できず、clinic/device失効を既存Phase 4 registryと一貫して強制しにくい。",
+          "accuracy": "暗号文アップロード自体は可能だがauth identityとPhase 4 sender identityが二重管理になる。",
+          "simplicity": "コード量は少ないがFirebase Auth/App Check/clinic credential運用が別途必要になり、全体運用は単純化しない。",
+          "humanOperations": "clinicごとのAuth導入やcredential回復運用が増える。",
+          "maintenance": "Firebase client auth設定とrulesの保守が増える。",
+          "reversibility": "SDKとAuth依存の除去が必要。",
+          "existingOverlap": "Phase 4署名/失効機構を十分に再利用できない。"
+        }
+      }
+    ],
+    "selectedOptionId": "signed-relay-resumable-storage",
+    "extendRationale": "Cloud Storage/Firebase Storage RulesはPhase 4の独自ECDSA sender署名とローカル失効registryを直接検証できないため、安全に既存identityを再利用するにはserver-side relay境界が必要。"
+  },
+  "riskSignals": {
+    "protectedOrPatientData": true,
+    "externalCommunication": true,
+    "addedCostOrPaidUsage": true,
+    "authOrIdentity": true,
+    "productionImpact": true,
+    "realDataImpact": true
+  },
+  "status": "APPROVED",
+  "decisionId": "U09"
+}

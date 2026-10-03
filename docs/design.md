@@ -450,6 +450,24 @@ Phase 0の境界（15.1〜15.11）は変更しない。Phase 1は医院側「参
 - 「送信完了までこの画面を閉じないでください」は非表示要素として用意のみ。送信処理はPhase 5。
 - iPad Safariの実機確認（カメラ/動画capture、マイク権限、録音再生、見た目）は未確認。
 
+### 15.13 Phase 5の実装事実（Issue #140）
+
+Phase 3のパッケージ完全性とPhase 4の暗号Envelope・送信端末署名を正本として再利用し、暗号化済みデータだけを一時クラウド中継へ送るtransport境界を実装する。Phase 5では本番クラウドへのデプロイ・課金有効化・実患者データ投入は行わない。
+
+- ブラウザ側は `media-relay.js` がPhase 4 Envelopeを検証し、manifest / work-order / 添付chunkの**暗号文**だけを列挙する。各暗号文のサイズ・SHA-256・IVと、署名済みdescriptorに対応する論理slotから転送planを作る。
+- 送信端末はPhase 4の非extractable ECDSA P-256秘密鍵でrelay authorizationにも署名する。authorizationはdescriptor hash、plan hash、送信端末ID、署名鍵ID、受信鍵ID、合計byte数、有効時間を束縛する。
+- `media.js` の `uploadEncryptedTransferEnvelope(...)` は非UI・明示呼び出し専用で、自動送信・固定endpoint・credential保存を行わない。
+- server側の純粋ロジックは `cloud/relay-core.mjs`。登録済みsenderの公開鍵・active/revoked状態を確認し、Phase 4 descriptor署名とrelay authorization署名の両方をfail closedで検証してからupload sessionを発行する。
+- Cloud Storageのobject pathは `relay/v1/<opaque-job-id>/o/<ordinal>.bin` のみ。患者名・医院名・歯科医師名・元ファイル名・`workOrderRef`・attachment IDをobject pathや保存job metadataへ入れない。
+- jobはdescriptor SHA-256から決まるopaque IDで冪等化する。同じdescriptorで異なるplanは拒否し、再試行は同じupload sessionを再利用できる。
+- upload完了用tokenは32byte乱数とし、FirestoreにはSHA-256 hashだけを保存する。再試行時はtokenをローテーションする。
+- 本番runtimeは `cloud/index.mjs`。Firebase Functions v2 HTTPS + Firebase Admin/Firestore + Google Cloud Storageをmanaged identity / Application Default Credentialsで使用し、service-account JSONや秘密鍵をrepoへ置かない。
+- 配置候補は `asia-northeast1`（東京）。Cloud Storage / Firestoreへのbrowser直接アクセスはrulesでdenyし、browserへは検証済みjob専用のresumable upload URLだけを返す。
+- 専用relay bucketは30日Lifecycle Deleteを非常時の保持上限とし、Soft Deleteは専用bucketだけ無効化する運用を `cloud/README.md` に固定する。Lifecycle削除は通常削除ではない。
+- 通常の削除はPhase 7で「技工所PC受信 → 復号 → hash/完全性確認 → ローカル保存 → 受領確認」完了後に実行する。Phase 5にはdelete endpointを置かない。
+- 技工所PCの自動発見・download・復号・保存はPhase 6。Phase 5はそこへ渡すready状態までを責務とする。
+- 開発・テストは架空データのみ。実患者・実医院データ、本番project ID、bucket名、token、service-account credentialはrepoへ保存しない。
+
 
 ## 16. 全体入力・保存・出力 Phase 2（2026-10-02 確定仕様）
 
