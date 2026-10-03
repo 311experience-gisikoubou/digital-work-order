@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "intakeId": "media-transfer-phase6-20261003",
+  "intent": "メディア転送ロードマップPhase 6として、Phase 5でreadyになった暗号ジョブを技工所Windows PCが自動発見し、暗号文取得、復号、Phase 3/4完全性確認、ローカル保存まで安全に行える受信経路を確定する。",
+  "scope": "Phase 5のsigned relayを拡張し、recipientだけが復号できるreceiver bootstrap、ready-job discovery、短時間download URL、receiver auth、Windows Gateway、ciphertext hash/size検証、Envelope再構成、Phase 4 decryptEnvelope、Phase 3 verifyPackage、opaque local inboxへのatomic保存、crash/retry/idempotency、synthetic E2E testsを実装する。Phase 7のACK/cloud削除、本番cloud deploy、実患者/実医院データ、Phase 8 archive/SQLiteは含めない。",
+  "assumptions": [
+    "Phase 4 envelope本体・sender signature・recipient ECDH keyを変更せず再利用する。",
+    "Phase 5はdescriptorを永続化しないため、Phase 6互換送信ではheader/descriptor/signatureだけをrecipient public ECDH key向けに別途AES-GCM暗号化したreceiver bootstrapを追加する。",
+    "cloudへ保存するbootstrap情報はrecipientKeyId、ephemeral public JWK、HKDF salt、IV、ciphertext hash/sizeだけで、workOrderRef・患者名・医院名・attachmentId・元ファイル名は保存しない。",
+    "receiver APIは256-bit相当の高entropy bearer tokenで認証し、serverにはSHA-256 hashだけを設定する。実tokenはrepoへ置かない。",
+    "Windows PCではreceiver tokenとrecipient backup passphraseをDPAPI CurrentUserで保護できるsetup/run wrapperを用意する。実secretはテスト・repoへ入れない。",
+    "download URLは短寿命かつread-only。service-account JSONは使わずCloud runtime managed identityで署名する。",
+    "ローカル保存先はopaque jobId folderだけを使い、temp directoryへ書いた後に全検証成功時だけatomic renameする。",
+    "Phase 6完了はローカル保存まで。cloud ACK/deleteはPhase 7でのみ実行する。"
+  ],
+  "humanQuestions": [],
+  "solutionReview": {
+    "options": [
+      {
+        "id": "encrypted-bootstrap-token-auth-gateway",
+        "decision": "EXTEND_REQUIRED",
+        "summary": "receiver bootstrapをrecipient ECDH鍵へ暗号化し、hash-only bearer authでready job/download planを取得、Windows Gatewayで検証・復号・atomic保存する。",
+        "assessment": {
+          "safety": "cloudにworkOrderRefや患者/医院情報を永続化せず、PC秘密鍵保持者だけがbootstrapとEnvelopeを復号できる。receiver tokenはserver hashのみ、PCはDPAPI保護。",
+          "accuracy": "Phase 3/4の既存verify/decryptをそのまま最終判定に再利用でき、Phase 5 object ordinalも固定順で再構成できる。",
+          "simplicity": "追加はbootstrap、receiver read API、Windows Gatewayに限定し、Firebase Authや新しいclinic credential体系を増やさない。",
+          "humanOperations": "本番setup時にreceiver token生成、server hash設定、Windows DPAPI secret登録が一度必要。日常は自動polling。",
+          "maintenance": "provider-independentなreceiver coreとlocal-storeを分離し、Cloud adapterとWindows wrapperを薄く保つ。",
+          "reversibility": "Phase 6 receiver機能を無効化してもPhase 5 uploadと既存アプリはそのまま動く。",
+          "existingOverlap": "Phase 3 verifyPackage、Phase 4 decryptEnvelope/key backup、Phase 5 relay/job/object specsを再利用する。"
+        }
+      },
+      {
+        "id": "store-plaintext-descriptor-in-firestore",
+        "decision": "MINIMAL_CHANGE",
+        "summary": "Phase 4 descriptorをFirestoreへ保存してPCが再構成する。",
+        "assessment": {
+          "safety": "workOrderRef等をcloud metadataへ永続化しPhase 5の最小化方針を弱めるため採用しない。",
+          "accuracy": "再構成は簡単だが既存のprivacy boundaryと矛盾する。",
+          "simplicity": "実装は短いがデータ境界が悪化する。",
+          "humanOperations": "追加操作は少ない。",
+          "maintenance": "コード量は少ない。",
+          "reversibility": "後で暗号化bootstrapへ移行が必要になる。",
+          "existingOverlap": "Phase 4 descriptorを直接保存するだけで再利用度は高いが採用しない。"
+        }
+      }
+    ],
+    "selectedOptionId": "encrypted-bootstrap-token-auth-gateway",
+    "extendRationale": "Phase 5の「cloud永続metadataへworkOrderRefを残さない」境界を維持しながらPC側でEnvelopeを再構成するには、recipientだけが復号できるbootstrapが必要。"
+  },
+  "riskSignals": {
+    "protectedOrPatientData": true,
+    "externalCommunication": true,
+    "addedCostOrPaidUsage": true,
+    "authOrIdentity": true,
+    "productionImpact": true,
+    "realDataImpact": true
+  },
+  "status": "APPROVED",
+  "decisionId": "U10"
+}

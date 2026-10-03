@@ -203,9 +203,22 @@
         "artifactIds": [
           "digital-work-order-phase2-business-v1"
         ]
+      },
+      {
+        "id": "U10",
+        "topic": "project-intake:media-transfer-phase6-20261003",
+        "status": "CONFIRMED",
+        "summary": "Phase 5 merge後の次マイルストーンとしてPhase 6を進める。技工所Windows PCがready暗号ジョブを自動発見し、暗号文download、ciphertext hash/size検証、receiver bootstrap復号、Phase 4署名/復号、Phase 3完全性検証、opaque local inboxへのatomic保存までを行う。本番cloud deploy/課金操作/実患者データは扱わず、Phase 7のACK/削除とPhase 8の本格archiveは別工程とする。",
+        "decidedAt": "2026-10-03",
+        "source": "EXPLICIT_HUMAN",
+        "type": "BUSINESS",
+        "replaces": null,
+        "artifactIds": [
+          "digital-work-order-phase2-business-v1"
+        ]
       }
     ],
-    "currentState": "U01〜U09はCONFIRMED。Phase 4はmainへmerge済み。Issue #140でメディア転送Phase 5（暗号Envelopeの一時クラウド中継、東京リージョン優先、通常はPC取込後削除、30日TTL安全網）を開始する。",
-    "nextAction": "承認済みPhase 5 intakeをproject-intake gateへ通し、Phase 4 encrypted envelopeを再利用するcloud relay transportとprovider設定をsynthetic data限定で実装する。"
+    "currentState": "U01〜U10はCONFIRMED。Phase 5はmainへmerge済み。Issue #142でメディア転送Phase 6（技工所PC自動受信・復号・完全性確認・ローカル保存）を開始する。",
+    "nextAction": "Phase 6 intakeをproject-intake gateへ通し、receiver bootstrap・ready job discovery/download API・Windows Gatewayをsynthetic data限定で実装する。"
   }
 }
