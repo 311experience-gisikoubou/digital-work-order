@@ -4,16 +4,26 @@
 // Dependency-free, read-only, local/repository-scoped checks that the
 // Phase 5-8 cloud/gateway repository contracts described in cloud/README.md
 // and gateway/README.md have not drifted, and that no production runtime
-// config/secret file has been accidentally tracked at an obvious path.
+// config/secret file has been accidentally *Git-tracked* at an obvious path.
 //
-// This script performs NO network access and NO cloud CLI calls. It never
-// mutates any file. It never prints file contents or secret-like values.
+// The secret-path check only fails on paths that are tracked in Git (via
+// local, read-only `git ls-files` metadata). A file merely existing
+// untracked in the local working tree — for example a legitimate,
+// gitignored gateway-config.json or a Windows-DPAPI-protected secret file
+// produced after production setup — never causes a failure here.
+//
+// This script performs NO network access, NO cloud CLI calls, no
+// environment secret reads, no home-directory scans, and no file-content
+// reads for secret candidates; it only reads local Git tracked-path
+// metadata. It never mutates any file. It never prints file contents or
+// secret-like values.
 //
 // See docs/production-activation-runbook.md Stage 0.
 
-import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 
 const EXPECTED_CORS_ORIGIN = 'https://311experience-gisikoubou.github.io';
 const EXPECTED_CORS_METHOD = 'PUT';
@@ -29,8 +39,6 @@ const OBVIOUS_SECRET_PATH_CANDIDATES = [
   'gateway/gateway-config.json',
   'gateway/sender-registry.json',
 ];
-
-const SHALLOW_SCAN_DIRS = ['.', 'cloud', 'gateway', 'gateway/windows'];
 
 // Extension-aware runtime secret/config artifact patterns.
 // These intentionally require a runtime-data extension (e.g. .json) so that
@@ -166,38 +174,93 @@ export function checkGatewayConfigExample(json) {
   return pass('gateway-config-example', 'template remains non-secret/template-shaped');
 }
 
-export function findObviousSecretPaths(repoRoot) {
+// Evaluates the obvious-secret-path candidates and the suspicious filename
+// patterns against an already-determined set of Git-*tracked* repository
+// paths. This helper is pure: it performs no filesystem access, no process
+// spawning, and no git calls of its own, so selftest can exercise the
+// tracked/untracked contract directly with a synthetic tracked-path set and
+// without needing a real git repository.
+//
+// trackedPaths must be an iterable of repo-relative, forward-slash-separated
+// path strings (the shape produced by `git ls-files`). A file that merely
+// exists untracked in the local working tree (for example a legitimate
+// gitignored gateway-config.json or a DPAPI-protected secret produced after
+// production setup) must never appear in trackedPaths and therefore never
+// causes a finding here.
+export function evaluateObviousSecretPaths(trackedPaths) {
   const findings = [];
+  const trackedSet = trackedPaths instanceof Set ? trackedPaths : new Set(trackedPaths);
 
   for (const candidate of OBVIOUS_SECRET_PATH_CANDIDATES) {
-    const fullPath = join(repoRoot, candidate);
-    if (existsSync(fullPath)) {
+    if (trackedSet.has(candidate)) {
       findings.push(stop('tracked-secret-path', `tracked production-config/secret-shaped path present: ${candidate}`));
     }
   }
 
-  for (const dir of SHALLOW_SCAN_DIRS) {
-    const fullDir = join(repoRoot, dir);
-    let entries;
-    try {
-      entries = readdirSync(fullDir, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      if (!entry.isFile()) continue;
-      if (SUSPICIOUS_FILENAME_PATTERNS.some((pattern) => pattern.test(entry.name))) {
-        const relPath = dir === '.' ? entry.name : `${dir}/${entry.name}`;
-        findings.push(stop('tracked-secret-path', `secret-shaped filename present at obvious path: ${relPath}`));
-      }
+  for (const trackedPath of trackedSet) {
+    const basename = trackedPath.split('/').pop() ?? trackedPath;
+    if (SUSPICIOUS_FILENAME_PATTERNS.some((pattern) => pattern.test(basename))) {
+      findings.push(stop('tracked-secret-path', `secret-shaped filename tracked in git at: ${trackedPath}`));
     }
   }
 
   if (findings.length === 0) {
-    findings.push(pass('tracked-secret-path', 'no production runtime config/secret file found at obvious paths'));
+    findings.push(pass('tracked-secret-path', 'no production runtime config/secret file tracked at obvious paths'));
   }
 
   return findings;
+}
+
+// Reads the set of Git-tracked paths for repoRoot using local Git metadata
+// only (`git ls-files`, read-only, no network, no cloud CLI). Returns an
+// empty Set when repoRoot is not inside any git repository at all (this is
+// expected for synthetic/non-repo fixtures and is not a trust failure).
+// Throws when repoRoot IS (or may be) a real repository but tracked-path
+// enumeration could not be completed/trusted (git missing, permission
+// error, corrupt repo, etc.) so callers can fail closed.
+export function getGitTrackedPaths(repoRoot) {
+  let stdout;
+  try {
+    stdout = execFileSync('git', ['-C', repoRoot, 'ls-files', '-z'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (error) {
+    const stderr =
+      typeof error?.stderr === 'string'
+        ? error.stderr
+        : Buffer.isBuffer(error?.stderr)
+          ? error.stderr.toString('utf8')
+          : '';
+    if (/not a git repository/i.test(stderr)) {
+      // repoRoot is not inside any git repository; nothing can be tracked.
+      return new Set();
+    }
+    throw new Error(
+      `git tracked-path enumeration failed and cannot be trusted: ${stderr.trim() || error?.message || 'unknown error'}`
+    );
+  }
+
+  const paths = stdout
+    .split('\u0000')
+    .filter((entry) => entry.length > 0)
+    .map((entry) => entry.replace(/\\/g, '/'));
+  return new Set(paths);
+}
+
+export function findObviousSecretPaths(repoRoot) {
+  let trackedPaths;
+  try {
+    trackedPaths = getGitTrackedPaths(repoRoot);
+  } catch (error) {
+    return [
+      stop(
+        'tracked-secret-path',
+        `could not trust git tracked-path enumeration for secret-shaped path checks: ${error.message}`
+      ),
+    ];
+  }
+  return evaluateObviousSecretPaths(trackedPaths);
 }
 
 // ---- argument parsing (exported for selftest) ----

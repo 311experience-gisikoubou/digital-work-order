@@ -6,12 +6,24 @@
 // No network, no cloud, no auth, no real repository paths are read or written.
 // Every fixture directory created by this selftest is removed before exit,
 // including on failure, so no artifact is left behind.
+//
+// Most of the tracked-vs-untracked secret-path contract is exercised via the
+// pure evaluateObviousSecretPaths(trackedPaths) helper with an explicit,
+// in-memory tracked-path list, so no real git repository is needed to test
+// that logic. The synthetic temp fixtures used elsewhere in this file are
+// never initialized as git repositories, so findObviousSecretPaths(root)
+// against them always resolves to an empty tracked-path set.
 
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { runPreflight, parseArgs } from './production-readiness-preflight.mjs';
+import {
+  runPreflight,
+  parseArgs,
+  evaluateObviousSecretPaths,
+  findObviousSecretPaths,
+} from './production-readiness-preflight.mjs';
 
 const BASELINE_FIREBASE_JSON = {
   functions: {
@@ -204,7 +216,11 @@ service cloud.firestore {
   record('non-deny-all rules produce firestore-rules STOP finding', Boolean(finding) && finding.status === 'STOP');
 });
 
-// ---- Case 6: tracked runtime config/secret path present ----
+// ---- Case 6: an obvious secret-shaped path that exists only untracked in
+// the local working tree (no .git repository at all here, so it is
+// necessarily untracked) must NOT fail. This is the exact post-production-
+// setup scenario: a legitimate, gitignored gateway/gateway-config.json or a
+// Windows-DPAPI-protected secret file existing locally. ----
 
 withTempRepo((root) => {
   buildBaselineRepo(root);
@@ -213,14 +229,49 @@ withTempRepo((root) => {
     relayEndpoint: 'https://example-relay.example/relay',
   });
   const result = runPreflight(root);
-  record('tracked secret path overall status is STOP', result.status === 'STOP');
+  record(
+    'untracked/local-only gateway-config.json does not cause overall STOP',
+    result.status === 'PASS',
+    JSON.stringify(result.findings.filter((f) => f.status === 'STOP'))
+  );
   const finding = findingFor(result, 'tracked-secret-path');
-  record('tracked secret path produces tracked-secret-path STOP finding', Boolean(finding) && finding.status === 'STOP');
+  record(
+    'untracked/local-only gateway-config.json keeps tracked-secret-path PASS',
+    Boolean(finding) && finding.status === 'PASS'
+  );
 });
 
-// ---- Case 6b: legitimate tracked source script with a secret-related
-// filename (gateway/windows/protect-receiver-secrets.ps1) must NOT be
-// flagged as a tracked secret-shaped path. ----
+// ---- Case 6b: the same obvious secret-shaped path DOES fail when it is
+// Git-tracked. Exercised via the pure evaluateObviousSecretPaths helper so
+// no real repository is required. ----
+
+record(
+  'tracked gateway/gateway-config.json produces a STOP finding',
+  (() => {
+    const findings = evaluateObviousSecretPaths(['gateway/gateway-config.json']);
+    return findings.some((f) => f.id === 'tracked-secret-path' && f.status === 'STOP');
+  })()
+);
+
+record(
+  'tracked .firebaserc produces a STOP finding',
+  (() => {
+    const findings = evaluateObviousSecretPaths(['.firebaserc']);
+    return findings.some((f) => f.id === 'tracked-secret-path' && f.status === 'STOP');
+  })()
+);
+
+// ---- Case 6c: legitimate tracked source script with a secret-related
+// filename (gateway/windows/protect-receiver-secrets.ps1) must remain
+// allowed even when Git-tracked. ----
+
+record(
+  'tracked protect-receiver-secrets.ps1 source script keeps tracked-secret-path PASS',
+  (() => {
+    const findings = evaluateObviousSecretPaths(['gateway/windows/protect-receiver-secrets.ps1']);
+    return findings.length === 1 && findings[0].id === 'tracked-secret-path' && findings[0].status === 'PASS';
+  })()
+);
 
 withTempRepo((root) => {
   buildBaselineRepo(root);
@@ -230,31 +281,55 @@ withTempRepo((root) => {
   );
   const result = runPreflight(root);
   record(
-    'legitimate protect-receiver-secrets.ps1 source script does not cause STOP',
+    'untracked protect-receiver-secrets.ps1 does not cause overall STOP',
     result.status === 'PASS',
     JSON.stringify(result.findings.filter((f) => f.status === 'STOP'))
   );
-  const finding = findingFor(result, 'tracked-secret-path');
-  record(
-    'legitimate protect-receiver-secrets.ps1 source script keeps tracked-secret-path PASS',
-    Boolean(finding) && finding.status === 'PASS'
-  );
 });
 
-// ---- Case 6c: an actual runtime receiver-secrets DPAPI JSON artifact must
-// still fail closed. ----
+// ---- Case 6d: service-account / receiver-secrets JSON artifacts fail when
+// Git-tracked (suspicious filename patterns, evaluated against the tracked
+// path set). ----
+
+record(
+  'tracked receiver-secrets.dpapi.json runtime artifact produces a STOP finding',
+  (() => {
+    const findings = evaluateObviousSecretPaths(['gateway/windows/receiver-secrets.dpapi.json']);
+    return findings.some((f) => f.id === 'tracked-secret-path' && f.status === 'STOP');
+  })()
+);
+
+record(
+  'tracked service-account JSON produces a STOP finding',
+  (() => {
+    const findings = evaluateObviousSecretPaths(['cloud/my-service-account.json']);
+    return findings.some((f) => f.id === 'tracked-secret-path' && f.status === 'STOP');
+  })()
+);
+
+record(
+  'untracked receiver-secrets.dpapi.json does not cause a STOP finding (pure helper, empty tracked set)',
+  (() => {
+    const findings = evaluateObviousSecretPaths([]);
+    return findings.length === 1 && findings[0].status === 'PASS';
+  })()
+);
+
+// ---- Case 6e: findObviousSecretPaths(repoRoot) against a directory that is
+// not inside any git repository treats the tracked-path set as empty
+// (nothing can be tracked there) rather than failing closed, even when a
+// secret-shaped file exists untracked on disk. ----
 
 withTempRepo((root) => {
   buildBaselineRepo(root);
   writeJson(join(root, 'gateway', 'windows', 'receiver-secrets.dpapi.json'), {
     protectedBlob: 'not-a-real-secret-placeholder',
   });
-  const result = runPreflight(root);
-  record('actual receiver-secrets.dpapi.json runtime artifact overall status is STOP', result.status === 'STOP');
-  const finding = findingFor(result, 'tracked-secret-path');
+  const findings = findObviousSecretPaths(root);
   record(
-    'actual receiver-secrets.dpapi.json runtime artifact produces tracked-secret-path STOP finding',
-    Boolean(finding) && finding.status === 'STOP'
+    'findObviousSecretPaths on a non-repo directory does not fail closed for an untracked secret-shaped file',
+    findings.length === 1 && findings[0].status === 'PASS',
+    JSON.stringify(findings)
   );
 });
 
