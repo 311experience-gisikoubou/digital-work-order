@@ -196,8 +196,10 @@ delete-resume.
   not the transfer job database.
 - Apps Script Utilities provides HMAC-SHA256.
 - Apps Script LockService can serialize updates to shared small control state.
-- The Advanced Drive service exposes the public Drive API; Drive API files.delete permanently
-  deletes a user-owned file without moving it to Trash.
+- Drive API files.delete permanently deletes a user-owned file without moving it to Trash.
+- Apps Script can call Google APIs directly with UrlFetchApp using ScriptApp.getOAuthToken() when
+  the script has the required OAuth scopes. Therefore permanent delete does not require enabling
+  the Advanced Drive service solely for files.delete; the smaller direct REST path is preferred.
 - Files moved to normal Drive Trash otherwise remain there for 30 days and consume storage.
 
 Official references checked:
@@ -260,8 +262,13 @@ Current evidence is recorded in
 
 ### C. Permanent-delete prototype
 
-Enable Advanced Drive service for the trial project only after confirming the exact permission
-boundary.
+Use the smallest official path: Drive REST `files.delete` through `UrlFetchApp` with
+`ScriptApp.getOAuthToken()`. Do not enable the Advanced Drive service solely for this operation.
+
+Because the Drive scope can delete files beyond the relay folder, code must fail closed unless the
+exact target file ID is first proven to be a direct child of the dedicated synthetic/relay job
+folder and is present in the job's expected-object list. Folder deletion must also require the
+expected opaque folder ID and an empty-folder check.
 
 With synthetic files:
 
@@ -272,13 +279,26 @@ With synthetic files:
 - partial delete -> deleting state resumes safely;
 - unrelated Drive files cannot be selected/deleted.
 
+Current evidence is recorded in
+`docs/drive-relay-permanent-delete-trial-20261007.md`:
+
+- 22/22 synthetic checks: PASS;
+- direct REST `files.delete` path: PASS;
+- wrong receiver/capability/proof: no deletion;
+- unrelated file ID: rejected and preserved;
+- interrupted delete: resumed safely;
+- trial folders: permanently removed after empty-folder checks;
+- public web-app POST remained disabled throughout.
+
+Therefore Gate C is **PASS for the bounded synthetic prototype**.
+
 ### D. Real iPad path, still synthetic
 
 Run from the actual clinic-style iPad Safari / GitHub Pages origin:
 
 - existing pairing state restored;
 - synthetic encrypted transfer;
-- HMAC-authenticated Apps Script writes;
+- selected upload credential authenticates Apps Script writes (bearer is currently provisional);
 - PC asleep/offline during send;
 - PC later wakes and Drive sync completes;
 - Gateway verifies/decrypts/persists;
