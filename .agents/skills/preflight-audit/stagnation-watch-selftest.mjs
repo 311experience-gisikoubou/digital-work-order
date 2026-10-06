@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import process from 'node:process';
+import { evaluate as evaluateReality } from '../test-gate/staged-reality-gate.mjs';
+import { evaluate as evaluateHumanReview } from '../test-gate/human-visual-review-gate.mjs';
 
 const watcherArg = process.argv[2];
 if (!watcherArg) throw new Error('watcher path required');
@@ -24,6 +26,59 @@ await writeFile(join(root, 'app.txt'), 'v1\n');
 await writeFile(join(root, 'AGENTS.md'), 'governance\n');
 cmd('git', ['add', '.']);
 cmd('git', ['commit', '-m', 'base']);
+
+const humanReviewStateId = 'git:' + 'a'.repeat(40);
+const humanReviewEvidence = kind => ({ kind, status: 'PASS', source: 'local', reference: 'selftest:' + kind, stateId: humanReviewStateId });
+const humanReviewCleanup = {
+  schemaVersion: 1, receiptType: 'UI_BROWSER_CLEANUP_V1', result: 'PASS', code: 'BROWSER_CLEANUP_OK',
+  runId: 'stagnation-review', stateId: humanReviewStateId, ownershipValidated: true, rootPidGone: true,
+  childProcessesGone: true, cdpPortReleased: true, profileLocksGone: true,
+};
+const humanReviewFinalReality = evaluateReality({
+  schemaVersion: 2,
+  phase: 'FINAL_REALITY_CHECK',
+  taskTypes: ['UI'],
+  stateId: humanReviewStateId,
+  identity: {
+    repositoryExpected: 'acme/app', repositoryObserved: 'acme/app',
+    projectContextExpected: 'app-v1', projectContextObserved: 'app-v1',
+    workTargetExpected: 'screen-a', workTargetObserved: 'screen-a',
+    executionSurfaceExpected: 'tauri-dev', executionSurfaceObserved: 'tauri-dev',
+  },
+  authority: { state: 'CURRENT', source: 'REPO_LOCAL', reference: 'PROJECT_CONTEXT.json#screen-a' },
+  actors: { implementerId: 'impl', judgeId: 'judge' },
+  checkpoint: { scopeMatch: true, structureMatch: true, implementationComplete: true, deliverableMatch: true },
+  evidence: [
+    humanReviewEvidence('GIT_STATE'), humanReviewEvidence('DIFF'), humanReviewEvidence('SCREENSHOT'),
+    { kind: 'UI_BROWSER_CLEANUP', status: 'PASS', source: 'local', reference: 'cleanup', stateId: humanReviewStateId, receipt: humanReviewCleanup },
+    humanReviewEvidence('TEST_GATE_RESULT'),
+  ],
+});
+if (humanReviewFinalReality.result !== 'PASS') throw new Error(JSON.stringify(humanReviewFinalReality));
+const humanReviewMetric = (clientWidth, clientHeight, scrollWidth = clientWidth, scrollHeight = clientHeight) => ({ clientWidth, clientHeight, scrollWidth, scrollHeight });
+const humanReviewReceipt = evaluateHumanReview({
+  schemaVersion: 1,
+  stateId: humanReviewStateId,
+  generatedAt: new Date().toISOString(),
+  stagedRealityReceipt: humanReviewFinalReality,
+  expectedSurface: 'tauri', observedSurface: 'tauri', environment: 'dev',
+  runtime: {
+    applicationSurfaceConfirmed: true, bypassesDeclaredApplicationRuntime: false,
+    projectIdentityConfirmed: true, worktreeProvenanceConfirmed: true, nonProductionDataConfirmed: true,
+    windowVisible: true, windowForeground: true, sameWindowMeasuredAndPresented: true,
+    hostProcessId: 4242, hostProcessName: 'acme-app.exe', measurementWindowId: 'hwnd:1234', presentationWindowId: 'hwnd:1234',
+  },
+  viewport: { width: 1298, height: 761, devicePixelRatio: 1 },
+  layout: { root: humanReviewMetric(1298, 761), screen: humanReviewMetric(1110, 697), pageOverflowAllowed: false },
+  requiredRegions: [{
+    id: 'screen', rect: { left: 10, top: 10, right: 1110, bottom: 707, width: 1100, height: 697 },
+    visibility: { visibleWidth: 1100, visibleHeight: 697 }, scroll: humanReviewMetric(1100, 697), internalScrollAllowed: false,
+  }],
+  presentationEvidenceRef: 'selftest:presented-tauri-window',
+});
+if (humanReviewReceipt.result !== 'PASS') throw new Error(JSON.stringify(humanReviewReceipt));
+const humanReviewReceiptFile = join(root, 'human-visual-review-receipt.json');
+await writeFile(humanReviewReceiptFile, JSON.stringify(humanReviewReceipt));
 
 function run(extra, expectStatus = 0) {
   const args = [
@@ -194,7 +249,17 @@ if (pm.code !== 'PRE_MERGE_READY_WAITING_MERGE_AUTH' || pm.result !== 'WAIT_HUMA
 pm = runPreMerge(['--human-gate','none','--continuation-action','resume','--pr-state','none','--test-gate-state','fail','--response-intent','terminate'], 2);
 if (pm.code !== 'TERMINAL_RESPONSE_REJECTED_AI_CONTINUES' || pm.terminalState !== 'AI_CONTINUES' || pm.responseMayTerminate !== false || pm.handoffClass !== 'AI_OWNED' || pm.turnCloseReceipt !== null) throw new Error(JSON.stringify(pm));
 
-// Genuine human confirmation, pre-merge readiness, complete work, and exhausted AI routes are terminal states.
+// Subjective real-device confirmation is not a valid terminal human gate until the exact human-visual-review receipt is verified.
+pm = runPreMerge(['--human-gate','required','--human-gate-kind','subjective-real-device','--continuation-action','wait-human','--pr-state','none','--response-intent','terminate'], 2);
+if (pm.code !== 'TERMINAL_RESPONSE_REJECTED_AI_CONTINUES' || pm.terminalResponseUnderlyingCode !== 'HUMAN_VISUAL_REVIEW_RECEIPT_REQUIRED' || pm.terminalState !== 'AI_CONTINUES' || pm.responseMayTerminate !== false || pm.handoffClass !== 'AI_OWNED' || pm.turnCloseReceipt !== null || pm.humanVisualReviewReady !== false) throw new Error(JSON.stringify(pm));
+pm = runPreMerge([
+  '--human-gate','required','--human-gate-kind','subjective-real-device','--continuation-action','wait-human','--pr-state','none','--response-intent','terminate',
+  '--human-visual-review-state-id', humanReviewStateId,
+  '--human-visual-review-receipt-file', humanReviewReceiptFile,
+]);
+if (pm.terminalState !== 'HUMAN_CONFIRMATION_REQUIRED' || !pm.responseMayTerminate || !pm.turnCloseReceipt?.id || pm.handoffClass !== 'HUMAN_REQUIRED' || pm.humanVisualReviewReady !== true || pm.humanVisualReviewReceiptId !== humanReviewReceipt.receiptId) throw new Error(JSON.stringify(pm));
+
+// Other genuine human confirmation kinds remain unchanged.
 pm = runPreMerge(['--human-gate','required','--human-gate-kind','cost','--continuation-action','wait-human','--pr-state','none','--response-intent','terminate']);
 if (pm.terminalState !== 'HUMAN_CONFIRMATION_REQUIRED' || !pm.responseMayTerminate || !pm.turnCloseReceipt?.id || pm.turnCloseReceipt.issuedAt !== '2026-09-03T20:00:00.000Z') throw new Error(JSON.stringify(pm));
 pm = runPreMerge(['--human-gate','required','--human-gate-kind','cost','--continuation-action','wait-human','--response-intent','terminate', ...readyStages]);
