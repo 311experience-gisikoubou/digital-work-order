@@ -151,32 +151,44 @@ function minimumChecksFor(flags) {
     checks.push('DOCS_CONSISTENCY');
   }
 
+  // Normal runtime changes start with the narrowest directly relevant test.
+  // Broad build/full-suite work is an escalation, not the default.
   if (flags.frontend) {
-    checks.push('TARGETED_SELFTEST', 'FRONTEND_BUILD');
+    checks.push('TARGETED_FRONTEND_TEST');
   }
 
   if (flags.backend) {
-    checks.push('BACKEND_FULL_TEST');
+    checks.push('TARGETED_BACKEND_TEST');
   }
 
+  // Migrations and dependency changes are explicitly high-coupling. They keep
+  // broader coverage because failures can escape the changed module.
   if (flags.migration) {
-    checks.push('MIGRATION_TEST');
+    checks.push('BACKEND_FULL_TEST', 'MIGRATION_TEST', 'FULL_REPOSITORY_SUITE');
   }
 
   if (flags.dependency) {
-    checks.push('DEPENDENCY_AUDIT');
+    checks.push('DEPENDENCY_AUDIT', 'FULL_REPOSITORY_SUITE');
   }
 
   return unique(checks);
 }
 
+function verificationLevelFor(flags, escalationReason) {
+  if (flags.migration || flags.dependency || escalationReason === 'RELEASE_GATE') return 'FULL';
+  if (flags.frontend && flags.backend) return 'AFFECTED';
+  if (flags.governance || flags.frontend || flags.backend) return 'TARGETED';
+  return 'MINIMAL';
+}
+
 function excessiveChecksFor(flags, plannedChecks) {
   const excessive = [];
+  const highCoupling = flags.migration || flags.dependency;
 
   for (const check of plannedChecks) {
-    if (check === 'FULL_REPOSITORY_SUITE') excessive.push(check);
-    if (check === 'FRONTEND_FULL_TEST') excessive.push(check);
-    if (check === 'BACKEND_FULL_TEST' && !flags.backend) excessive.push(check);
+    if (check === 'FULL_REPOSITORY_SUITE' && !highCoupling) excessive.push(check);
+    if (check === 'FRONTEND_FULL_TEST' && !flags.dependency) excessive.push(check);
+    if (check === 'BACKEND_FULL_TEST' && !flags.migration) excessive.push(check);
     if (check === 'FRONTEND_BUILD' && !flags.frontend) excessive.push(check);
     if (check === 'BACKEND_BUILD' && !flags.backend) excessive.push(check);
     if (check === 'TARGETED_FRONTEND_TEST' && !flags.frontend) excessive.push(check);
@@ -220,6 +232,7 @@ export function evaluate(input) {
 
   const classified = classifyFiles(changedFiles);
   const minimumChecks = minimumChecksFor(classified.flags);
+  const verificationLevel = verificationLevelFor(classified.flags, escalationReason);
 
   if (classified.profile === 'UNKNOWN') {
     return {
@@ -227,6 +240,7 @@ export function evaluate(input) {
       code: 'CHANGE_SCOPE_UNKNOWN',
       profile: classified.profile,
       flags: classified.flags,
+      verificationLevel,
       minimumChecks,
       excessiveChecks: [],
     };
@@ -241,6 +255,7 @@ export function evaluate(input) {
       code: 'REQUIRED_CHECK_MISSING',
       profile: classified.profile,
       flags: classified.flags,
+      verificationLevel,
       minimumChecks,
       missingMinimumChecks,
       excessiveChecks,
@@ -253,6 +268,7 @@ export function evaluate(input) {
       code: 'EXCESSIVE_CHECKS_UNJUSTIFIED',
       profile: classified.profile,
       flags: classified.flags,
+      verificationLevel,
       minimumChecks,
       missingMinimumChecks: [],
       excessiveChecks,
@@ -264,6 +280,7 @@ export function evaluate(input) {
     code: excessiveChecks.length > 0 ? 'ESCALATION_ACCEPTED' : 'SCOPE_PROPORTIONAL',
     profile: classified.profile,
     flags: classified.flags,
+    verificationLevel,
     minimumChecks,
     missingMinimumChecks: [],
     excessiveChecks,
