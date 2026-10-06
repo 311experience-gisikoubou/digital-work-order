@@ -39,13 +39,22 @@ Therefore Apps Script should not become the authoritative ECDSA verifier.
 Apps Script still needs a relay-side gate so a public web-app endpoint cannot be used to fill the
 lab Drive with arbitrary objects.
 
-Candidate:
+Candidates must be compared with synthetic data before one is selected:
 
-- During the existing one-time pairing flow, provision a separate random HMAC-SHA256 upload key.
-- Import the clinic copy as a non-extractable Web Crypto HMAC key and store the CryptoKey using the
-  same browser-side persistence boundary used for the sender identity.
-- Store the corresponding verification secret only in Apps Script Script Properties, indexed by
-  the opaque sender clinic-device ID.
+1. a random bearer upload token provisioned during pairing, with only its SHA-256 verifier stored
+   server-side; or
+2. a random HMAC-SHA256 upload key provisioned during pairing.
+
+For the HMAC candidate, import the clinic copy as a non-extractable Web Crypto HMAC key and persist
+the CryptoKey in IndexedDB. Phase 4 currently defines sender key generation/pairing but does not yet
+implement the iPad browser key store, so this persistence boundary is a new prototype requirement
+and should later be shared with sender-identity persistence rather than duplicated.
+
+For the bearer candidate, keep only a SHA-256 verifier server-side and persist the high-entropy
+token in the same future credential store.
+
+If HMAC is selected, store the corresponding verification secret only in Apps Script Script
+Properties, indexed by the opaque sender clinic-device ID.
 - Never put the secret in the repository, HTML/JavaScript bundle, URL, logs, Drive filenames, or
   transfer metadata.
 - Normal clinic operation remains zero-touch after pairing.
@@ -76,16 +85,21 @@ Apps Script rejects:
 
 Retry of an identical already-stored object remains idempotent.
 
-## Why not a normal bearer upload token
+## Bearer vs HMAC decision rule
 
-A bearer token would be simpler, and the server could keep only its SHA-256 hash. However the
-plaintext token would need to be transmitted on every upload request and remain readable by the
-browser application.
+A bearer token is simpler and lets Apps Script retain only a SHA-256 verifier, but the plaintext
+token is transmitted on each authenticated request and is readable by the browser application.
 
 A non-extractable HMAC CryptoKey keeps the long-lived upload secret out of each request and makes
-straightforward secret exfiltration harder while preserving zero daily clinic operations.
+straightforward key export harder. However Apps Script must retain the HMAC verification secret
+itself rather than only a one-way verifier. Same-origin malicious code could also use a restored
+non-extractable key for signing even if it cannot export the raw key.
 
-The HMAC key is not a new user account or login.
+Therefore HMAC is not assumed to be safer overall. Select it only if the bounded synthetic
+comparison shows a material client-side safety benefit that justifies the extra server-side secret
+and code. Otherwise prefer the bearer variant for simplicity and hash-only server storage.
+
+Neither option is a new user account or login.
 
 ## Drive layout
 
@@ -212,19 +226,37 @@ volume remains comfortably within current Apps Script/Drive limits.
 
 ### A. Independent architecture review
 
-Required because this changes an external trust/storage boundary.
-The first local Codex review attempt on 2026-10-07 could not access its execution helper, and the
-first Claude CLI attempt did not return a review. Do not count either as approval.
+**Completed, but it does not approve production adoption.**
 
-### B. HMAC pairing prototype
+The 2026-10-07 Gemini adversarial review is recorded in
+`docs/drive-apps-script-relay-gemini-adversarial-20261007.md`. It agreed with preserving the
+existing E2E/ECDSA and verified-ACK boundaries, but kept the overall decision at `TRIAL_REQUIRED`
+because public Apps Script endpoint availability/quota abuse, credential persistence/revocation,
+and HMAC-vs-bearer selection still require bounded testing.
+
+Local Codex/Claude review attempts were not counted as approvals when their execution environments
+failed or stalled.
+
+### B. Upload credential comparison + browser persistence prototype
 
 Using synthetic values only:
 
-- generate/import non-extractable HMAC key in the browser;
-- persist/restore it on iPad Safari;
-- Apps Script verify canonical HMAC;
-- expiry/replay/unknown sender/revocation tests;
-- retry/idempotency tests.
+- prove a non-extractable Web Crypto credential can persist/restore through IndexedDB;
+- prove the existing sender ECDSA private key can use the same persistence mechanism;
+- compare bearer-token and HMAC request gates under the same expiry/replay/unknown sender/revocation
+  and retry/idempotency tests;
+- confirm bearer uses hash-only server storage;
+- confirm HMAC requires server-side verification secret storage;
+- run exact iPad Safari persistence/restore before selecting either candidate;
+- select the simpler option unless the more complex option demonstrates a material safety gain.
+
+Current evidence is recorded in
+`docs/drive-relay-upload-credential-comparison-20261007.md`:
+
+- synthetic Chrome comparison: PASS;
+- provisional recommendation: bearer token;
+- exact iPad Safari persistence/restore: still required;
+- therefore Gate B is PARTIAL PASS, not complete.
 
 ### C. Permanent-delete prototype
 
