@@ -41,32 +41,32 @@ assert.equal(result.code, 'EXCESSIVE_CHECKS_UNJUSTIFIED');
 
 result = evaluate({
   changedFiles: ['src/main.ts'],
-  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_SELFTEST', 'FRONTEND_BUILD', 'BACKEND_FULL_TEST'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_FRONTEND_TEST', 'BACKEND_FULL_TEST'],
 });
 assert.equal(result.code, 'EXCESSIVE_CHECKS_UNJUSTIFIED');
 
 result = evaluate({
   changedFiles: ['src/main.ts'],
-  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_SELFTEST', 'FRONTEND_BUILD'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_FRONTEND_TEST'],
 });
 assert.equal(result.decision, 'PROCEED');
 
 result = evaluate({
   changedFiles: ['index.html', 'app/visual-snapshot.js', 'app.js', 'orders.js', 'scripts/visual-snapshot-frontend.test.js'],
-  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_SELFTEST', 'FRONTEND_BUILD'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_FRONTEND_TEST'],
 });
 assert.equal(result.profile, 'FRONTEND_ONLY');
 assert.equal(result.decision, 'PROCEED');
 
 result = evaluate({
   changedFiles: ['src-tauri/src/lib.rs'],
-  plannedChecks: ['DIFF_HYGIENE', 'BACKEND_FULL_TEST'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_BACKEND_TEST'],
 });
 assert.equal(result.decision, 'PROCEED');
 
 result = evaluate({
   changedFiles: ['migrations/0009_x.sql'],
-  plannedChecks: ['DIFF_HYGIENE', 'BACKEND_FULL_TEST', 'MIGRATION_TEST'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_BACKEND_TEST', 'BACKEND_FULL_TEST', 'MIGRATION_TEST', 'FULL_REPOSITORY_SUITE'],
 });
 assert.equal(result.decision, 'PROCEED');
 
@@ -75,17 +75,17 @@ result = evaluate({
   plannedChecks: ['DIFF_HYGIENE', 'DEPENDENCY_AUDIT'],
 });
 assert.equal(result.code, 'REQUIRED_CHECK_MISSING');
-assert.deepEqual(result.missingMinimumChecks, ['BACKEND_FULL_TEST']);
+assert.deepEqual(result.missingMinimumChecks, ['TARGETED_BACKEND_TEST', 'FULL_REPOSITORY_SUITE']);
 
 result = evaluate({
   changedFiles: ['Cargo.lock', 'migrations/0009_x.sql'],
-  plannedChecks: ['DIFF_HYGIENE', 'BACKEND_FULL_TEST', 'MIGRATION_TEST', 'DEPENDENCY_AUDIT'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_BACKEND_TEST', 'BACKEND_FULL_TEST', 'MIGRATION_TEST', 'DEPENDENCY_AUDIT', 'FULL_REPOSITORY_SUITE'],
 });
 assert.equal(result.decision, 'PROCEED');
 
 result = evaluate({
   changedFiles: ['package-lock.json', 'src/main.ts'],
-  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_SELFTEST', 'FRONTEND_BUILD', 'DEPENDENCY_AUDIT'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_FRONTEND_TEST', 'DEPENDENCY_AUDIT', 'FULL_REPOSITORY_SUITE'],
 });
 assert.equal(result.decision, 'PROCEED');
 
@@ -114,7 +114,7 @@ assert.equal(classifyFiles(['scripts/ui-layout-smoke.check.js']).profile, 'FRONT
 // Required PASS selftest: index.html + src file + frontend-verification-script => FRONTEND_ONLY, PROCEED.
 result = evaluate({
   changedFiles: ['index.html', 'src/home.ts', 'scripts/home-stage-scale.selftest.ts'],
-  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_SELFTEST', 'FRONTEND_BUILD'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_FRONTEND_TEST'],
 });
 assert.equal(result.profile, 'FRONTEND_ONLY');
 assert.equal(result.decision, 'PROCEED');
@@ -130,7 +130,7 @@ assert.equal(result.code, 'CHANGE_SCOPE_UNKNOWN');
 // Negative: migration change is DB_MIGRATION, not frontend-only, even alongside frontend files.
 result = evaluate({
   changedFiles: ['migrations/0010_add_column.sql', 'src/home.ts'],
-  plannedChecks: ['DIFF_HYGIENE', 'BACKEND_FULL_TEST', 'MIGRATION_TEST'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_BACKEND_TEST', 'BACKEND_FULL_TEST', 'MIGRATION_TEST', 'FULL_REPOSITORY_SUITE'],
 });
 assert.equal(result.profile, 'DB_MIGRATION');
 assert.notEqual(result.profile, 'FRONTEND_ONLY');
@@ -138,7 +138,7 @@ assert.notEqual(result.profile, 'FRONTEND_ONLY');
 // Negative: backend change is BACKEND_ONLY, not frontend-only.
 result = evaluate({
   changedFiles: ['src-tauri/src/lib.rs'],
-  plannedChecks: ['DIFF_HYGIENE', 'BACKEND_FULL_TEST'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_BACKEND_TEST'],
 });
 assert.equal(result.profile, 'BACKEND_ONLY');
 assert.notEqual(result.profile, 'FRONTEND_ONLY');
@@ -146,7 +146,7 @@ assert.notEqual(result.profile, 'FRONTEND_ONLY');
 // Negative: dependency change is DEPENDENCY_CHANGE, not frontend-only, even with frontend deps.
 result = evaluate({
   changedFiles: ['package-lock.json'],
-  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_SELFTEST', 'FRONTEND_BUILD', 'DEPENDENCY_AUDIT'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_FRONTEND_TEST', 'DEPENDENCY_AUDIT', 'FULL_REPOSITORY_SUITE'],
 });
 assert.equal(result.profile, 'DEPENDENCY_CHANGE');
 assert.notEqual(result.profile, 'FRONTEND_ONLY');
@@ -231,7 +231,7 @@ assert.equal(classifyFiles(['docs/gateway-test-notes.md']).profile, 'DOCS_ONLY')
 // (backend recognized), never collapsed into FRONTEND_ONLY.
 result = evaluate({
   changedFiles: ['scripts/gateway-viewer-phase8.test.mjs', 'src/main.ts'],
-  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_SELFTEST', 'FRONTEND_BUILD', 'BACKEND_FULL_TEST'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_FRONTEND_TEST', 'TARGETED_BACKEND_TEST'],
 });
 assert.equal(result.profile, 'MIXED_RUNTIME');
 assert.equal(result.decision, 'PROCEED');
@@ -239,7 +239,7 @@ assert.equal(result.decision, 'PROCEED');
 // evaluate(): gateway-only change with required backend test plan proceeds.
 result = evaluate({
   changedFiles: ['gateway/receiver/handler.ts'],
-  plannedChecks: ['DIFF_HYGIENE', 'BACKEND_FULL_TEST'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_BACKEND_TEST'],
 });
 assert.equal(result.profile, 'BACKEND_ONLY');
 assert.equal(result.decision, 'PROCEED');
@@ -247,7 +247,7 @@ assert.equal(result.decision, 'PROCEED');
 // evaluate(): dedicated gateway script test alone also requires backend test plan.
 result = evaluate({
   changedFiles: ['scripts/gateway-receiver-e2e.test.mjs'],
-  plannedChecks: ['DIFF_HYGIENE', 'BACKEND_FULL_TEST'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_BACKEND_TEST'],
 });
 assert.equal(result.profile, 'BACKEND_ONLY');
 assert.equal(result.decision, 'PROCEED');
@@ -258,7 +258,7 @@ result = evaluate({
   plannedChecks: ['DIFF_HYGIENE'],
 });
 assert.equal(result.code, 'REQUIRED_CHECK_MISSING');
-assert.deepEqual(result.missingMinimumChecks, ['BACKEND_FULL_TEST']);
+assert.deepEqual(result.missingMinimumChecks, ['TARGETED_BACKEND_TEST']);
 
 // evaluate(): unrelated/unknown scripts change (vs the gateway backend case
 // above) stays CHANGE_SCOPE_UNKNOWN and must STOP rather than PROCEED.
@@ -273,7 +273,7 @@ assert.equal(result.code, 'CHANGE_SCOPE_UNKNOWN');
 // as BACKEND_ONLY with the required backend test plan.
 result = evaluate({
   changedFiles: ['gateway/viewer-core.mjs'],
-  plannedChecks: ['DIFF_HYGIENE', 'BACKEND_FULL_TEST'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_BACKEND_TEST'],
 });
 assert.equal(result.profile, 'BACKEND_ONLY');
 assert.equal(result.decision, 'PROCEED');
@@ -282,7 +282,7 @@ assert.equal(result.decision, 'PROCEED');
 // as BACKEND_ONLY with the required backend test plan.
 result = evaluate({
   changedFiles: ['gateway/viewer-server.mjs'],
-  plannedChecks: ['DIFF_HYGIENE', 'BACKEND_FULL_TEST'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_BACKEND_TEST'],
 });
 assert.equal(result.profile, 'BACKEND_ONLY');
 assert.equal(result.decision, 'PROCEED');
@@ -291,7 +291,7 @@ assert.equal(result.decision, 'PROCEED');
 // as BACKEND_ONLY with the required backend test plan.
 result = evaluate({
   changedFiles: ['gateway/receiver.mjs'],
-  plannedChecks: ['DIFF_HYGIENE', 'BACKEND_FULL_TEST'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_BACKEND_TEST'],
 });
 assert.equal(result.profile, 'BACKEND_ONLY');
 assert.equal(result.decision, 'PROCEED');
@@ -338,7 +338,7 @@ assert.equal(classifyFiles(['index.html', 'orders.js']).profile, 'FRONTEND_ONLY'
 // the required backend test plan (no spurious FRONTEND_BUILD required).
 result = evaluate({
   changedFiles: ['scripts/gateway-ui.test.mjs'],
-  plannedChecks: ['DIFF_HYGIENE', 'BACKEND_FULL_TEST'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_BACKEND_TEST'],
 });
 assert.equal(result.profile, 'BACKEND_ONLY');
 assert.equal(result.decision, 'PROCEED');
@@ -347,9 +347,48 @@ assert.equal(result.decision, 'PROCEED');
 // backend gateway test) requires both frontend and backend checks.
 result = evaluate({
   changedFiles: ['index.html', 'scripts/gateway-ui.test.mjs'],
-  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_SELFTEST', 'FRONTEND_BUILD', 'BACKEND_FULL_TEST'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_FRONTEND_TEST', 'TARGETED_BACKEND_TEST'],
 });
 assert.equal(result.profile, 'MIXED_RUNTIME');
 assert.equal(result.decision, 'PROCEED');
+
+// --- Proportionate verification regression cases (2026-10-05) ---------
+result = evaluate({
+  changedFiles: ['src-tauri/src/import/categories.rs'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_BACKEND_TEST'],
+});
+assert.equal(result.decision, 'PROCEED');
+assert.equal(result.verificationLevel, 'TARGETED');
+assert.deepEqual(result.minimumChecks, ['DIFF_HYGIENE', 'TARGETED_BACKEND_TEST']);
+
+result = evaluate({
+  changedFiles: ['src/components/InvoiceBadge.tsx'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_FRONTEND_TEST'],
+});
+assert.equal(result.decision, 'PROCEED');
+assert.equal(result.verificationLevel, 'TARGETED');
+assert.equal(result.excessiveChecks.includes('FULL_REPOSITORY_SUITE'), false);
+
+result = evaluate({
+  changedFiles: ['migrations/0011_add_invoice_index.sql'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_BACKEND_TEST', 'BACKEND_FULL_TEST', 'MIGRATION_TEST', 'FULL_REPOSITORY_SUITE'],
+});
+assert.equal(result.decision, 'PROCEED');
+assert.equal(result.verificationLevel, 'FULL');
+
+result = evaluate({
+  changedFiles: ['docs/verification-cost.md'],
+  plannedChecks: ['DIFF_HYGIENE', 'DOCS_CONSISTENCY'],
+});
+assert.equal(result.decision, 'PROCEED');
+assert.equal(result.verificationLevel, 'MINIMAL');
+
+result = evaluate({
+  changedFiles: ['docs/release-note.md'],
+  plannedChecks: ['DIFF_HYGIENE', 'DOCS_CONSISTENCY', 'FULL_REPOSITORY_SUITE'],
+  escalationReason: 'RELEASE_GATE',
+});
+assert.equal(result.decision, 'PROCEED_ESCALATED');
+assert.equal(result.verificationLevel, 'FULL');
 
 console.log('verification-scope-gate selftest: PASS');
