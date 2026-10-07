@@ -155,3 +155,31 @@ The script and the CLI print only the localhost URL (for example `http://127.0.0
 - Phase 8 does not delete or archive received jobs automatically. Retention period, archive location, and access policy for the lab PC remain a separate human operational decision.
 - If the inbox directory is backed up at the filesystem level, that backup contains the same plaintext protected data (patient/clinic names, media) as the inbox itself. Choosing a production backup target, retention period, and access control is a separate human policy decision; Phase 8 does not select or automate one.
 - Production cloud/Windows automatic-start activation remains out of scope for Phase 8, exactly as for Phase 6/7.
+
+
+## U13: local PDF + later video association
+
+U13 extends the existing localhost Viewer; it does **not** create a second desktop application or modify the verified Gateway inbox.
+
+Optional configuration:
+
+    "manualRoot": "C:\\path\\to\\manual-receive-folder",
+    "relatedMediaStorePath": null
+
+When `manualRoot` is configured, the Viewer scans only direct regular files in that one local folder (no recursion and no symlinks). A PDF is eligible only when its filename contains the explicit case ID form `KYYMMDD-NN` such as `K991231-99`. Videos use `.mov`, `.mp4`, or `.m4v`.
+
+- Matching PDF/video case IDs are shown together automatically.
+- Duplicate video copies are collapsed by SHA-256 content.
+- The Viewer shows the PDF and `関連動画 N本` in the same local detail view.
+- A video can be dragged from Windows Explorer onto the PDF card in the Viewer. The browser sends only filename/size/mtime metadata; no video bytes are uploaded through the drag action.
+- The server resolves that metadata only against a direct regular file already present in `manualRoot`. Missing, ambiguous, traversal, or unsupported candidates fail closed.
+- Manual links are stored atomically in a separate local app-state JSON containing only PDF/video SHA-256 values, case ID, and timestamp. Original filenames/full paths are not persisted in the association store.
+- PDF/video source files are never copied, renamed, edited, or deleted by U13.
+
+The default association store is under the current user's local application-data directory (`KoyoshiDWO/related-media-associations-v1.json`), intentionally outside the watched folder and Gateway inbox. Set `relatedMediaStorePath` only when a different local app-state path is intentionally needed.
+
+For an ad-hoc run without editing config:
+
+    powershell -ExecutionPolicy Bypass -File .\gateway\windows\run-viewer.ps1 -ManualRoot "C:\path\to\manual-receive-folder"
+
+The drag target is the PDF card **inside the localhost Viewer**, not the PDF icon in Windows Explorer. Direct Explorer-PDF drop handling would require a Windows Shell extension and is intentionally not used. The Viewer must therefore be running and open for drag/drop. Windows automatic startup is a separate activation step and is not enabled by this change.

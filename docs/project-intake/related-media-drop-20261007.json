@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "intakeId": "related-media-drop-20261007",
+  "intent": "技工所Windows PCでPDFと動画が別々に届く場合でも、既存のローカルViewer上で同じ症例として簡単に関連付け、PDFを見ながら関連動画をすぐ再生できるようにする。",
+  "scope": "既存Gateway localhost Viewerを再利用し、指定したローカル受信フォルダ内の技工指示書PDFと動画をケース番号で自動候補化する。PDFカードへの動画ドラッグ&ドロップを手動関連付けとして扱い、元PDF/元動画は変更・削除しない。同一動画はSHA-256で重複扱いにし、ViewerではPDFと関連動画件数を同一詳細画面に表示する。ExplorerのPDFアイコン自体をDropHandler化するWindows Shell拡張、新しい独立デスクトップアプリ、新しい外部サービス、クラウド送信、元ファイルの自動削除、本番の自動起動有効化はv1範囲外とする。",
+  "assumptions": [
+    "ドラッグ&ドロップ先はWindows Explorer上のPDFアイコンではなく、既存localhost Viewer内のPDFカードとする。",
+    "同一ケース番号がファイル名に存在する場合は自動関連付け候補として扱い、手動ドラッグは上書き/補助経路とする。",
+    "Viewerが参照する手動受信フォルダはローカルPC内だけとし、外部ネットワークへファイル名・内容・ハッシュを送らない。",
+    "関連付け情報は元ファイルを変更せず、ローカルの最小sidecar metadataとして保持する。患者名・医院名をmetadata keyや保存先ディレクトリ名へ使用しない。",
+    "v1では新しいSQLiteや外部dependencyを追加せず、Node.js標準機能と既存Gateway Viewerを拡張する。",
+    "Windows起動時の自動起動は技術的には可能だが、実機検証後の別activationとし、この実装ではOS設定を変更しない。"
+  ],
+  "humanQuestions": [],
+  "solutionReview": {
+    "options": [
+      {
+        "id": "extend-existing-localhost-viewer",
+        "decision": "MINIMAL_CHANGE",
+        "summary": "既存Gateway localhost ViewerへPDF一覧・ケース番号自動候補・動画ドロップ関連付けを追加する。",
+        "assessment": {
+          "safety": "元ファイルとverified Gateway inboxを変更せず、関連付けmetadataだけをローカルに保存し、外部通信を増やさない。",
+          "accuracy": "ケース番号一致を候補にしつつSHA-256で同一動画を判定し、手動ドロップを明示的な関連付けとして扱える。",
+          "simplicity": "既存ViewerとNode.js標準機能を再利用し、新アプリやDBを追加しない。",
+          "humanOperations": "普段は自動候補で確認でき、必要なときだけPDFカードへ動画をドロップする。",
+          "maintenance": "既存Gateway Viewerの範囲に閉じ、依存ソフトや別更新経路を増やさない。",
+          "reversibility": "追加metadataと機能を無効化すれば元PDF/動画と既存Phase 8 Viewerはそのまま残る。",
+          "existingOverlap": "Phase 8のlocalhost Viewer、既存Windows launcher、既存の動画再生経路を再利用する。"
+        }
+      },
+      {
+        "id": "windows-shell-drop-handler",
+        "decision": "EXTEND_REQUIRED",
+        "summary": "Explorer上のPDFファイルへ直接動画をドロップできるWindows Shell拡張を作る。",
+        "assessment": {
+          "safety": "PDF全般のShell動作へ介入し、COM登録やfile association周辺の影響が増える。",
+          "accuracy": "実現可能だがOS統合の例外が多く、通常PDF操作への副作用確認が必要になる。",
+          "simplicity": "Viewer内dropより大幅に複雑で、目的に対して過剰。",
+          "humanOperations": "操作は最少だが、導入・更新・復旧の管理が増える。",
+          "maintenance": "Windows更新やShell互換性を継続管理する必要がある。",
+          "reversibility": "登録解除は可能だが、OS設定復旧を伴う。",
+          "existingOverlap": "既存Viewerのdrop targetで同じ業務目的を満たせるため採用しない。"
+        }
+      },
+      {
+        "id": "new-native-desktop-app",
+        "decision": "EXTEND_REQUIRED",
+        "summary": "Tauri/Electron等で別のWindowsアプリを新設し、OS drag-and-dropとPDF表示を行う。",
+        "assessment": {
+          "safety": "新しい実行物・更新経路・ファイルアクセス境界が増える。",
+          "accuracy": "OS drag-and-drop pathは扱いやすいが、既存Viewerと機能が重複する。",
+          "simplicity": "新規アプリは最小変更ではない。",
+          "humanOperations": "インストール・起動・更新対象が増える。",
+          "maintenance": "ビルドと配布の維持が必要になる。",
+          "reversibility": "アンインストールできるが追加構成の撤去が必要。",
+          "existingOverlap": "既存localhost Viewerで大部分を実現できるため採用しない。"
+        }
+      }
+    ],
+    "selectedOptionId": "extend-existing-localhost-viewer",
+    "extendRationale": null
+  },
+  "riskSignals": {
+    "protectedOrPatientData": true,
+    "externalCommunication": false,
+    "addedCostOrPaidUsage": false,
+    "authOrIdentity": false,
+    "productionImpact": true,
+    "realDataImpact": true
+  },
+  "status": "APPROVED",
+  "decisionId": "U13"
+}

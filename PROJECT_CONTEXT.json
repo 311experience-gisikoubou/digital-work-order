@@ -242,9 +242,22 @@
         "artifactIds": [
           "digital-work-order-phase2-business-v1"
         ]
+      },
+      {
+        "id": "U13",
+        "topic": "project-intake:related-media-drop-20261007",
+        "status": "CONFIRMED",
+        "summary": "PDFと動画が別々に届く場合、既存Gateway localhost Viewerを拡張し、ケース番号一致を自動候補としてPDFと動画を関連付け、必要時はViewer内のPDFカードへ動画をドラッグ&ドロップして関連付ける。元PDF/元動画とverified Gateway inboxは変更・削除せず、同一動画はSHA-256で重複扱いとする。Windows ExplorerのPDFアイコン自体をDropHandler化するShell拡張や新しい独立アプリは作らず、本番の自動起動有効化は実機検証後の別工程とする。",
+        "decidedAt": "2026-10-07",
+        "source": "EXPLICIT_HUMAN",
+        "type": "BUSINESS",
+        "replaces": null,
+        "artifactIds": [
+          "digital-work-order-phase2-business-v1"
+        ]
       }
     ],
-    "currentState": "U01〜U12はCONFIRMED。Phase 7はmainへmerge済み。次はPhase 8（技工所PCのローカル閲覧と納品・請求連携）を進める。",
-    "nextAction": "Phase 8 intakeをgateへ通し、既存Gatewayのlocalhost read-only viewerとdigital-work-order-intake-v1 handoffをsynthetic data限定で実装する。"
+    "currentState": "U01〜U13はCONFIRMED。Phase 8の既存localhost Viewerを土台に、PDFと後着動画のローカル関連付け機能を最小変更で追加する。",
+    "nextAction": "related-media-drop intakeをgateへ通し、既存Viewerのread-only inbox境界を維持したまま、ローカル受信フォルダのPDF一覧・ケース番号自動候補・SHA-256重複排除・Viewer内ドラッグ&ドロップ関連付けをsynthetic dataで実装・検証する。"
   }
 }

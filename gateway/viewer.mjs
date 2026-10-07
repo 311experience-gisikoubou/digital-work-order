@@ -8,23 +8,26 @@
 // stdout prints only the localhost URL. It never prints job counts, work
 // order fields, patient/clinic names, or any other received content.
 import { pathToFileURL } from 'node:url';
-import { loadInboxRootFromGatewayConfig, resolveViewerConfigPath, validateViewerPort, DEFAULT_PORT } from './viewer-config.mjs';
+import { loadInboxRootFromGatewayConfig, loadRelatedMediaConfig, resolveViewerConfigPath, validateViewerPort, DEFAULT_PORT } from './viewer-config.mjs';
 import { startViewer } from './viewer-server.mjs';
 
 function parseArgs(argv) {
   const configArg = argv.find(arg => arg.startsWith('--config='));
   const portArg = argv.find(arg => arg.startsWith('--port='));
+  const manualRootArg = argv.find(arg => arg.startsWith('--manual-root='));
   return {
     configPath: resolveViewerConfigPath(configArg ? configArg.slice('--config='.length) : null),
-    port: portArg ? portArg.slice('--port='.length) : DEFAULT_PORT
+    port: portArg ? portArg.slice('--port='.length) : DEFAULT_PORT,
+    manualRoot: manualRootArg ? manualRootArg.slice('--manual-root='.length) : null
   };
 }
 
 async function main() {
-  const { configPath, port } = parseArgs(process.argv.slice(2));
+  const { configPath, port, manualRoot } = parseArgs(process.argv.slice(2));
   const inboxRoot = await loadInboxRootFromGatewayConfig(configPath);
+  const relatedMedia = await loadRelatedMediaConfig(configPath, manualRoot);
   const resolvedPort = validateViewerPort(port);
-  const server = await startViewer({ inboxRoot, port: resolvedPort });
+  const server = await startViewer({ inboxRoot, port: resolvedPort, ...relatedMedia });
   const address = server.address();
   process.stdout.write('http://127.0.0.1:' + address.port + '/\n');
 }
