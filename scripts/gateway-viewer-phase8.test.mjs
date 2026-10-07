@@ -13,8 +13,10 @@ import {
 import { createViewerServer, startViewer } from '../gateway/viewer-server.mjs';
 import {
   loadInboxRootFromGatewayConfig,
+  loadRelatedMediaConfig,
   validateViewerPort
 } from '../gateway/viewer-config.mjs';
+import { caseIdForFilename, scanManualRoot } from '../gateway/related-media-core.mjs';
 
 const REF = 'dwo:123e4567-e89b-42d3-a456-426614174000';
 const ATT = 'att-123e4567-e89b-42d3-a456-426614174001';
@@ -190,6 +192,164 @@ async function withTempRoot(fn) {
     await fs.rm(root, { recursive: true, force: true });
   }
 }
+
+test('U13 extracts the explicit KYYMMDD-NN case id and scans direct regular files only', async () => {
+  assert.equal(caseIdForFilename('技工指示書_K991231-99_架空.pdf'), 'K991231-99');
+  assert.equal(caseIdForFilename('k991231-99_動画.mov'), 'K991231-99');
+  assert.equal(caseIdForFilename('case-42.pdf'), null);
+
+  await withTempRoot(async root => {
+    const manual = path.join(root, 'manual');
+    await fs.mkdir(path.join(manual, 'nested'), { recursive: true });
+    await fs.writeFile(path.join(manual, '技工指示書_K991231-99_架空.pdf'), Buffer.from('%PDF-synthetic'));
+    await fs.writeFile(path.join(manual, 'no-case.pdf'), Buffer.from('%PDF-ignore'));
+    await fs.writeFile(path.join(manual, 'K991231-99_動画.mov'), Buffer.from('same-video-bytes'));
+    await fs.writeFile(path.join(manual, 'K991231-99_動画 (1).mov'), Buffer.from('same-video-bytes'));
+    await fs.writeFile(path.join(manual, 'nested', 'K991231-99_ネスト.mov'), Buffer.from('must-not-recurse'));
+    await fs.writeFile(path.join(manual, 'ignore.txt'), Buffer.from('ignore'));
+
+    const scanned = await scanManualRoot(manual);
+    assert.equal(scanned.pdfs.length, 1);
+    assert.equal(scanned.pdfs[0].caseId, 'K991231-99');
+    assert.equal(scanned.videos.length, 1, 'duplicate video bytes collapse by SHA-256');
+    assert.equal(scanned.allVideos.length, 2, 'both direct duplicate filenames remain resolvable for drag/drop');
+    assert.ok(scanned.allVideos.every(item => !item.absolutePath.includes('nested' + path.sep)));
+  });
+});
+
+test('U13 manual-root PDF/video association is local-only, atomic, deduplicated, range-playable, and fail-closed', async () => {
+  await withTempRoot(async root => {
+    const inbox = path.join(root, 'inbox');
+    const manual = path.join(root, 'manual');
+    const store = path.join(root, 'app-state', 'related-media-associations.json');
+    await fs.mkdir(inbox, { recursive: true });
+    await fs.mkdir(manual, { recursive: true });
+
+    const pdfName = '技工指示書_K991231-99_架空.pdf';
+    const autoVideoName = 'K991231-99_動画.mov';
+    const duplicateVideoName = 'K991231-99_動画 (1).mov';
+    const manualVideoName = '追加動画.mov';
+    const pdfBytes = Buffer.from('%PDF-synthetic');
+    const autoVideoBytes = Buffer.from('same-video-bytes-0123456789');
+    const manualVideoBytes = Buffer.from('manual-video-bytes-abcdefghij');
+
+    await fs.writeFile(path.join(manual, pdfName), pdfBytes);
+    await fs.writeFile(path.join(manual, autoVideoName), autoVideoBytes);
+    await fs.writeFile(path.join(manual, duplicateVideoName), autoVideoBytes);
+    await fs.writeFile(path.join(manual, manualVideoName), manualVideoBytes);
+
+    const beforeManual = await snapshotTree(manual);
+    const beforeInbox = await snapshotTree(inbox);
+    const server = await startViewer({
+      inboxRoot: inbox,
+      manualRoot: manual,
+      associationStorePath: store,
+      port: 0
+    });
+
+    try {
+      const port = server.address().port;
+      const base = 'http://127.0.0.1:' + port;
+
+      const listing = await fetch(base + '/api/related-media/pdfs');
+      assert.equal(listing.status, 200);
+      const pdfs = (await listing.json()).pdfs;
+      assert.equal(pdfs.length, 1);
+      assert.equal(pdfs[0].caseId, 'K991231-99');
+      assert.equal(pdfs[0].relatedVideoCount, 1, 'same-case duplicate copies count once');
+
+      const detailResponse = await fetch(base + '/api/related-media/pdfs/' + encodeURIComponent(pdfs[0].token));
+      assert.equal(detailResponse.status, 200);
+      const detail = await detailResponse.json();
+      assert.equal(detail.pdf.mime, 'application/pdf');
+      assert.equal(detail.videos.length, 1);
+      assert.equal((await fetch(base + detail.pdf.url)).headers.get('content-type'), 'application/pdf');
+
+      const videoRange = await fetch(base + detail.videos[0].url, { headers: { Range: 'bytes=1-4' } });
+      assert.equal(videoRange.status, 206);
+      assert.equal(videoRange.headers.get('content-type'), 'video/quicktime');
+      assert.deepEqual(Buffer.from(await videoRange.arrayBuffer()), autoVideoBytes.subarray(1, 5));
+
+      const associateBody = {
+        pdfToken: pdfs[0].token,
+        video: { basename: manualVideoName, size: manualVideoBytes.length, lastModified: 0 }
+      };
+      const associated = await fetch(base + '/api/related-media/associate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(associateBody)
+      });
+      assert.equal(associated.status, 200);
+      assert.equal((await associated.json()).videos.length, 2);
+
+      const duplicateAssociation = await fetch(base + '/api/related-media/associate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(associateBody)
+      });
+      assert.equal(duplicateAssociation.status, 200);
+      assert.equal((await duplicateAssociation.json()).videos.length, 2);
+
+      const missing = await fetch(base + '/api/related-media/associate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pdfToken: pdfs[0].token,
+          video: { basename: 'outside.mov', size: manualVideoBytes.length }
+        })
+      });
+      assert.equal(missing.status, 404);
+
+      const traversal = await fetch(base + '/api/related-media/associate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pdfToken: pdfs[0].token,
+          video: { basename: '../outside.mov', size: manualVideoBytes.length }
+        })
+      });
+      assert.equal(traversal.status, 422);
+
+      const wrongMethod = await fetch(base + '/api/related-media/pdfs', { method: 'POST' });
+      assert.equal(wrongMethod.status, 405);
+
+      const rawForeign = 'GET /api/related-media/pdfs HTTP/1.1\r\n' +
+        'Host: evil.example.com\r\nConnection: close\r\n\r\n';
+      assert.equal(parseRawResponse(await sendRawRequest(port, rawForeign)).status, 403);
+
+      assert.deepEqual(await snapshotTree(manual), beforeManual);
+      assert.deepEqual(await snapshotTree(inbox), beforeInbox);
+
+      const saved = JSON.parse(await fs.readFile(store, 'utf8'));
+      assert.equal(saved.version, 'dwo-related-media-associations-v1');
+      assert.equal(saved.links.length, 1);
+      assert.deepEqual(Object.keys(saved.links[0]).sort(), ['caseId', 'createdAt', 'pdfSha256', 'videoSha256'].sort());
+      assert.equal(saved.links[0].caseId, 'K991231-99');
+      assert.equal(JSON.stringify(saved).includes(pdfName), false);
+      assert.equal(JSON.stringify(saved).includes(manualVideoName), false);
+
+      const stateDirNames = await fs.readdir(path.dirname(store));
+      assert.equal(stateDirNames.some(name => name.endsWith('.tmp')), false, 'atomic temp is cleaned/renamed');
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
+  });
+});
+
+test('U13 viewer config is disabled by default and resolves manual root with app-state outside watched data', async () => {
+  await withTempRoot(async root => {
+    const configPath = path.join(root, 'gateway-config.json');
+    await fs.writeFile(configPath, JSON.stringify({ schemaVersion: 1, inboxRoot: 'inbox' }));
+    const disabled = await loadRelatedMediaConfig(configPath);
+    assert.deepEqual(disabled, { manualRoot: null, associationStorePath: null });
+
+    await fs.writeFile(configPath, JSON.stringify({ schemaVersion: 1, inboxRoot: 'inbox', manualRoot: 'manual' }));
+    const enabled = await loadRelatedMediaConfig(configPath);
+    assert.equal(enabled.manualRoot, path.join(root, 'manual'));
+    assert.equal(path.resolve(enabled.associationStorePath).startsWith(path.resolve(root, 'manual') + path.sep), false);
+    assert.equal(path.resolve(enabled.associationStorePath).startsWith(path.resolve(root, 'inbox') + path.sep), false);
+  });
+});
 
 test('Phase 8 lists only verified opaque jobs newest-first and leaves inbox bytes unchanged', async () => {
   await withTempRoot(async root => {

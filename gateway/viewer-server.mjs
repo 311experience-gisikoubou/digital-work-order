@@ -17,6 +17,7 @@ import {
   summarizeJob
 } from './viewer-core.mjs';
 import { buildDigitalWorkOrderIntake, buildDeliveryIntakeFilename } from './delivery-intake-reuse.mjs';
+import { createRelatedMediaService } from './related-media-core.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_SCRIPT_PATH = path.join(__dirname, 'viewer-client.js');
@@ -47,6 +48,21 @@ function sendText(res, status, body, contentType) {
     'Content-Length': Buffer.byteLength(body)
   });
   res.end(body);
+}
+
+async function readSmallJson(req, maxBytes = 2048) {
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > maxBytes) throw viewerServerError('RELATED_MEDIA_INVALID_DROP');
+    chunks.push(chunk);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch (_) {
+    throw viewerServerError('RELATED_MEDIA_INVALID_DROP');
+  }
 }
 
 // Fail-closed job lookup errors never leak internal detail to the HTTP
@@ -201,6 +217,11 @@ function buildIndexHtml() {
     '.field-row .key { font-weight: bold; min-width: 10rem; }\n' +
     '.media-item { margin-bottom: 1rem; }\n' +
     'img, video { max-width: 480px; display: block; }\n' +
+    '.related-pdf { width: min(100%, 900px); height: 600px; border: 1px solid #ccc; }\n' +
+    '.related-video { max-width: 640px; width: 100%; margin-bottom: 1rem; }\n' +
+    '#related-pdf-list { list-style: none; padding: 0; }\n' +
+    '.related-pdf-card { border: 2px dashed #999; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.5rem; cursor: pointer; }\n' +
+    '.related-pdf-card.drop-active { background: #e9f5ff; border-color: #1677c8; }\n' +
     'audio { display: block; }\n' +
     '#detail-panel { margin-top: 1.5rem; }\n' +
     'button { cursor: pointer; }\n' +
@@ -211,6 +232,7 @@ function buildIndexHtml() {
     '<p>Phase 8: lists verified received jobs from the local inbox only. Nothing here is sent anywhere.</p>\n' +
     '<ul id="job-list"></ul>\n' +
     '<section id="detail-panel"></section>\n' +
+    '<section id="related-media-section"><h2>手動受信PDF</h2><p>動画をPDFカードへドロップすると関連付けます。元ファイルは変更されません。</p><ul id="related-pdf-list"></ul><section id="related-detail-panel"></section></section>\n' +
     '<script src="/viewer-client.js"></script>\n' +
     '</body>\n' +
     '</html>\n';
@@ -354,10 +376,110 @@ async function handleMedia(req, res, inboxRoot, rawJobId, rawAttachmentId) {
   fsSync.createReadStream(filePath).pipe(res);
 }
 
-async function handleRequest(req, res, inboxRoot, clientScript, indexHtml) {
+async function handleRelatedMedia(req, res, relatedMedia, pathname) {
+  if (!relatedMedia) {
+    sendJson(res, 404, { error: 'RELATED_MEDIA_DISABLED' });
+    return;
+  }
+
+  if (pathname === '/api/related-media/pdfs') {
+    if (req.method !== 'GET') {
+      sendJson(res, 405, { error: 'VIEWER_METHOD_NOT_ALLOWED' });
+      return;
+    }
+    sendJson(res, 200, { pdfs: await relatedMedia.listPdfs() });
+    return;
+  }
+
+  let match = pathname.match(/^\/api\/related-media\/pdfs\/([^/]+)$/);
+  if (match) {
+    if (req.method !== 'GET') {
+      sendJson(res, 405, { error: 'VIEWER_METHOD_NOT_ALLOWED' });
+      return;
+    }
+    const token = decodeSegment(match[1]);
+    if (token === null) {
+      sendJson(res, 400, { error: 'RELATED_MEDIA_PDF_NOT_FOUND' });
+      return;
+    }
+    try {
+      sendJson(res, 200, await relatedMedia.detail(token));
+    } catch (error) {
+      sendJson(res, 404, { error: (error && error.code) || 'RELATED_MEDIA_PDF_NOT_FOUND' });
+    }
+    return;
+  }
+
+  if (pathname === '/api/related-media/associate') {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: 'VIEWER_METHOD_NOT_ALLOWED' });
+      return;
+    }
+    try {
+      sendJson(res, 200, await relatedMedia.associate(await readSmallJson(req)));
+    } catch (error) {
+      const code = (error && error.code) || 'RELATED_MEDIA_ASSOCIATION_FAILED';
+      const status = code === 'RELATED_MEDIA_PDF_NOT_FOUND' || code === 'RELATED_MEDIA_DROP_NOT_FOUND' ? 404 : 422;
+      sendJson(res, status, { error: code });
+    }
+    return;
+  }
+
+  match = pathname.match(/^\/manual-media\/([^/]+)$/);
+  if (match) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      sendJson(res, 405, { error: 'VIEWER_METHOD_NOT_ALLOWED' });
+      return;
+    }
+    const token = decodeSegment(match[1]);
+    if (token === null) {
+      sendJson(res, 400, { error: 'RELATED_MEDIA_FILE_NOT_FOUND' });
+      return;
+    }
+    try {
+      const media = await relatedMedia.resolveMedia(token);
+      const stat = await fs.lstat(media.absolutePath);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== media.size) {
+        throw viewerServerError('RELATED_MEDIA_FILE_NOT_FOUND');
+      }
+
+      const range = parseRange(req.headers.range, stat.size);
+      const baseHeaders = {
+        'Content-Type': media.mime,
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'no-store',
+        'Accept-Ranges': 'bytes'
+      };
+      if (range) {
+        const headers = Object.assign({}, baseHeaders, {
+          'Content-Range': 'bytes ' + range.start + '-' + range.end + '/' + stat.size,
+          'Content-Length': range.end - range.start + 1
+        });
+        res.writeHead(206, headers);
+        if (req.method === 'HEAD') {
+          res.end();
+          return;
+        }
+        fsSync.createReadStream(media.absolutePath, { start: range.start, end: range.end }).pipe(res);
+        return;
+      }
+
+      res.writeHead(200, Object.assign({}, baseHeaders, { 'Content-Length': stat.size }));
+      if (req.method === 'HEAD') res.end();
+      else fsSync.createReadStream(media.absolutePath).pipe(res);
+    } catch (error) {
+      sendJson(res, 404, { error: (error && error.code) || 'RELATED_MEDIA_FILE_NOT_FOUND' });
+    }
+    return;
+  }
+
+  sendJson(res, 404, { error: 'VIEWER_NOT_FOUND' });
+}
+
+async function handleRequest(req, res, inboxRoot, relatedMedia, clientScript, indexHtml) {
   if (!enforceLoopbackGuard(req, res, req.socket && req.socket.localPort)) return;
 
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
+  if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'POST') {
     sendJson(res, 405, { error: 'VIEWER_METHOD_NOT_ALLOWED' });
     return;
   }
@@ -370,6 +492,16 @@ async function handleRequest(req, res, inboxRoot, clientScript, indexHtml) {
     return;
   }
   const pathname = url.pathname;
+
+  if (pathname.startsWith('/api/related-media/') || pathname.startsWith('/manual-media/')) {
+    await handleRelatedMedia(req, res, relatedMedia, pathname);
+    return;
+  }
+
+  if (req.method === 'POST') {
+    sendJson(res, 405, { error: 'VIEWER_METHOD_NOT_ALLOWED' });
+    return;
+  }
 
   if (pathname === '/' || pathname === '/index.html') {
     sendText(res, 200, indexHtml, 'text/html; charset=utf-8');
@@ -407,15 +539,18 @@ async function handleRequest(req, res, inboxRoot, clientScript, indexHtml) {
 
 // Builds the HTTP server (not yet listening). inboxRoot must be an absolute
 // path; this function performs no network bind.
-export async function createViewerServer({ inboxRoot }) {
+export async function createViewerServer({ inboxRoot, manualRoot = null, associationStorePath = null }) {
   if (typeof inboxRoot !== 'string' || !path.isAbsolute(inboxRoot)) {
     throw viewerServerError('VIEWER_INVALID_INBOX_ROOT');
   }
+  const relatedMedia = manualRoot
+    ? await createRelatedMediaService({ manualRoot, associationStorePath, inboxRoot })
+    : null;
   const clientScript = await fs.readFile(CLIENT_SCRIPT_PATH, 'utf8');
   const indexHtml = buildIndexHtml();
 
   const server = http.createServer((req, res) => {
-    handleRequest(req, res, inboxRoot, clientScript, indexHtml).catch(() => {
+    handleRequest(req, res, inboxRoot, relatedMedia, clientScript, indexHtml).catch(() => {
       if (!res.headersSent) sendJson(res, 500, { error: 'VIEWER_INTERNAL_ERROR' });
       else res.destroy();
     });
@@ -426,8 +561,8 @@ export async function createViewerServer({ inboxRoot }) {
 // Starts listening. The host is hardcoded to the loopback address and is not
 // a parameter of this function, so no caller can make the viewer reachable
 // from outside the lab PC.
-export async function startViewer({ inboxRoot, port }) {
-  const server = await createViewerServer({ inboxRoot });
+export async function startViewer({ inboxRoot, port, manualRoot = null, associationStorePath = null }) {
+  const server = await createViewerServer({ inboxRoot, manualRoot, associationStorePath });
   await new Promise((resolve, reject) => {
     const onError = reject;
     server.once('error', onError);

@@ -7,5 +7,7 @@
   "activeRecipientKeyId": null,
   "senderRegistryPath": "sender-registry.json",
   "inboxRoot": null,
+  "manualRoot": null,
+  "relatedMediaStorePath": null,
   "pollSeconds": 60
 }
