@@ -32,12 +32,23 @@ const ESCALATION_REASONS = new Set([
 ]);
 
 const DOC_RE = /(^|\/)(docs?|documentation)(\/|$)|\.(md|mdx|txt|rst)$/i;
-const GOVERNANCE_RE = /(^|\/)\.agents\/|(^|\/)templates\/(?:AGENTS\.index\.md\.template$|\.claude\/skills\/|ui-reference\/reproduction\/)|(^|\/)(AGENTS(?:\.local)?\.md|OPERATIONS\.md|CORE\.md|PROJECT_COMPLETION\.md|PROJECT_CONTEXT\.json|CURRENT_STATUS\.md|STATUS\.md|CHANGELOG\.md|VERSION)$|(^|\/)tools\/portfolio-governance-audit(?:-selftest)?\.mjs$/i;
+const GOVERNANCE_RE = /(^|\/)\.agents\/|(^|\/)\.(?:gitignore|gitattributes)$|(^|\/)templates\/(?:AGENTS\.index\.md\.template$|\.claude\/skills\/|ui-reference\/reproduction\/)|(^|\/)(AGENTS(?:\.local)?\.md|OPERATIONS\.md|CORE\.md|PROJECT_COMPLETION\.md|PROJECT_CONTEXT\.json|CURRENT_STATUS\.md|STATUS\.md|CHANGELOG\.md|VERSION)$|(^|\/)tools\/portfolio-governance-audit(?:-selftest)?\.mjs$/i;
 const DEPENDENCY_RE = /(^|\/)(package(?:-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|Cargo\.(?:toml|lock)|pyproject\.toml|poetry\.lock|uv\.lock|requirements[^/]*\.txt|Pipfile(?:\.lock)?|go\.(?:mod|sum)|composer\.(?:json|lock)|pom\.xml|build\.gradle(?:\.kts)?|gradle\.lockfile)$/i;
 const FRONTEND_DEPENDENCY_RE = /(^|\/)(package(?:-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?)$/i;
 const BACKEND_DEPENDENCY_RE = /(^|\/)(Cargo\.(?:toml|lock)|pyproject\.toml|poetry\.lock|uv\.lock|requirements[^/]*\.txt|Pipfile(?:\.lock)?|go\.(?:mod|sum)|composer\.(?:json|lock)|pom\.xml|build\.gradle(?:\.kts)?|gradle\.lockfile)$/i;
 const MIGRATION_RE = /(^|\/)(migrations?|schema|database|db)(\/|$)|\.sql$/i;
 const FRONTEND_RE = /(^|\/)(src|app|web|frontend|ui|components?|pages?|views?|styles?)(\/|$).+\.(ts|tsx|js|jsx|mjs|cjs|vue|svelte|css|scss|sass|less|html)$/i;
+// Narrow Node/CLI script vocabulary. Keep generic src/*.js|ts frontend behavior unchanged;
+// only explicit CLI/command paths plus ESM/CommonJS core/tests are classified as CLI scripts.
+const CLI_SCRIPT_RE = /^(?:(?:src\/)?(?:cli|command)\.(?:js|ts|mjs|cjs)|src\/(?:cli|commands?)\/.+\.(?:js|ts|mjs|cjs|ps1)|src\/core\/.+\.(?:mjs|cjs)|tests?\/.+\.(?:mjs|cjs))$/i;
+// Narrow local transport executables: only files whose basename contains a
+// delimited `mcp` or `stdio` semantic under src/transport. Generic transport
+// modules (for example src/transport/http.ts) remain subject to the normal
+// frontend/backend/unknown rules rather than being broadly reclassified.
+const LOCAL_STDIO_TRANSPORT_RE = /^src\/transport\/(?:[^/]+\/)*(?:[A-Za-z0-9]+[-_.])*(?:mcp|stdio)(?:[-_.][A-Za-z0-9]+)*\.(?:js|ts|mjs|cjs)$/i;
+// Narrow executable launchers under tools/. This does not classify generic tools/*.mjs;
+// only a basename ending in a delimited `launcher` semantic is treated as CLI runtime.
+const LOCAL_TOOL_LAUNCHER_RE = /^tools\/(?:[^/]+\/)*(?:[A-Za-z0-9]+[-_.])*launcher\.(?:js|ts|mjs|cjs)$/i;
 const ROOT_INDEX_HTML_RE = /^index\.html$/i;
 const FRONTEND_VERIFICATION_SCRIPT_RE = /^scripts\/(?=[^/]*\.(?:ts|js|mjs)$)(?=[^/]*(?:frontend|ui|browser|render|layout|visual|home-stage|home-invoice))(?=[^/]*(?:verify|verification|selftest|test|smoke|check|scale))[^/]+\.(?:ts|js|mjs)$/i;
 const ROOT_FRONTEND_JS_COMPANION_RE = /^(?!.*(?:^|[._-])(?:server|backend|api|build|config|test|tests|spec|tool|tools|script|scripts|webpack|vite|rollup|eslint|jest|playwright|cypress)(?:[._-]|$))[^/]+\.(?:js|mjs|cjs)$/i;
@@ -76,13 +87,15 @@ function validRepoPath(value) {
 }
 
 export function classifyFiles(changedFiles) {
+  const hasCliScriptAnchor = changedFiles.some(file => CLI_SCRIPT_RE.test(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file));
+
   // Anchor candidates exclude anything already resolved as backend (a
   // dedicated gateway script test, or any BACKEND_RE path such as a
   // frontend-looking gateway subdirectory like gateway/ui/render.js) so a
   // backend-classified file can never manufacture a frontend companion
   // anchor for an otherwise-unrelated root JS file.
   const hasStrongFrontendAnchor = changedFiles.some(file => {
-    if (isGatewayDedicatedScriptTest(file) || BACKEND_RE.test(file)) return false;
+    if (CLI_SCRIPT_RE.test(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file) || isGatewayDedicatedScriptTest(file) || BACKEND_RE.test(file)) return false;
     return ROOT_INDEX_HTML_RE.test(file) || FRONTEND_VERIFICATION_SCRIPT_RE.test(file) || FRONTEND_RE.test(file);
   });
 
@@ -93,13 +106,17 @@ export function classifyFiles(changedFiles) {
     migration: false,
     frontend: false,
     backend: false,
+    cli: false,
     unknown: false,
   };
 
   for (const file of changedFiles) {
     if (DEPENDENCY_RE.test(file)) {
       flags.dependency = true;
-      if (FRONTEND_DEPENDENCY_RE.test(file)) flags.frontend = true;
+      if (FRONTEND_DEPENDENCY_RE.test(file)) {
+        if (hasCliScriptAnchor) flags.cli = true;
+        else flags.frontend = true;
+      }
       if (BACKEND_DEPENDENCY_RE.test(file)) flags.backend = true;
       continue;
     }
@@ -120,6 +137,10 @@ export function classifyFiles(changedFiles) {
       flags.backend = true;
       continue;
     }
+    if (CLI_SCRIPT_RE.test(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file)) {
+      flags.cli = true;
+      continue;
+    }
     if (ROOT_INDEX_HTML_RE.test(file) || FRONTEND_VERIFICATION_SCRIPT_RE.test(file) || FRONTEND_RE.test(file)) {
       flags.frontend = true;
       continue;
@@ -134,9 +155,11 @@ export function classifyFiles(changedFiles) {
   if (flags.unknown) return { profile: 'UNKNOWN', flags };
   if (flags.dependency) return { profile: 'DEPENDENCY_CHANGE', flags };
   if (flags.migration) return { profile: 'DB_MIGRATION', flags };
-  if (flags.backend && flags.frontend) return { profile: 'MIXED_RUNTIME', flags };
+  const runtimeKinds = Number(flags.frontend) + Number(flags.backend) + Number(flags.cli);
+  if (runtimeKinds > 1) return { profile: 'MIXED_RUNTIME', flags };
   if (flags.backend) return { profile: 'BACKEND_ONLY', flags };
   if (flags.frontend) return { profile: 'FRONTEND_ONLY', flags };
+  if (flags.cli) return { profile: 'CLI_SCRIPT', flags };
   if (flags.governance) return { profile: 'GOVERNANCE_ONLY', flags };
   if (flags.docs) return { profile: 'DOCS_ONLY', flags };
   return { profile: 'UNKNOWN', flags };
@@ -161,6 +184,10 @@ function minimumChecksFor(flags) {
     checks.push('TARGETED_BACKEND_TEST');
   }
 
+  if (flags.cli) {
+    checks.push('TARGETED_SELFTEST');
+  }
+
   // Migrations and dependency changes are explicitly high-coupling. They keep
   // broader coverage because failures can escape the changed module.
   if (flags.migration) {
@@ -176,8 +203,8 @@ function minimumChecksFor(flags) {
 
 function verificationLevelFor(flags, escalationReason) {
   if (flags.migration || flags.dependency || escalationReason === 'RELEASE_GATE') return 'FULL';
-  if (flags.frontend && flags.backend) return 'AFFECTED';
-  if (flags.governance || flags.frontend || flags.backend) return 'TARGETED';
+  if (Number(flags.frontend) + Number(flags.backend) + Number(flags.cli) > 1) return 'AFFECTED';
+  if (flags.governance || flags.frontend || flags.backend || flags.cli) return 'TARGETED';
   return 'MINIMAL';
 }
 
