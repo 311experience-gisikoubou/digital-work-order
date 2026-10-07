@@ -1,4 +1,4 @@
-# Drive relay permanent-delete trial — 2026-10-07
+﻿# Drive relay permanent-delete trial 窶・2026-10-07
 
 Status: **GATE C SYNTHETIC PASS**
 
@@ -34,7 +34,7 @@ References:
 
 The prototype is in:
 
-`tools/drive-relay-permanent-delete-probe.gs`
+`gateway/drive-relay-permanent-delete-probe.gs`
 
 The deployed public web app stayed write-disabled for the entire Gate C run:
 

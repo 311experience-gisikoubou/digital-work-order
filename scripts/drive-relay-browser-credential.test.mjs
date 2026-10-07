@@ -1,4 +1,4 @@
-// Synthetic-only comparison of bearer vs HMAC upload anti-abuse credentials.
+﻿// Synthetic-only comparison of bearer vs HMAC upload anti-abuse credentials.
 // No external network, no Drive writes, no patient/clinic data.
 // Reuses the dependency-free headless Chrome/CDP pattern already present in this repo.
 import { spawn } from 'node:child_process';
@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const pagePath = path.join(root, 'tools', 'drive-relay-credential-probe.html');
+const pagePath = path.join(root, 'app', 'drive-relay-credential-probe.html');
 const CHROME_CANDIDATES = [
   process.argv[2],
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',

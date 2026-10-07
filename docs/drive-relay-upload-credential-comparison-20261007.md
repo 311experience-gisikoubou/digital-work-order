@@ -1,4 +1,4 @@
-# Drive relay upload credential comparison — 2026-10-07
+﻿# Drive relay upload credential comparison 窶・2026-10-07
 
 Status: **SYNTHETIC CHROME PASS / iPad SAFARI STILL REQUIRED**
 
@@ -18,8 +18,8 @@ verified by the lab Gateway remains the authoritative end-to-end sender identity
 
 Files:
 
-- `tools/drive-relay-credential-probe.html`
-- `tools/drive-relay-credential-e2e.mjs`
+- `app/drive-relay-credential-probe.html`
+- `scripts/drive-relay-browser-credential.test.mjs`
 
 The test uses localhost plus a temporary headless Chrome profile and CDP. It adds no dependency,
 uses no external network, writes nothing to Drive, and uses no real protected data.

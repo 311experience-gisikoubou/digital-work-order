@@ -7,9 +7,9 @@ Google Drive and must never be used with patient/clinic data.
 
 ## Files
 
-- `drive-relay-device-probe.html`
-- `tools/drive-relay-device-probe.js`
-- `tools/drive-relay-device-probe-e2e.mjs`
+- `app/drive-relay-device-probe.html`
+- `app/drive-relay-device-probe.js`
+
 
 The page is intentionally separate from the normal work-order UI and is not linked from the app.
 It includes `noindex,nofollow`.
@@ -47,9 +47,8 @@ rather than an unauthenticated downgrade or silent key rotation.
 
 ## Local E2E result
 
-`node tools/drive-relay-device-probe-e2e.mjs`
-
-passed 15/15 checks:
+The probe logic was verified at commit `82a6ac5` with the original local CDP harness and passed
+15/15 checks:
 
 - missing state fails closed;
 - synthetic credential initialization succeeds;
@@ -67,18 +66,25 @@ passed 15/15 checks:
 - synthetic state can be explicitly cleared;
 - cleared state fails closed instead of silently rotating.
 
-Terminal result:
+Terminal result recorded at that commit:
 
 `DRIVE_RELAY_DEVICE_PROBE_E2E=PASS`
 
 `CHECK_COUNT=15`
+
+After relocating the probe under `app/` for verification-scope classification, the probe JavaScript
+was compared byte-for-byte with the 82a6ac5 version and had no differences. Static HTTP checks also
+confirmed the relocated HTML and JavaScript are both served successfully. A second relocated CDP
+harness is intentionally not kept because it introduced harness-only page-load instability while
+the probe logic itself remained unchanged. The next decisive browser check is the actual iPad Safari
+gate below.
 
 ## Actual iPad Safari gate
 
 After this probe page is deliberately merged/deployed to the normal GitHub Pages origin, the target
 URL will be:
 
-`https://311experience-gisikoubou.github.io/digital-work-order/drive-relay-device-probe.html`
+`https://311experience-gisikoubou.github.io/digital-work-order/app/drive-relay-device-probe.html`
 
 Required real-device procedure:
 
