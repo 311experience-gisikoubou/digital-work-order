@@ -258,7 +258,9 @@ Current evidence is recorded in
 - synthetic Chrome comparison: PASS;
 - provisional recommendation: bearer token;
 - exact iPad Safari persistence/restore: still required;
-- therefore Gate B is PARTIAL PASS, not complete.
+- a standalone no-network iPad probe is prepared and locally 15/15 PASS; see
+  `docs/drive-relay-ipad-device-probe-20261007.md`;
+- therefore Gate B is PARTIAL PASS, not complete until the actual iPad Safari run passes.
 
 ### C. Permanent-delete prototype
 
@@ -294,7 +296,16 @@ Therefore Gate C is **PASS for the bounded synthetic prototype**.
 
 ### D. Real iPad path, still synthetic
 
-Run from the actual clinic-style iPad Safari / GitHub Pages origin:
+#### D1. Browser credential persistence
+
+First run the standalone device probe from the actual clinic-style iPad Safari / GitHub Pages
+origin. It must prove the non-extractable ECDSA sender key and provisional bearer survive a real
+Safari close/reopen without silent rotation. The probe is locally 15/15 PASS but is not deployed
+until the branch is explicitly merged.
+
+#### D2. Full synthetic relay
+
+Only after D1 passes:
 
 - existing pairing state restored;
 - synthetic encrypted transfer;
@@ -304,7 +315,7 @@ Run from the actual clinic-style iPad Safari / GitHub Pages origin:
 - Gateway verifies/decrypts/persists;
 - ACK permanently deletes only the relay job.
 
-No patient/clinic data is used in this gate.
+No patient/clinic data is used in either D1 or D2.
 
 ### E. Failure matrix
 
