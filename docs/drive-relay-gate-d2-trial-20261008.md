@@ -1,0 +1,13 @@
+# Gate D2 synthetic trial harness
+
+Status: **TRIAL / repository preparation only**. This artifact does not authorize deployment, Drive configuration, public write activation, patient/clinic data, or production adoption.
+
+`app/drive-relay-d2-trial.html` is unlinked and `noindex,nofollow`. It accepts only its own prepared `?bridge=` URL, validates it, and has one IndexedDB state record. The iPad creates only its stable, non-extractable ECDSA sender key and high-entropy bearer; the lab PC owns the recipient private key. The bridge supplies only `{recipientKeyId, publicJwk}`. Existing package, crypto, receiver-bootstrap, and transport builders create a tiny synthetic package.
+
+The parent uses an HtmlService iframe bridge because ContentService CORS is not assumed. Every message binds to iframe `contentWindow`, a random per-page channel, and an observed exact allowed Apps Script origin. The bridge requires the exact configured parent origin. The repository Apps Script source is inert unless `D2_TRIAL_ENABLED=true` and `D2_PARENT_ORIGIN`, `D2_SYNTHETIC_ROOT_ID`, `D2_RECEIVER_BEARER_SHA256`, and `D2_RECIPIENT_PUBLIC_JSON` are configured. Pairing additionally needs `D2_PAIRING_ENABLED=true`; it stores a hash-only upload verifier and root `pairing.json` public sender registry, then closes pairing.
+
+Drive uses opaque job/object names, hashes/sizes/bootstrap metadata, `meta.json`, and a ready marker written last. No work-order reference, names, source filenames, or plaintext payload are stored. The adapter rejects absent/hash- or size-mismatched Drive-for-desktop objects before decrypt, persistence, or ACK; it loads the separate root pairing registry rather than trusting a job key. It invokes ACK only after verified persistence. ACK permanently deletes exact direct-child IDs only, with `ready -> deleting` retry state and no Trash.
+
+Setup/run boundary: use a dedicated synthetic Drive root; create a separate Apps Script deployment manually; set only synthetic values; prepare one GitHub Pages URL with `?bridge=`; enable pairing for one browser pair; then disable it. Send only the built-in tiny synthetic fixture. The PC may be offline; no background service is introduced. Cleanup is a separate authorized operation: disable `D2_TRIAL_ENABLED`, remove synthetic deployment/configuration, and permanently remove only the dedicated synthetic root after confirming it contains no wanted data.
+
+Status boundary: **D1 actual iPad PASS. D2 is repository harness prepared and locally tested only. External Apps Script is still disabled and unmodified. Production adoption and Gate E are NOT complete.**

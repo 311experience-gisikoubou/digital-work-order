@@ -298,10 +298,9 @@ Therefore Gate C is **PASS for the bounded synthetic prototype**.
 
 #### D1. Browser credential persistence
 
-First run the standalone device probe from the actual clinic-style iPad Safari / GitHub Pages
-origin. It must prove the non-extractable ECDSA sender key and provisional bearer survive a real
-Safari close/reopen without silent rotation. The probe is locally 15/15 PASS but is not deployed
-until the branch is explicitly merged.
+The standalone device probe from the actual clinic-style iPad Safari / GitHub Pages origin is
+**actual PASS**: it proved the non-extractable ECDSA sender key and provisional bearer survive a
+Safari close/reopen without silent rotation.
 
 #### D2. Full synthetic relay
 
@@ -316,6 +315,9 @@ Only after D1 passes:
 - ACK permanently deletes only the relay job.
 
 No patient/clinic data is used in either D1 or D2.
+
+D2 currently has a local repository harness only; it is locally tested but is **not** a real D2
+PASS. External Apps Script remains disabled and unmodified.
 
 ### E. Failure matrix
 

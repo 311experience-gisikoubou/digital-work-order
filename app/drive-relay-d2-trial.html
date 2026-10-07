@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; font-src 'none'; frame-src https://script.google.com https://*.googleusercontent.com; base-uri 'none'; form-action 'none'">
+  <title>D2 synthetic relay trial</title>
+  <style>body{font:16px system-ui;margin:2rem;max-width:42rem}button,input{font:inherit;padding:.6rem;margin:.25rem 0;width:100%}pre{white-space:pre-wrap;background:#f4f4f4;padding:1rem}iframe{display:none}</style>
+</head>
+<body>
+  <h1>D2 synthetic relay trial</h1>
+  <p>This unlinked page handles synthetic data only. It never displays or copies credentials.</p>
+  <p>The prepared URL supplies the bridge; no credential is shown.</p>
+  <button id="pair" type="button">One-time synthetic pairing</button>
+  <button id="send" type="button">Build and send synthetic job</button>
+  <pre id="status">State missing: sending is fail-closed.</pre>
+  <iframe id="relay-bridge" sandbox="allow-scripts allow-same-origin" title="D2 relay bridge"></iframe>
+  <script src="../media-transfer-package.js"></script>
+  <script src="../media-transfer-crypto.js"></script>
+  <script src="../media-receiver-bootstrap.js"></script>
+  <script src="../media-relay.js"></script>
+  <script src="drive-relay-d2-trial.js"></script>
+</body>
+</html>
