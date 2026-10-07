@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; font-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Drive Relay iPad 合成テスト</title>
+  <style>
+    :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; background: #f5f5f3; color: #1f2428; }
+    main { max-width: 720px; margin: 0 auto; padding: 28px 18px 48px; }
+    .card { background: #fff; border: 1px solid #d8d8d4; border-radius: 18px; padding: 22px; margin: 14px 0; box-shadow: 0 1px 5px rgba(0,0,0,.04); }
+    h1 { font-size: 25px; margin: 0 0 8px; }
+    h2 { font-size: 18px; margin: 0 0 12px; }
+    p, li { font-size: 16px; line-height: 1.55; }
+    .muted { color: #667078; font-size: 14px; }
+    #probe-badge { display: inline-block; border-radius: 999px; padding: 6px 11px; font-weight: 700; background: #ececea; }
+    #probe-badge[data-state="pass"] { background: #e6f4ea; color: #146c2e; }
+    #probe-badge[data-state="fail"] { background: #fce8e6; color: #a50e0e; }
+    #probe-status { margin: 12px 0 0; font-weight: 650; }
+    button { width: 100%; min-height: 52px; border: 0; border-radius: 12px; padding: 11px 14px; margin: 7px 0; font: inherit; font-weight: 650; background: #1f6feb; color: #fff; }
+    button.secondary { background: #eceff2; color: #20252a; }
+    button.danger { background: #f6e8e8; color: #8b1e1e; }
+    button:disabled { opacity: .45; }
+    dl { display: grid; grid-template-columns: 120px 1fr; gap: 8px 12px; margin: 0; }
+    dt { color: #667078; }
+    dd { margin: 0; overflow-wrap: anywhere; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f7f7f5; border-radius: 10px; padding: 12px; font-size: 12px; min-height: 50px; }
+    ol { padding-left: 22px; }
+  </style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <span id="probe-badge" data-state="idle">未実行</span>
+    <h1>iPad Safari 合成保存テスト</h1>
+    <p>患者情報・医院情報・写真は使いません。Google Driveにも送信しません。このページ内の架空鍵だけをSafariのIndexedDBへ保存します。</p>
+    <p id="probe-status">確認中…</p>
+  </div>
+
+  <div class="card">
+    <h2>確認すること</h2>
+    <ol>
+      <li><strong>① 架空テストを作成</strong>を押す。</li>
+      <li>PASSを確認したら、Safariのこのタブを閉じる。できればSafari自体も終了してから開き直す。</li>
+      <li>同じURLを開き、<strong>② 再開後を確認</strong>を押す。</li>
+      <li>PASSなら<strong>結果をコピー</strong>。最後に<strong>架空テストデータを削除</strong>。</li>
+    </ol>
+    <button id="probe-init" type="button">① 架空テストを作成</button>
+    <button id="probe-verify" type="button" class="secondary">② 再開後を確認</button>
+    <button id="probe-copy" type="button" class="secondary" disabled>結果をコピー</button>
+    <button id="probe-clear" type="button" class="danger">架空テストデータを削除</button>
+  </div>
+
+  <div class="card">
+    <h2>環境</h2>
+    <dl>
+      <dt>ページ</dt><dd id="probe-origin">確認中…</dd>
+      <dt>安全な接続</dt><dd id="probe-secure">確認中…</dd>
+    </dl>
+    <p class="muted">秘密鍵やbearerの実値は画面・コピー結果に出しません。</p>
+  </div>
+
+  <div class="card">
+    <h2>検証結果</h2>
+    <pre id="probe-details"></pre>
+  </div>
+</main>
+<script src="drive-relay-device-probe.js"></script>
+</body>
+</html>
