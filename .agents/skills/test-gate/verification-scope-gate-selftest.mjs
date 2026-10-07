@@ -14,6 +14,21 @@ assert.equal(classifyFiles(['STATUS.md', 'PROJECT_CONTEXT.json']).profile, 'GOVE
 assert.equal(classifyFiles(['templates/.claude/skills/test-gate/SKILL.md.template']).profile, 'GOVERNANCE_ONLY');
 assert.equal(classifyFiles(['templates/AGENTS.index.md.template']).profile, 'GOVERNANCE_ONLY');
 assert.equal(classifyFiles(['templates/ui-reference/reproduction/FIXED_SHAPES.json.template']).profile, 'GOVERNANCE_ONLY');
+assert.equal(classifyFiles(['.gitignore']).profile, 'GOVERNANCE_ONLY');
+assert.equal(classifyFiles(['src/cli.mjs']).profile, 'CLI_SCRIPT');
+assert.equal(classifyFiles(['src/cli/windows-gui-adapter.mjs']).profile, 'CLI_SCRIPT');
+assert.equal(classifyFiles(['src/cli/windows-gui.ps1']).profile, 'CLI_SCRIPT');
+assert.equal(classifyFiles(['src/gui/windows-gui.ps1']).profile, 'UNKNOWN');
+assert.equal(classifyFiles(['src/core/audit-log.mjs']).profile, 'CLI_SCRIPT');
+assert.equal(classifyFiles(['src/transport/mcp-server.mjs']).profile, 'CLI_SCRIPT');
+assert.equal(classifyFiles(['src/transport/stdio-bridge.ts']).profile, 'CLI_SCRIPT');
+assert.equal(classifyFiles(['src/transport/nested/local-mcp.mjs']).profile, 'CLI_SCRIPT');
+assert.equal(classifyFiles(['src/transport/http.ts']).profile, 'FRONTEND_ONLY');
+assert.equal(classifyFiles(['src/transport/socket-client.ts']).profile, 'FRONTEND_ONLY');
+assert.equal(classifyFiles(['tools/rdc-singleton-launcher.mjs']).profile, 'CLI_SCRIPT');
+assert.equal(classifyFiles(['tools/local-runner-launcher.ts']).profile, 'CLI_SCRIPT');
+assert.equal(classifyFiles(['tools/cleanup.mjs']).profile, 'UNKNOWN');
+assert.equal(classifyFiles(['tests/core.test.mjs']).profile, 'CLI_SCRIPT');
 
 // Root runtime JS is accepted only as a companion to an already-clear frontend change.
 assert.equal(classifyFiles(['app.js']).profile, 'UNKNOWN');
@@ -28,6 +43,49 @@ assert.equal(classifyFiles(['index.html', 'config.js']).profile, 'UNKNOWN');
 assert.equal(classifyFiles(['index.html', 'visual.test.js']).profile, 'UNKNOWN');
 
 let result = evaluate({
+  changedFiles: [
+    '.gitignore',
+    'AGENTS.local.md',
+    'CURRENT_STATUS.md',
+    'PROJECT_CONTEXT.json',
+    'README.md',
+    'docs/architecture.md',
+    'package.json',
+    'src/cli.mjs',
+    'src/core/audit-log.mjs',
+    'tools/rdc-singleton-launcher.mjs',
+    'tests/core.test.mjs',
+  ],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_SELFTEST', 'DOCS_CONSISTENCY', 'DEPENDENCY_AUDIT', 'FULL_REPOSITORY_SUITE'],
+});
+assert.equal(result.profile, 'DEPENDENCY_CHANGE');
+assert.equal(result.flags.unknown, false);
+assert.equal(result.flags.cli, true);
+assert.equal(result.flags.frontend, false);
+assert.equal(result.decision, 'PROCEED');
+
+result = evaluate({
+  changedFiles: [
+    'AGENTS.local.md',
+    'CURRENT_STATUS.md',
+    'PROJECT_CONTEXT.json',
+    'README.md',
+    'docs/architecture.md',
+    'package.json',
+    'package-lock.json',
+    'src/transport/mcp-server.mjs',
+    'tests/mcp-transport.test.mjs',
+    'tests/transport-dependency-boundary.test.mjs',
+  ],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_SELFTEST', 'DOCS_CONSISTENCY', 'DEPENDENCY_AUDIT', 'FULL_REPOSITORY_SUITE'],
+});
+assert.equal(result.profile, 'DEPENDENCY_CHANGE');
+assert.equal(result.flags.cli, true);
+assert.equal(result.flags.frontend, false);
+assert.equal(result.flags.unknown, false);
+assert.equal(result.decision, 'PROCEED');
+
+result = evaluate({
   changedFiles: ['docs/guide.md'],
   plannedChecks: ['DIFF_HYGIENE', 'DOCS_CONSISTENCY'],
 });
