@@ -46,6 +46,29 @@ const GITHUB_SSH_URL_ORIGIN_RE = /^ssh:\/\/git@github\.com\/([^/]+)\/([^/]+?)(?:
 // edit only rather than weakening the write boundary. See SKILL.md.
 const IMPLEMENTATION_TOOLS = 'Read,Write,Edit,Glob,Grep';
 
+// Only a narrow, unmistakable Claude plan usage/rate-limit message that also
+// carries explicit reset/retry-later context is ever classified as a
+// provider capacity stop. Both a "hit your X limit" phrasing and an
+// "X limit reached/hit/exceeded" phrasing are recognized, each only when a
+// reset/retry/resume phrase also appears nearby. Any other nonzero exit
+// (including generic "rate limit" mentions with no reset context, or
+// unrelated provider/CLI errors) stays the generic PROVIDER_STOPPED code.
+// The matched text is used only to pick a stop CODE; it is never copied into
+// any returned result, so raw provider stdout/stderr (and anything
+// secret-shaped inside it) can never leak through this classification.
+const PROVIDER_CAPACITY_LIMIT_PHRASE = '(?:hit(?:ting)? (?:your |the )?(?:session|usage|plan|rate) limit|(?:session|usage|plan|rate) limit(?:ed)? (?:reached|hit|exceeded))';
+const PROVIDER_CAPACITY_RESET_PHRASE = '(?:reset|resets|resetting|retry[- ]after|try again (?:at|in|after)|resumes?|available again)';
+const PROVIDER_CAPACITY_REGEX = new RegExp(
+  `\\b${PROVIDER_CAPACITY_LIMIT_PHRASE}\\b[\\s\\S]{0,80}?\\b${PROVIDER_CAPACITY_RESET_PHRASE}\\b`, 'i',
+);
+const PROVIDER_CAPACITY_SCAN_MAX_CHARS = 16384;
+
+export function isProviderCapacityFailure(text) {
+  if (typeof text !== 'string' || text.length === 0) return false;
+  const bounded = text.length > PROVIDER_CAPACITY_SCAN_MAX_CHARS ? text.slice(0, PROVIDER_CAPACITY_SCAN_MAX_CHARS) : text;
+  return PROVIDER_CAPACITY_REGEX.test(bounded);
+}
+
 function safeToken(value) {
   return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/.test(value);
 }
@@ -451,7 +474,16 @@ export function runClaudeImplementationTask(payload, {
     });
     if (result.error?.code === 'ETIMEDOUT') return stop('PROVIDER_TIMEOUT', taskId);
     if (result.error?.code === 'ENOBUFS') return stop('PROVIDER_OUTPUT_TOO_LARGE', taskId);
-    if (result.error || result.status !== 0) return stop('PROVIDER_STOPPED', taskId);
+    if (result.error) return stop('PROVIDER_STOPPED', taskId);
+    if (result.status !== 0) {
+      // Classification only ever decides which STOP code to return; the
+      // narrowly-matched provider text itself is discarded right here and
+      // never attached to the stop() result below.
+      if (isProviderCapacityFailure(`${result.stdout || ''}\n${result.stderr || ''}`)) {
+        return stop('PROVIDER_CAPACITY_UNAVAILABLE', taskId);
+      }
+      return stop('PROVIDER_STOPPED', taskId);
+    }
     let parsed;
     try { parsed = JSON.parse(result.stdout); } catch { return stop('PROVIDER_OUTPUT_INVALID', taskId); }
     if (parsed?.type !== 'result' || parsed?.subtype !== 'success' || parsed?.is_error !== false || typeof parsed?.result !== 'string') return stop('PROVIDER_OUTPUT_INVALID', taskId);

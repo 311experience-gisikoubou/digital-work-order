@@ -141,6 +141,39 @@ try {
         $gates['claude_result'] = if ($orch -and $orch.result -eq 'COMPLETED') { 'PASS' } else { "FAIL: $(Prop $orch 'code')" }
         Update-Status @{ state = 'GATES_RUNNING'; orchestrator_code = (Prop $orch 'code'); claude_ended_at = (Get-Date).ToString('o') }
 
+        # Provider capacity exhaustion (narrow Claude plan usage/rate-limit stop,
+        # classified by implementation-runner.mjs and propagated here as the
+        # orchestrator's top-level code) is handled before the normal scope/test
+        # gates: it is never retried automatically and never checkpointed.
+        # - Clean worktree (no uncommitted source changes left by this attempt):
+        #   WAIT_PROVIDER. No DONE, no test gate, no further attempt in this
+        #   runner invocation -- an outer poller/operator resumes the same job
+        #   later via -ContinueJob.
+        # - Dirty worktree (uncommitted source changes remain): fails closed
+        #   with a distinct capacity-with-source-changes stop code instead of
+        #   ever committing or retrying that unreviewed dirty state.
+        if ([string](Prop $orch 'code') -eq 'PROVIDER_CAPACITY_UNAVAILABLE') {
+            $capacityDirty = @(Get-DirtyPaths $st.worktree)
+            $gates['provider_capacity'] = if ($capacityDirty.Count -eq 0) { 'WAIT: clean worktree' } else { 'FAIL: source changes remain' }
+            $changed = @($capacityDirty)
+            if ($capacityDirty.Count -eq 0) {
+                $final = 'WAIT_PROVIDER'
+                $retryStopCode = 'PROVIDER_CAPACITY_UNAVAILABLE'
+            } else {
+                $final = 'CLAUDE_FAILED'
+                $retryStopCode = 'PROVIDER_CAPACITY_WITH_SOURCE_CHANGES'
+            }
+            $attemptDir = Join-Path (Join-Path $JobDir 'attempts') ('attempt-{0}' -f $attempt)
+            New-Item -ItemType Directory -Force -Path $attemptDir | Out-Null
+            foreach ($f in @('task.json', 'instruction-clarity.json', 'orchestrator.json', 'test.log', 'stderr.log')) {
+                $src = Join-Path $JobDir $f
+                if (Test-Path $src) { Copy-Item $src (Join-Path $attemptDir $f) -Force }
+            }
+            Save-Json ([ordered]@{ attempt = $attempt; final_state = $final; gates = $gates; changed_files = $changed }) (Join-Path $attemptDir 'result.json')
+            $attempts += [ordered]@{ attempt = $attempt; final_state = $final; test = 'SKIPPED: provider capacity unavailable'; fingerprint = $null }
+            break
+        }
+
         $changed = @()
         $changed += @(git -C $st.worktree diff --name-only $st.root_base_commit 2>$null)
         $changed += @(git -C $st.worktree ls-files --others --exclude-standard 2>$null)
