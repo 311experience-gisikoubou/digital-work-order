@@ -40,6 +40,7 @@ const {
   validateImplementationTask, runClaudeImplementationTask, implementationRunnerEvidence,
   readBoundedTaskInput, verifyFeatureRepository, verifyWorktreeClean, verifyRepositoryIdentity,
   readHeadSha, computeChangeSetSha256, validScopePattern, changedPathsWithinScope, changedPathsInForbiddenScope,
+  isProviderCapacityFailure,
 } = await import(pathToFileURL(testImplPath).href);
 const { computeConstraintsDigest } = await import(researchGateUrl);
 
@@ -232,6 +233,18 @@ process.stdin.on('data', (chunk) => { input += chunk; });
 process.stdin.on('end', () => {
   record('run', input);
   if (mode === 'fail') { console.error('SECRET_STDERR_SHOULD_NOT_LEAK'); process.exit(7); }
+  if (mode === 'capacity') {
+    console.error("You've hit your session limit · resets 4:50pm (Asia/Tokyo)");
+    process.exit(1);
+  }
+  if (mode === 'capacity-usage-reached') {
+    console.error('Usage limit reached. Your usage limit will reset at 09:00 UTC.');
+    process.exit(1);
+  }
+  if (mode === 'nearmiss-limit') {
+    console.error('API rate limit middleware error: request limit configuration invalid');
+    process.exit(1);
+  }
   if (mode === 'outofscope') {
     fs.writeFileSync('OUT_OF_SCOPE.txt', 'not allowed\\n', 'utf8');
     console.log(JSON.stringify({ type:'result', subtype:'success', is_error:false, result:'Edited an out-of-scope file' }));
@@ -386,6 +399,32 @@ process.stdin.on('end', () => {
   const failed = runClaudeImplementationTask(implPayload, { desc: desc('fail'), envSource: cleanEnv, timeoutMs: 5000 });
   assert(failed.code === 'PROVIDER_STOPPED' && !JSON.stringify(failed).includes('SECRET_STDERR_SHOULD_NOT_LEAK'), 'stderr must not leak');
   assert(verifyWorktreeClean(repoDir).ok === true, 'worktree must be clean again before the protected-scope test');
+
+  // --- provider capacity classification: narrow, unmistakable only, never leaking raw provider text ---
+  assert(isProviderCapacityFailure("You've hit your session limit · resets 4:50pm (Asia/Tokyo)") === true,
+    'the real current Claude session-limit wording must be recognized as capacity');
+  assert(isProviderCapacityFailure('Usage limit reached. Your usage limit will reset at 09:00 UTC.') === true,
+    'a usage-limit-reached + reset wording must be recognized as capacity');
+  assert(isProviderCapacityFailure('API rate limit middleware error: request limit configuration invalid') === false,
+    'a mention of "limit" with no reset/retry context must not be misclassified as capacity');
+  assert(isProviderCapacityFailure('Error: ECONNRESET while calling provider') === false,
+    'an unrelated transport error must not be misclassified as capacity');
+  assert(isProviderCapacityFailure('') === false, 'empty text must not be misclassified as capacity');
+
+  const capacityStop = runClaudeImplementationTask(implPayload, { desc: desc('capacity'), envSource: cleanEnv, timeoutMs: 5000 });
+  assert(capacityStop.result === 'STOP' && capacityStop.code === 'PROVIDER_CAPACITY_UNAVAILABLE',
+    `the real current session-limit wording must classify as PROVIDER_CAPACITY_UNAVAILABLE: ${JSON.stringify(capacityStop)}`);
+  assert(!JSON.stringify(capacityStop).includes('session limit') && !JSON.stringify(capacityStop).includes('Asia/Tokyo'),
+    'raw provider capacity wording must never be leaked into the returned STOP result');
+  assert(verifyWorktreeClean(repoDir).ok === true, 'worktree must be clean again after the capacity test');
+
+  const capacityUsageStop = runClaudeImplementationTask(implPayload, { desc: desc('capacity-usage-reached'), envSource: cleanEnv, timeoutMs: 5000 });
+  assert(capacityUsageStop.code === 'PROVIDER_CAPACITY_UNAVAILABLE', `usage-limit-reached wording must classify as capacity: ${JSON.stringify(capacityUsageStop)}`);
+  assert(verifyWorktreeClean(repoDir).ok === true, 'worktree must be clean again after the usage-limit capacity test');
+
+  const nearMissStop = runClaudeImplementationTask(implPayload, { desc: desc('nearmiss-limit'), envSource: cleanEnv, timeoutMs: 5000 });
+  assert(nearMissStop.code === 'PROVIDER_STOPPED', `an unrelated "limit" mention without reset context must stay PROVIDER_STOPPED: ${JSON.stringify(nearMissStop)}`);
+  assert(verifyWorktreeClean(repoDir).ok === true, 'worktree must be clean again after the near-miss test');
 
   // --- protected-file edit STOP: even an allowed path cannot be changed when forbiddenScope protects it ---
   const forbiddenStop = runClaudeImplementationTask({ ...implPayload, forbiddenScope: ['README.md'] }, { desc: desc('forbidden'), envSource: cleanEnv, timeoutMs: 5000 });
