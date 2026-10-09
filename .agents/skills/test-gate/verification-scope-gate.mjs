@@ -40,6 +40,7 @@ const MIGRATION_RE = /(^|\/)(migrations?|schema|database|db)(\/|$)|\.sql$/i;
 const FRONTEND_RE = /(^|\/)(src|app|web|frontend|ui|components?|pages?|views?|styles?)(\/|$).+\.(ts|tsx|js|jsx|mjs|cjs|vue|svelte|css|scss|sass|less|html)$/i;
 // Narrow Node/CLI script vocabulary. Keep generic src/*.js|ts frontend behavior unchanged;
 // only explicit CLI/command paths plus ESM/CommonJS core/tests are classified as CLI scripts.
+const FOUNDATION_POLLER_PS1_RE = /^scripts\/ai-job-poller\/(?:[a-z0-9]+(?:[-_][a-z0-9]+)*\.ps1|tests\/[a-z0-9]+(?:[-_][a-z0-9]+)*\.ps1)$/i;
 const CLI_SCRIPT_RE = /^(?:(?:src\/)?(?:cli|command)\.(?:js|ts|mjs|cjs)|src\/(?:cli|commands?)\/.+\.(?:js|ts|mjs|cjs|ps1)|src\/core\/.+\.(?:mjs|cjs)|tests?\/.+\.(?:mjs|cjs))$/i;
 // Narrow local transport executables: only files whose basename contains a
 // delimited `mcp` or `stdio` semantic under src/transport. Generic transport
@@ -87,7 +88,7 @@ function validRepoPath(value) {
 }
 
 export function classifyFiles(changedFiles) {
-  const hasCliScriptAnchor = changedFiles.some(file => CLI_SCRIPT_RE.test(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file));
+  const hasCliScriptAnchor = changedFiles.some(file => CLI_SCRIPT_RE.test(file) || FOUNDATION_POLLER_PS1_RE.test(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file));
 
   // Anchor candidates exclude anything already resolved as backend (a
   // dedicated gateway script test, or any BACKEND_RE path such as a
@@ -95,7 +96,7 @@ export function classifyFiles(changedFiles) {
   // backend-classified file can never manufacture a frontend companion
   // anchor for an otherwise-unrelated root JS file.
   const hasStrongFrontendAnchor = changedFiles.some(file => {
-    if (CLI_SCRIPT_RE.test(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file) || isGatewayDedicatedScriptTest(file) || BACKEND_RE.test(file)) return false;
+    if (CLI_SCRIPT_RE.test(file) || FOUNDATION_POLLER_PS1_RE.test(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file) || isGatewayDedicatedScriptTest(file) || BACKEND_RE.test(file)) return false;
     return ROOT_INDEX_HTML_RE.test(file) || FRONTEND_VERIFICATION_SCRIPT_RE.test(file) || FRONTEND_RE.test(file);
   });
 
@@ -137,7 +138,7 @@ export function classifyFiles(changedFiles) {
       flags.backend = true;
       continue;
     }
-    if (CLI_SCRIPT_RE.test(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file)) {
+    if (CLI_SCRIPT_RE.test(file) || FOUNDATION_POLLER_PS1_RE.test(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file)) {
       flags.cli = true;
       continue;
     }

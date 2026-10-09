@@ -19,6 +19,22 @@ assert.equal(classifyFiles(['src/cli.mjs']).profile, 'CLI_SCRIPT');
 assert.equal(classifyFiles(['src/cli/windows-gui-adapter.mjs']).profile, 'CLI_SCRIPT');
 assert.equal(classifyFiles(['src/cli/windows-gui.ps1']).profile, 'CLI_SCRIPT');
 assert.equal(classifyFiles(['src/gui/windows-gui.ps1']).profile, 'UNKNOWN');
+// AI Job Poller PowerShell scripts and their dedicated tests are CLI; unrelated scripts stay unknown.
+assert.equal(classifyFiles(['scripts/ai-job-poller/poll-once.ps1']).profile, 'CLI_SCRIPT');
+assert.equal(classifyFiles(['scripts/ai-job-poller/tests/poller-windows-selftest.ps1']).profile, 'CLI_SCRIPT');
+assert.equal(classifyFiles(['scripts/ai-job-poller/poll-once.ps1','scripts/ai-job-poller/tests/poller-windows-selftest.ps1']).profile, 'CLI_SCRIPT');
+assert.equal(classifyFiles(['scripts/misc.ps1']).profile, 'UNKNOWN');
+assert.equal(classifyFiles(['scripts/ai-job-poller/nested/poll.ps1']).profile, 'UNKNOWN');
+assert.equal(classifyFiles(['scripts/ai-job-poller/notes.bin']).profile, 'UNKNOWN');
+const aiPollerFiles=['scripts/ai-job-poller/poll-once.ps1','scripts/ai-job-poller/tests/poller-windows-selftest.ps1'];
+let aiPollerGate=evaluate({changedFiles:aiPollerFiles,plannedChecks:['DIFF_HYGIENE','TARGETED_SELFTEST']});
+assert.equal(aiPollerGate.profile, 'CLI_SCRIPT');
+assert.equal(aiPollerGate.decision, 'PROCEED');
+aiPollerGate=evaluate({changedFiles:aiPollerFiles,plannedChecks:['DIFF_HYGIENE','TARGETED_SELFTEST','FULL_REPOSITORY_SUITE']});
+assert.equal(aiPollerGate.code, 'EXCESSIVE_CHECKS_UNJUSTIFIED');
+aiPollerGate=evaluate({changedFiles:['scripts/ai-job-poller/nested/poll.ps1'],plannedChecks:['DIFF_HYGIENE']});
+assert.equal(aiPollerGate.code, 'CHANGE_SCOPE_UNKNOWN');
+
 assert.equal(classifyFiles(['src/core/audit-log.mjs']).profile, 'CLI_SCRIPT');
 assert.equal(classifyFiles(['src/transport/mcp-server.mjs']).profile, 'CLI_SCRIPT');
 assert.equal(classifyFiles(['src/transport/stdio-bridge.ts']).profile, 'CLI_SCRIPT');

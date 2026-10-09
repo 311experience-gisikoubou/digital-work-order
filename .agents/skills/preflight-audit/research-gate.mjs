@@ -809,11 +809,26 @@ export function evaluateResearchGate(input, expected = {}) {
   };
 }
 
+export const BOUNDED_SYNTHETIC_TRIAL_WRITE_MODE = 'SYNTHETIC_BOUNDED_MINIMAL_ONLY';
+
 // Convenience export for orchestrator/receipt integration: true for any
 // outcome that must block a source writer / install / account / config /
-// external adoption from proceeding on this evidence.
-export function blocksSourceWrite(result) {
-  return !result || (result.result !== 'ADOPT' && result.result !== 'BYPASS_LIGHT');
+// external adoption from proceeding on this evidence. TRIAL_REQUIRED stays
+// blocked by default; its sole source-write exception is an explicit closed
+// synthetic trial mode that exactly matches the independently recomputed
+// authorization. This function never authorizes install/account/config,
+// production, merge, destructive work, general implementation, or real data.
+export function blocksSourceWrite(result, { trialWriteMode, dataClass } = {}) {
+  if (!result) return true;
+  if (result.result === 'ADOPT' || result.result === 'BYPASS_LIGHT') return false;
+  const trial = result.trialAuthorization;
+  return !(result.result === 'TRIAL_REQUIRED' &&
+    trial?.permitted === true &&
+    trial.scope === BOUNDED_SYNTHETIC_TRIAL_WRITE_MODE &&
+    trial.generalImplementationAuthorized === false &&
+    trial.realDataPermitted === false &&
+    trialWriteMode === BOUNDED_SYNTHETIC_TRIAL_WRITE_MODE &&
+    dataClass === 'synthetic');
 }
 
 // Strict orchestrator/receipt binding entry point. Raw evidence must never
