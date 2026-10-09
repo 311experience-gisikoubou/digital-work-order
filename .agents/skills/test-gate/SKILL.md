@@ -63,12 +63,17 @@ Use `launchManagedBrowser` / `withManagedBrowser` from `.agents/skills/test-gate
 
 Cleanup is PID/run-owned and refuses ownership mismatch or image-name-wide termination. After the run it proves the recorded root PID is gone, managed descendants are gone, the CDP port is released, and profile locks are gone before emitting `BROWSER_CLEANUP_OK`. Cleanup failure emits `BROWSER_CLEANUP_FAILED`; orphan scan events use `ORPHAN_BROWSER_FOUND` and `ORPHAN_BROWSER_REMOVED`.
 
-At FINAL REALITY, both `UI` and `UI_REFERENCE_REPRODUCTION` require a PASS `UI_BROWSER_CLEANUP_V1` receipt as `UI_BROWSER_CLEANUP` evidence bound to the same `stateId`. EARLY/MILESTONE do not require cleanup evidence.
+At FINAL REALITY, both `UI` and `UI_REFERENCE_REPRODUCTION` require cleanup evidence bound to the same `stateId`; which receipt type is mandatory depends on the checkpoint's execution surface. EARLY/MILESTONE do not require cleanup evidence.
+
+When `executionSurfaceExpected` and `executionSurfaceObserved` are both exactly `Tauri native`, the staged gate requires a PASS `UI_NATIVE_CLEANUP_V1` receipt as `UI_NATIVE_CLEANUP` evidence instead of a browser receipt; a browser cleanup receipt cannot substitute for it. `verifyNativeCleanupReceipt` validates that the pre-shutdown observation and the post-cleanup receipt agree exactly on `stateId`, `ownedTaskId`/`runId`, `workerPid`, `nativeProcessPid`, and `cdpPort`; that the native PID was present in the pre-shutdown tracked-PID set; that every cleanup flag (`workerExited`, `nativeProcessExited`, `trackedChildrenExited`, `cdpPortReleased`, `syntheticWorkspaceIsolated`, `verifiedBeforeShutdown`) is `true`; that the pre-observation and post-observation timestamps are valid and correctly ordered; and that the receipt's SHA-256 `receiptId` matches its own content. A missing or tampered native receipt is `STOP`; the hash is tamper-evidence integrity, not an assertion of authored identity.
+
+For every other UI execution surface, the existing `UI_BROWSER_CLEANUP_V1` receipt as `UI_BROWSER_CLEANUP` evidence remains mandatory, and the managed Chrome lifecycle/cleanup rules above are unchanged.
 
 Self-test:
 
 ```text
 node .agents/skills/test-gate/ui-browser-lifecycle-selftest.mjs
+node .agents/skills/test-gate/ui-native-cleanup-evidence-selftest.mjs
 ```
 
 ### Approved Reference Reproduction Gate

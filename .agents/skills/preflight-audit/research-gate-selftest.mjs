@@ -12,6 +12,7 @@ const {
   validateResearchGateInput,
   computeConstraintsDigest,
   blocksSourceWrite,
+  BOUNDED_SYNTHETIC_TRIAL_WRITE_MODE,
   CHECKLIST_IDS,
   MINIMAL_BYPASS_CHECKLIST_IDS,
   TRIGGER_KEYS,
@@ -587,6 +588,19 @@ function aiBasicResearcher(researcherId = 'provider-a', researchSessionRef = 're
   assert(result.trialAuthorization.scope === 'SYNTHETIC_BOUNDED_MINIMAL_ONLY', 'trial must be synthetic/bounded/minimal only');
   assert(result.trialAuthorization.generalImplementationAuthorized === false, 'trial must never authorize general implementation');
   assert(result.trialAuthorization.realDataPermitted === false, 'trial must never permit real data');
+  assert(blocksSourceWrite(result), 'TRIAL_REQUIRED without an explicit trial mode must block source write');
+  assert(!blocksSourceWrite(result, { trialWriteMode: BOUNDED_SYNTHETIC_TRIAL_WRITE_MODE, dataClass: 'synthetic' }),
+    'TRIAL_REQUIRED with exact trial mode and synthetic data must allow only bounded trial source write');
+  assert(blocksSourceWrite(result, { trialWriteMode: BOUNDED_SYNTHETIC_TRIAL_WRITE_MODE, dataClass: 'source-only' }),
+    'trial mode must block source-only data class');
+  assert(blocksSourceWrite(result, { trialWriteMode: BOUNDED_SYNTHETIC_TRIAL_WRITE_MODE, dataClass: 'public' }),
+    'trial mode must block public data class');
+  assert(blocksSourceWrite({ ...result, result: 'REJECT' }, { trialWriteMode: BOUNDED_SYNTHETIC_TRIAL_WRITE_MODE, dataClass: 'synthetic' }),
+    'trial mode must not turn REJECT into trial authorization');
+  assert(blocksSourceWrite({ ...result, result: 'UNKNOWN' }, { trialWriteMode: BOUNDED_SYNTHETIC_TRIAL_WRITE_MODE, dataClass: 'synthetic' }),
+    'trial mode must not turn UNKNOWN into trial authorization');
+  assert(blocksSourceWrite({ ...result, trialAuthorization: { ...result.trialAuthorization, permitted: false } }, { trialWriteMode: BOUNDED_SYNTHETIC_TRIAL_WRITE_MODE, dataClass: 'synthetic' }),
+    'malformed or withdrawn trial authorization must block source write');
 }
 
 // --- Security/privacy UNKNOWN never permits real data (flag surfaced even on an otherwise clean matrix) ---
