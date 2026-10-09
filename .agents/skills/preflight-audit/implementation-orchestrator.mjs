@@ -7,7 +7,7 @@ import { routeTask } from './ai-task-router.mjs';
 import { evaluateReceipt, CHATGPT_DIRECT_GATED_KINDS as RECEIPT_RESEARCH_GATED_KINDS } from './implementation-route-receipt.mjs';
 import { evaluateInstructionClarity } from './instruction-clarity-gate.mjs';
 import {
-  evaluateResearchGateBound, blocksSourceWrite,
+  evaluateResearchGateBound, blocksSourceWrite, BOUNDED_SYNTHETIC_TRIAL_WRITE_MODE,
   validateResearchEnvelopeShape, buildResearchExpectedBinding,
 } from './research-gate.mjs';
 import {
@@ -27,7 +27,7 @@ const EXECUTION_ENVIRONMENT = 'local-cli-write';
 const ALLOWED_KEYS = new Set([
   'schemaVersion', 'taskId', 'kind', 'objective', 'prompt', 'repoRoot', 'branch',
   'allowedScope', 'forbiddenScope', 'doneConditions', 'requiredTests', 'dataClass', 'repository',
-  'instructionClarity', 'research',
+  'instructionClarity', 'research', 'trialWriteMode',
 ]);
 
 function safeToken(value) {
@@ -86,6 +86,9 @@ export function validateOrchestrationTask(payload) {
   if (!optionalStringArray(payload.doneConditions)) errors.push('doneConditions_invalid');
   if (!optionalStringArray(payload.requiredTests)) errors.push('requiredTests_invalid');
   if (!ALLOWED_DATA_CLASSES.has(payload.dataClass)) errors.push('dataClass_invalid');
+  if (payload.trialWriteMode !== undefined && payload.trialWriteMode !== BOUNDED_SYNTHETIC_TRIAL_WRITE_MODE) {
+    errors.push('trialWriteMode_invalid');
+  }
   const repository = payload.repository;
   if (!repository || typeof repository !== 'object' || Array.isArray(repository)) {
     errors.push('repository_not_object');
@@ -180,7 +183,7 @@ export function runImplementationOrchestration(payload, {
     taskId: payload.taskId, repository: payload.repository, scope: payload.allowedScope,
   });
   const researchGate = evaluateResearchGateBound(payload.research.evidence, researchExpected);
-  if (blocksSourceWrite(researchGate)) {
+  if (blocksSourceWrite(researchGate, { trialWriteMode: payload.trialWriteMode, dataClass: payload.dataClass })) {
     return stop('RESEARCH_GATE_BLOCKED', { taskId, instructionClarity, researchGate });
   }
 
@@ -204,6 +207,7 @@ export function runImplementationOrchestration(payload, {
     branch: payload.branch,
     allowedScope: [...payload.allowedScope],
     dataClass: payload.dataClass,
+    ...(payload.trialWriteMode !== undefined ? { trialWriteMode: payload.trialWriteMode } : {}),
     costPolicy: 'no-new-cost',
     requestedAuthorities: [],
     instructionClarity: payload.instructionClarity,
@@ -233,6 +237,7 @@ export function runImplementationOrchestration(payload, {
     taskId: payload.taskId,
     capability: payload.kind,
     dataClass: payload.dataClass,
+    ...(payload.trialWriteMode !== undefined ? { trialWriteMode: payload.trialWriteMode } : {}),
     prompt: payload.prompt,
     repoRoot: payload.repoRoot,
     branch: payload.branch,

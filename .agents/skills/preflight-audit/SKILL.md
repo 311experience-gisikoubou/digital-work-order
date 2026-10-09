@@ -94,7 +94,7 @@ Record the result as `REUSE_EXISTING`, `ADOPT_OSS`, `COMPOSE_EXISTING`, `CUSTOM_
 
 ## Research Gate
 
-After Project Intake and before any source writer / install / account / config / external adoption, `.agents/skills/preflight-audit/research-gate.mjs` is the single machine-readable checklist authority for this closed structured risk assessment. It never invokes a provider and never grants write/install/merge authority; it only returns `ADOPT`, `TRIAL_REQUIRED` (narrow synthetic trial only), `REJECT`, or `STOP`.
+After Project Intake and before any source writer / install / account / config / external adoption, `.agents/skills/preflight-audit/research-gate.mjs` is the single machine-readable checklist authority for this closed structured risk assessment. It never invokes a provider and never grants write/install/merge authority; it only returns `ADOPT`, `TRIAL_REQUIRED` (narrow synthetic trial only), `REJECT`, or `STOP`. `TRIAL_REQUIRED` blocks source writes by default. The only exception is an explicit `trialWriteMode: "SYNTHETIC_BOUNDED_MINIMAL_ONLY"` carried through the task and both route receipts, with independently recomputed trial authorization of that exact scope and `dataClass: "synthetic"`. It permits only minimal preparation for that bounded synthetic trial; it does not authorize production deployment, general implementation, real data, merge, account/config changes, or destructive actions.
 
 ```text
 node .agents/skills/preflight-audit/research-gate.mjs --input <research-gate.json> --pretty

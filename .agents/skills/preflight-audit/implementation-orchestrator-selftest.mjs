@@ -68,7 +68,7 @@ fs.writeFileSync(patchedOrchestratorPath, orchestratorSource, 'utf8');
 const { runImplementationOrchestration, validateOrchestrationTask } = await import(pathToFileURL(patchedOrchestratorPath).href);
 const { evaluateReceipt, verifyFinalReceipt } = await import(receipt_url);
 const { readHeadSha, computeChangeSetSha256 } = await import(patchedRunnerUrl);
-const { computeConstraintsDigest } = await import(researchGateUrl);
+const { computeConstraintsDigest, CHECKLIST_IDS, TRIGGER_KEYS, BOUNDED_SYNTHETIC_TRIAL_WRITE_MODE } = await import(researchGateUrl);
 
 function minimalPassChecklist() {
   return ['safety', 'dataPreservation', 'existingOverlap'].map((id) => ({
@@ -109,6 +109,23 @@ function researchFor(taskId, overrides = {}) {
       checklist,
       humanTopConditions: [],
       deepResearch: null,
+    },
+    context: { proposalId: 'proposal-1', constraints, humanTopConditions: [] },
+  };
+}
+function trialResearchFor(taskId, overrides = {}) {
+  const repository = overrides.repository || { owner: 'acme', name: 'widgets' };
+  const scope = overrides.scope || ['src/**'];
+  const constraints = overrides.constraints || [];
+  return {
+    evidence: {
+      schemaVersion: 1,
+      evidenceBinding: { taskId, proposalId: 'proposal-1', repository, scope, constraints, constraintsDigestSha256: computeConstraintsDigest(constraints), assessedAtUtcMs: Date.now(), maxEvidenceAgeMs: 24 * 60 * 60 * 1000 },
+      triggers: Object.fromEntries(TRIGGER_KEYS.map((key) => [key, key === 'osBrowserCompatibility'])),
+      noTriggerAssessment: null,
+      checklist: CHECKLIST_IDS.map((id) => ({ id, status: id === 'browserCompatibility' ? 'UNKNOWN' : 'PASS', applicable: true, justification: `Trial evidence for ${id}.`, ...(id === 'browserCompatibility' ? {} : { primarySourceRef: 'https://example.invalid/evidence' }) })),
+      humanTopConditions: [],
+      deepResearch: { primary: { providerId: 'provider-a', researchSessionRef: 'research-session://primary/a', evidenceRef: 'research-note://primary' }, adversarial: { present: true, providerId: 'provider-b', researchSessionRef: 'research-session://adversarial/b', distinctFromPrimary: true, evidenceRef: 'research-note://adversarial' } },
     },
     context: { proposalId: 'proposal-1', constraints, humanTopConditions: [] },
   };
@@ -206,6 +223,10 @@ process.stdin.on('end', () => {
   assert(validateOrchestrationTask(basePayload).length === 0, 'valid orchestration payload rejected');
   assert(validateOrchestrationTask({ ...basePayload, forbiddenScope: ['src/protected-reference.ts'] }).length === 0, 'valid forbiddenScope must be accepted');
   assert(validateOrchestrationTask({ ...basePayload, forbiddenScope: ['src/*.ts'] }).includes('forbiddenScope_invalid'), 'unsupported forbiddenScope wildcard must fail closed');
+  assert(validateOrchestrationTask({ ...basePayload, dataClass: 'synthetic', trialWriteMode: BOUNDED_SYNTHETIC_TRIAL_WRITE_MODE, research: trialResearchFor('orch-1') }).length === 0,
+    'exact bounded synthetic trial mode must be accepted by the orchestrator schema');
+  assert(validateOrchestrationTask({ ...basePayload, trialWriteMode: 'UNBOUNDED' }).includes('trialWriteMode_invalid'),
+    'unknown trial mode must be rejected by the orchestrator schema');
 
   // --- clarity negatives: material ambiguity / hidden assumption stop before Claude invocation ---
   const materialStop = runImplementationOrchestration({
@@ -255,6 +276,15 @@ process.stdin.on('end', () => {
   assert(researchFailStop.result === 'STOP' && researchFailStop.code === 'RESEARCH_GATE_BLOCKED',
     `a raw research-gate FAIL must STOP before the Claude probe is ever invoked: ${JSON.stringify(researchFailStop)}`);
   assert(!fs.existsSync(logPath), 'a research-gate block must never invoke the Claude probe/runner');
+
+  const trialNoModeStop = runImplementationOrchestration(payloadWithTaskId('orch-trial-no-mode', {
+    dataClass: 'synthetic', research: trialResearchFor('orch-trial-no-mode'),
+  }), { desc: desc(), envSource: cleanEnv, timeoutMs: 5000 });
+  assert(trialNoModeStop.code === 'RESEARCH_GATE_BLOCKED', 'TRIAL_REQUIRED without mode must block before probe');
+  const trialPublicStop = runImplementationOrchestration(payloadWithTaskId('orch-trial-public', {
+    dataClass: 'public', trialWriteMode: BOUNDED_SYNTHETIC_TRIAL_WRITE_MODE, research: trialResearchFor('orch-trial-public'),
+  }), { desc: desc(), envSource: cleanEnv, timeoutMs: 5000 });
+  assert(trialPublicStop.code === 'RESEARCH_GATE_BLOCKED', 'trial mode with public data must block before probe');
 
   // Omitting the research envelope entirely must fail schema-closed, never silently bypass the orchestrator.
   const { research: _omittedResearch, ...payloadWithoutResearch } = payloadWithTaskId('orch-research-missing');
