@@ -52,6 +52,17 @@ const LOCAL_STDIO_TRANSPORT_RE = /^src\/transport\/(?:[^/]+\/)*(?:[A-Za-z0-9]+[-
 const LOCAL_TOOL_LAUNCHER_RE = /^tools\/(?:[^/]+\/)*(?:[A-Za-z0-9]+[-_.])*launcher\.(?:js|ts|mjs|cjs)$/i;
 const ROOT_INDEX_HTML_RE = /^index\.html$/i;
 const FRONTEND_VERIFICATION_SCRIPT_RE = /^scripts\/(?=[^/]*\.(?:ts|js|mjs)$)(?=[^/]*(?:frontend|ui|browser|render|layout|visual|home-stage|home-invoice))(?=[^/]*(?:verify|verification|selftest|test|smoke|check|scale))[^/]+\.(?:ts|js|mjs)$/i;
+// Strict top-level user-facing text selftests, not generic scripts, are frontend.
+// Non-frontend roles continue to fail closed even with a user-facing prefix.
+const USER_FACING_SELFTEST_RE = /^scripts\/user-facing-([a-z0-9]+(?:-[a-z0-9]+)*)\.selftest\.mjs$/;
+const NON_FRONTEND_USER_FACING_ROLES = new Set([
+  'backend', 'server', 'api', 'gateway', 'cli', 'command', 'build',
+  'config', 'security', 'auth', 'database', 'db',
+]);
+function isUserFacingFrontendSelftest(file) {
+  const match = USER_FACING_SELFTEST_RE.exec(file);
+  return Boolean(match && !match[1].split('-').some(role => NON_FRONTEND_USER_FACING_ROLES.has(role)));
+}
 const ROOT_FRONTEND_JS_COMPANION_RE = /^(?!.*(?:^|[._-])(?:server|backend|api|build|config|test|tests|spec|tool|tools|script|scripts|webpack|vite|rollup|eslint|jest|playwright|cypress)(?:[._-]|$))[^/]+\.(?:js|mjs|cjs)$/i;
 const BACKEND_RE = /(^|\/)(src-tauri|backend|server|api|services?|domain|repositories?|gateway)(\/|$)|\.(rs|go|py|java|kt|cs|rb|php)$/i;
 
@@ -72,6 +83,28 @@ function isGatewayDedicatedScriptTest(file) {
   const hasGatewaySegment = segments.includes('gateway');
   const hasTestSemanticSegment = segments.some(segment => GATEWAY_TEST_SEMANTIC_SEGMENTS.has(segment));
   return hasGatewaySegment && hasTestSemanticSegment;
+}
+
+// Narrow, reusable predicate for a root-level scripts/real-device-* file.
+// The exact `real-device-` naming convention alone is never sufficient:
+// the filename (before its final .js|.ts|.mjs extension, split on "-",
+// "_", and ".") must start with the delimited segments "real" then
+// "device" AND also contain a delimited verification-semantic segment
+// (for example "verify", "test", or "check"). A bare "scripts/real-device-
+// notes.mjs" with no verification semantic stays unclassified, and any
+// filename carrying a delimited "gateway" segment is rejected outright so
+// gateway-related scripts remain fail-closed and cannot be reclassified as
+// frontend real-device verification evidence through this rule.
+const REAL_DEVICE_SCRIPT_FILE_RE = /^scripts\/([A-Za-z0-9]+(?:[-_.][A-Za-z0-9]+)*)\.(?:js|ts|mjs)$/i;
+const REAL_DEVICE_VERIFICATION_SEMANTIC_SEGMENTS = new Set(['verify', 'verification', 'selftest', 'test', 'smoke', 'check', 'scale', 'evidence', 'objective', 'report']);
+
+function isRealDeviceVerificationScript(file) {
+  const match = REAL_DEVICE_SCRIPT_FILE_RE.exec(file);
+  if (!match) return false;
+  const segments = match[1].split(/[-_.]/).filter(Boolean).map(part => part.toLowerCase());
+  if (segments[0] !== 'real' || segments[1] !== 'device') return false;
+  if (segments.includes('gateway')) return false;
+  return segments.some(segment => REAL_DEVICE_VERIFICATION_SEMANTIC_SEGMENTS.has(segment));
 }
 
 function unique(values) {
@@ -97,7 +130,7 @@ export function classifyFiles(changedFiles) {
   // anchor for an otherwise-unrelated root JS file.
   const hasStrongFrontendAnchor = changedFiles.some(file => {
     if (CLI_SCRIPT_RE.test(file) || FOUNDATION_POLLER_PS1_RE.test(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file) || isGatewayDedicatedScriptTest(file) || BACKEND_RE.test(file)) return false;
-    return ROOT_INDEX_HTML_RE.test(file) || FRONTEND_VERIFICATION_SCRIPT_RE.test(file) || FRONTEND_RE.test(file);
+    return ROOT_INDEX_HTML_RE.test(file) || FRONTEND_VERIFICATION_SCRIPT_RE.test(file) || isUserFacingFrontendSelftest(file) || isRealDeviceVerificationScript(file) || FRONTEND_RE.test(file);
   });
 
   const flags = {
@@ -142,7 +175,7 @@ export function classifyFiles(changedFiles) {
       flags.cli = true;
       continue;
     }
-    if (ROOT_INDEX_HTML_RE.test(file) || FRONTEND_VERIFICATION_SCRIPT_RE.test(file) || FRONTEND_RE.test(file)) {
+    if (ROOT_INDEX_HTML_RE.test(file) || FRONTEND_VERIFICATION_SCRIPT_RE.test(file) || isUserFacingFrontendSelftest(file) || isRealDeviceVerificationScript(file) || FRONTEND_RE.test(file)) {
       flags.frontend = true;
       continue;
     }
@@ -333,7 +366,33 @@ async function readStdin() {
   }
 }
 
+const USAGE = [
+  'Usage: verification-scope-gate.mjs',
+  '  Reads a JSON object from stdin: { changedFiles: string[], plannedChecks: string[], escalationReason?: string }',
+  '  Writes a JSON decision ({ decision, code, ... }) to stdout and a VERIFICATION_SCOPE_GATE=<decision> marker to stderr.',
+  '  Exit code 0 on PROCEED/PROCEED_ESCALATED, exit code 2 on STOP.',
+  '',
+  'Options:',
+  '  --help, -h   Print this usage and exit 0 without reading stdin.',
+].join('\n');
+
 async function main() {
+  const argv = process.argv.slice(2);
+
+  if (argv.length === 1 && (argv[0] === '--help' || argv[0] === '-h')) {
+    console.log(USAGE);
+    process.exitCode = 0;
+    return;
+  }
+
+  if (argv.length > 0) {
+    const result = { decision: 'STOP', code: 'ARGUMENT_INVALID' };
+    console.log(JSON.stringify(result));
+    console.error(`VERIFICATION_SCOPE_GATE=${result.decision}`);
+    process.exitCode = 2;
+    return;
+  }
+
   const input = await readStdin();
   const result = input.error
     ? { decision: 'STOP', code: input.error }

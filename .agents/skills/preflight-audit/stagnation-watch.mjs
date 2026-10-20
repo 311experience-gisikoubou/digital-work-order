@@ -111,8 +111,9 @@ if (!['continue','terminate','platform-turn-boundary'].includes(responseIntent))
 if (!['available','exhausted'].includes(aiRouteState)) stop('--ai-route-state invalid');
 if (!['none','unspecified','merge-authorization','cost','credentials-authentication','destructive-high-risk','production-real-data','business-spec-value','protected-data-policy','subjective-real-device','scope-safety-boundary','workflow-ownership'].includes(humanGateKind)) stop('--human-gate-kind invalid');
 if (humanGate === 'none' && humanGateKind !== 'none') stop('--human-gate-kind must be none when --human-gate is none');
-if (humanGate === 'required' && humanGateKind === 'none') stop('--human-gate-kind must identify the required human gate');
-if (completionTarget === 'pre-merge' && humanGate === 'required' && humanGateKind === 'unspecified') stop('--human-gate-kind is required for pre-merge completion');
+if (humanGate === 'required' && (humanGateKind === 'none' || humanGateKind === 'unspecified')) {
+  stop('--human-gate-kind must name a genuine human decision for every work target; technical errors, crashes, connection failures, and redundant checks remain AI-owned', 'HUMAN_GATE_KIND_REQUIRED');
+}
 if (aiRouteState === 'exhausted' && humanGate === 'required') stop('--ai-route-state exhausted cannot coexist with a human gate');
 if (workState === 'complete' && humanGate === 'required') stop('--work-state complete cannot coexist with a human gate');
 if (!['not-run','pass','fail','unknown'].includes(testGateState)) stop('--test-gate-state invalid');
@@ -175,8 +176,11 @@ const preMergeTechnicalReady = completionTarget === 'pre-merge'
   && prState === 'open' && prDraft === 'yes' && finalAuditState === 'pass' && exactPrHeadState === 'verified';
 const prematureMergeAuthorization = completionTarget === 'pre-merge' && !preMergeTechnicalReady
   && humanGate === 'required' && humanGateKind === 'merge-authorization';
+// `complete` is not a valid substitute for merge authorization on a pre-merge target.
+const conflictingPreMergeCompletion = completionTarget === 'pre-merge' && workState === 'complete';
 let terminalState = 'AI_CONTINUES';
-if (workState === 'complete') terminalState = 'COMPLETE';
+if (conflictingPreMergeCompletion) terminalState = 'AI_CONTINUES';
+else if (workState === 'complete') terminalState = 'COMPLETE';
 else if (humanGate === 'required' && humanGateKind === 'subjective-real-device' && !humanVisualReviewReady) terminalState = 'AI_CONTINUES';
 else if (humanGate === 'required' && humanGateKind !== 'merge-authorization') terminalState = 'HUMAN_CONFIRMATION_REQUIRED';
 else if (preMergeTechnicalReady) terminalState = 'PRE_MERGE_READY';
@@ -292,7 +296,13 @@ let nextState = baseState;
 let detail = {};
 let handoffClass = humanGate === 'required' ? 'HUMAN_REQUIRED' : 'AI_OWNED';
 
-if (workState === 'complete') {
+if (conflictingPreMergeCompletion) {
+  result = 'STOP';
+  code = 'PRE_MERGE_COMPLETION_STATE_CONFLICT';
+  handoffClass = 'AI_OWNED';
+  nextState = { ...(previous ?? baseState), workId, lastCheckpointAt: isoNow, updatedAt: isoNow,
+    level: 'L1', requiredAction: 'complete-pre-merge-verification' };
+} else if (workState === 'complete') {
   result = 'COMPLETE';
   code = 'WORK_COMPLETE';
   nextState = { ...baseState, level: 'COMPLETE', requiredAction: 'none' };

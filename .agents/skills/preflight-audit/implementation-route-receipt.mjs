@@ -310,6 +310,17 @@ export function verifyFinalReceipt(receipt, expected) {
     const recomputed = computeChangeSetSha256(expected.repoRoot, receipt.executionEvidence.preHead, receipt.implementationHead);
     if (!recomputed) return stop('EXECUTION_EVIDENCE_UNVERIFIABLE');
     if (recomputed.changeSetSha256 !== receipt.executionEvidence.changeSetSha256) return stop('EXECUTION_EVIDENCE_CHANGE_SET_MISMATCH');
+    // The hash check alone cannot catch a receipt that records a changedPaths
+    // list which doesn't exactly correspond (same length, same canonical
+    // order) to the actually-committed path set the hash was computed from.
+    // Require an exact positional match against the recomputed, canonically
+    // ordered changedPaths rather than trusting the receipt's own listing.
+    const receivedChangedPaths = receipt.executionEvidence.changedPaths;
+    const recomputedChangedPaths = recomputed.changedPaths;
+    if (receivedChangedPaths.length !== recomputedChangedPaths.length ||
+        receivedChangedPaths.some((changedPath, index) => changedPath !== recomputedChangedPaths[index])) {
+      return stop('EXECUTION_EVIDENCE_CHANGE_SET_MISMATCH');
+    }
   }
   return { schemaVersion: 1, result: 'MERGE_READY', code: 'FINAL_RECEIPT_VERIFIED' };
 }

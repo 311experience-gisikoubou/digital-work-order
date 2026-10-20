@@ -331,6 +331,46 @@ expect(finalInput({
   '--expect-head', realImplementationHead, '--repo-root', repoDir,
 ], 'EXECUTION_EVIDENCE_CHANGE_SET_MISMATCH', 2);
 
+// This real fixture committed exactly two paths (src/new-file.ts, src/widget.ts); recomputed.changedPaths
+// is their canonical (sorted) order. Even with the correct, untampered changeSetSha256, a receipt whose
+// recorded changedPaths doesn't exactly match that canonical order/entries must still be rejected -- the
+// hash check alone cannot catch a mismatched changedPaths listing.
+assert(realChangeSet.changedPaths.length === 2, 'expected the fixture commit to change exactly two paths');
+const realChangedPathsArgs = [
+  '--expect-owner', 'acme', '--expect-name', 'widgets', '--expect-branch', 'feat/widget',
+  '--expect-head', realImplementationHead, '--repo-root', repoDir,
+];
+
+// (1) replace one recorded changed path with an unrelated path, keeping the correct hash
+expect(finalInput({
+  implementationHead: realImplementationHead,
+  executionEvidence: {
+    preHead: realPreHead,
+    changeSetSha256: realChangeSet.changeSetSha256,
+    changedPaths: [realChangeSet.changedPaths[0], 'src/unrelated-path.ts'],
+  },
+}), realChangedPathsArgs, 'EXECUTION_EVIDENCE_CHANGE_SET_MISMATCH', 2);
+
+// (2) omit one recorded changed path, keeping the correct hash
+expect(finalInput({
+  implementationHead: realImplementationHead,
+  executionEvidence: {
+    preHead: realPreHead,
+    changeSetSha256: realChangeSet.changeSetSha256,
+    changedPaths: [realChangeSet.changedPaths[0]],
+  },
+}), realChangedPathsArgs, 'EXECUTION_EVIDENCE_CHANGE_SET_MISMATCH', 2);
+
+// (3) reorder the same two recorded changed paths, keeping the correct hash
+expect(finalInput({
+  implementationHead: realImplementationHead,
+  executionEvidence: {
+    preHead: realPreHead,
+    changeSetSha256: realChangeSet.changeSetSha256,
+    changedPaths: [...realChangeSet.changedPaths].reverse(),
+  },
+}), realChangedPathsArgs, 'EXECUTION_EVIDENCE_CHANGE_SET_MISMATCH', 2);
+
 // wrong branch at verification time
 expect(realFinalInput, [
   '--expect-owner', 'acme', '--expect-name', 'widgets', '--expect-branch', 'feat/other',
