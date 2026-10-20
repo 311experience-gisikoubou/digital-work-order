@@ -753,6 +753,21 @@ export function evaluateResearchGate(input, expected = {}) {
   const hasFail = checklist.some((item) => item.applicable === true && item.status === 'FAIL');
   const hasUnknown = checklist.some((item) => item.applicable === true && item.status === 'UNKNOWN');
 
+  // Unknown external billing or privacy evidence cannot authorize even a
+  // synthetic cloud trial when a human top condition forbids the exposure.
+  // Preserve ordinary bounded local-trial behavior outside this scope.
+  const externalServiceRisk = (input.triggers.newCloudApiServiceAppLibraryCliAccount === true &&
+    input.newCloudApiServiceAppLibraryCliAccountRiskProfile === 'EXTERNAL_OR_HIGH_RISK') ||
+    input.triggers.authNetworkPrivacySecurityEncryptionBackupStorageChange === true;
+  const activeTopCondition = (id) => input.humanTopConditions.some((condition) =>
+    condition.id === id && condition.active === true);
+  const unknownEvidence = (ids) => checklist.some((item) => ids.includes(item.id) &&
+    item.applicable === true && item.status === 'UNKNOWN');
+  const unknownExternalCost = (externalServiceRisk || input.triggers.feeOrFreeQuota === true) &&
+    activeTopCondition('ZERO_ADDITIONAL_COST') &&
+    unknownEvidence(COST_EVIDENCE_CHECKLIST_IDS);
+  const unknownExternalPrivacy = externalServiceRisk && activeTopCondition('NO_PROTECTED_DATA_PERMITTED') &&
+    unknownEvidence(PRIVACY_RELATED_CHECKLIST_IDS);
   const decisionBasis = [];
   let result;
   let code;
@@ -774,6 +789,14 @@ export function evaluateResearchGate(input, expected = {}) {
     result = 'STOP';
     code = 'ADVERSARIAL_RESEARCH_EVIDENCE_MISSING';
     decisionBasis.push('Deep-Research-equivalent independent/adversarial evidence is required for this trigger profile and is missing.');
+  } else if (unknownExternalCost) {
+    result = 'STOP';
+    code = 'EXTERNAL_ZERO_COST_EVIDENCE_UNKNOWN';
+    decisionBasis.push('External billing, automatic purchases or quota-exhaustion behavior is unverified. The zero-additional-cost requirement prohibits even synthetic external trial.');
+  } else if (unknownExternalPrivacy) {
+    result = 'STOP';
+    code = 'EXTERNAL_PROTECTED_DATA_BOUNDARY_UNKNOWN';
+    decisionBasis.push('The external privacy/security boundary is unverified under the no-protected-data requirement. No synthetic external trial is authorized.');
   } else if (hasUnknown) {
     result = 'TRIAL_REQUIRED';
     code = 'UNKNOWN_APPLICABLE_CONDITION_REQUIRES_TRIAL';

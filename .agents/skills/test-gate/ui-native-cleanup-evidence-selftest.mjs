@@ -3,6 +3,7 @@
 import assert from 'node:assert';
 import { createHash } from 'node:crypto';
 import { verifyNativeCleanupReceipt } from './ui-native-cleanup-evidence.mjs';
+import { evaluate as evaluateReality, verifyStagedRealityReceipt } from './staged-reality-gate.mjs';
 
 const STATE_ID = 'git:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
@@ -14,7 +15,7 @@ const pre = {
   nativeProcessPid: 102,
   cdpPort: 9466,
   workspaceId: 'synthetic',
-  trackedPids: [102],
+  trackedPids: [101, 102],
   observedAt: '2026-10-09T07:00:00.000Z',
 };
 
@@ -115,6 +116,105 @@ function receiptWithId(post) {
   const result = verifyNativeCleanupReceipt(receipt, STATE_ID, pre);
   assert.strictEqual(result.ok, false);
   assert.strictEqual(result.reason, 'TIMESTAMP_INVALID');
+}
+
+// 8. trackedPids missing owned worker pid STOP
+{
+  const post = buildPost();
+  const receipt = receiptWithId(post);
+  const badPre = { ...pre, trackedPids: [102] };
+  const result = verifyNativeCleanupReceipt(receipt, STATE_ID, badPre);
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, 'TRACKED_PIDS_INVALID');
+}
+
+// 9. trackedPids contains duplicate entry STOP
+{
+  const post = buildPost();
+  const receipt = receiptWithId(post);
+  const badPre = { ...pre, trackedPids: [101, 102, 102] };
+  const result = verifyNativeCleanupReceipt(receipt, STATE_ID, badPre);
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, 'TRACKED_PIDS_INVALID');
+}
+
+// 10. trackedPids contains invalid integer STOP
+{
+  const post = buildPost();
+  const receipt = receiptWithId(post);
+  const badPre = { ...pre, trackedPids: [101, 102, -1] };
+  const result = verifyNativeCleanupReceipt(receipt, STATE_ID, badPre);
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, 'TRACKED_PIDS_INVALID');
+}
+
+// 11. workerPid equals nativeProcessPid STOP
+{
+  const post = buildPost();
+  post.workerPid = post.nativeProcessPid;
+  const receipt = receiptWithId(post);
+  const samePidPre = { ...pre, workerPid: post.workerPid, trackedPids: [102] };
+  const result = verifyNativeCleanupReceipt(receipt, STATE_ID, samePidPre);
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, 'TRACKED_PIDS_INVALID');
+}
+
+
+// 12. LocalOps observer output is NOT an independently trusted native issuer:
+// even structurally valid SHA-256 self-claims must STOP at the native FINAL gate.
+{
+  const receipt = receiptWithId(buildPost());
+  assert.deepStrictEqual(verifyNativeCleanupReceipt(receipt, STATE_ID, pre),
+    { ok: true, reason: 'NATIVE_CLEANUP_OK' }); // structural check only
+  const e = (kind, extra = {}) => ({
+    kind, status: 'PASS', source: 'local', reference: 'synthetic:' + kind,
+    stateId: STATE_ID, ...extra,
+  });
+  const input = {
+    schemaVersion: 2, phase: 'FINAL_REALITY_CHECK', taskTypes: ['UI'],
+    stateId: STATE_ID,
+    identity: {
+      repositoryExpected: 'synthetic/native', repositoryObserved: 'synthetic/native',
+      projectContextExpected: 'native-fixture', projectContextObserved: 'native-fixture',
+      workTargetExpected: 'tauri-screen', workTargetObserved: 'tauri-screen',
+      executionSurfaceExpected: 'Tauri native', executionSurfaceObserved: 'Tauri native',
+    },
+    authority: { state: 'CURRENT', source: 'REPO_LOCAL', reference: 'synthetic-only' },
+    actors: { implementerId: 'localops-claimed', judgeId: 'foundation-consumer' },
+    checkpoint: { scopeMatch: true, structureMatch: true,
+      implementationComplete: true, deliverableMatch: true },
+    evidence: [
+      e('GIT_STATE'), e('DIFF'), e('SCREENSHOT'),
+      e('UI_NATIVE_CLEANUP', { receipt, preEvidence: pre, issuerClaim: 'LocalOps OS observer' }),
+      e('TEST_GATE_RESULT'),
+    ],
+  };
+  for (const fake of [input, {
+    ...input, evidence: input.evidence.map(({ issuerClaim, ...item }) => item),
+  }]) {
+    const checked = evaluateReality(fake);
+    assert.strictEqual(checked.result, 'STOP');
+    assert.strictEqual(checked.code, 'UI_NATIVE_CLEANUP_FAILED');
+    assert.strictEqual(checked.reason, 'TRUSTED_NATIVE_ISSUER_REQUIRED');
+  }
+  const forgedIssuer = receiptWithId({ ...buildPost(), issuer: 'LocalOps' });
+  assert.strictEqual(verifyNativeCleanupReceipt(forgedIssuer, STATE_ID, pre).reason,
+    'RECEIPT_EXTRA_FIELDS');
+  const aggregate = {
+    schemaVersion: 2, receiptType: 'STAGED_REALITY_RECEIPT_V2',
+    result: 'PASS', code: 'FINAL_REALITY_CHECK_PASS',
+    phase: 'FINAL_REALITY_CHECK', stateId: STATE_ID,
+    taskTypes: ['UI'], authority: input.authority, actors: input.actors,
+    identity: input.identity, checkpoint: input.checkpoint,
+    evidence: input.evidence.map(({ kind, status, source, reference, stateId }) =>
+      ({ kind, status, source, reference, stateId })),
+    requiredEvidence: ['GIT_STATE', 'DIFF', 'SCREENSHOT', 'UI_NATIVE_CLEANUP', 'TEST_GATE_RESULT'],
+  };
+  aggregate.receiptId = sign(aggregate);
+  const checkedAggregate = verifyStagedRealityReceipt(aggregate, STATE_ID,
+    { requireFinal: true, requireUi: true });
+  assert.strictEqual(checkedAggregate.ok, false);
+  assert.strictEqual(checkedAggregate.code, 'NATIVE_FINAL_ISSUER_NOT_PROVEN');
 }
 
 console.log('ui-native-cleanup-evidence-selftest: all assertions passed');

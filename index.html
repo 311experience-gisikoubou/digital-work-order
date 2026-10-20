@@ -75,6 +75,19 @@
         </select>
       </div>
     </div>
+    <!-- 技工所番号の端末内保存設定 -->
+    <div class="form-row">
+      <div class="form-group full">
+        <label for="laboratory-registration-number">歯科技工所番号</label>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <input type="text" id="laboratory-registration-number" inputmode="numeric"
+            autocomplete="off" maxlength="11" placeholder="9桁の番号" style="max-width:180px">
+          <button type="button" class="btn-secondary" id="laboratory-registration-number-save">番号を保存</button>
+        </div>
+        <p id="laboratory-registration-number-status" role="status" aria-live="polite"
+           style="font-size:11px;color:var(--text-secondary);margin-top:6px;">この端末のブラウザ内に保存します。</p>
+      </div>
+    </div>
     <!-- 次回予約日時 / 発行日 -->
     <div class="form-row" style="align-items:flex-end;">
       <div class="form-group">
@@ -947,6 +960,7 @@
 <script src="date-utils.js"></script>
 <script src="tooth-chart.js"></script>
 <script src="validate.js"></script>
+<script src="app/laboratory-number.js"></script>
 <script src="app.js"></script>
 <script src="app/tooth-state.js"></script>
 <script src="app/visual-snapshot.js"></script>

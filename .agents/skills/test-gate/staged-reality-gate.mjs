@@ -117,11 +117,28 @@ export function verifyStagedRealityReceipt(receipt, expectedStateId = '', option
   const expectedReceiptId = createHash('sha256').update(JSON.stringify(core)).digest('hex');
   if (receipt.receiptId !== expectedReceiptId) return { ok: false, code: 'STAGED_REALITY_RECEIPT_TAMPERED' };
   if (expectedStateId && receipt.stateId !== expectedStateId) return { ok: false, code: 'STAGED_REALITY_RECEIPT_STALE' };
+  if (receipt.phase === 'FINAL_REALITY_CHECK') {
+    const requiredEvidence = Array.isArray(receipt.requiredEvidence) ? receipt.requiredEvidence : [];
+    const evidenceList = Array.isArray(receipt.evidence) ? receipt.evidence : [];
+    const claimsNative = receipt.identity?.executionSurfaceExpected === 'Tauri native' ||
+      receipt.identity?.executionSurfaceObserved === 'Tauri native' ||
+      requiredEvidence.some(entry => typeof entry === 'string' && entry.split('|').includes('UI_NATIVE_CLEANUP')) ||
+      evidenceList.some(item => item && (item.kind === 'UI_NATIVE_CLEANUP' || item.uiNativeRunId));
+    if (claimsNative) return { ok: false, code: 'NATIVE_FINAL_ISSUER_NOT_PROVEN' };
+  }
   if (options.requireFinal === true && receipt.phase !== 'FINAL_REALITY_CHECK') {
     return { ok: false, code: 'STAGED_REALITY_FINAL_REQUIRED' };
   }
   if (options.requireUi === true && !receipt.taskTypes.some(taskType => ['UI', 'UI_REFERENCE_REPRODUCTION'].includes(taskType))) {
     return { ok: false, code: 'STAGED_REALITY_UI_REQUIRED' };
+  }
+  if (Object.hasOwn(options, 'expectedExecutionSurface')) {
+    const expectedSurface = options.expectedExecutionSurface;
+    if (!bounded(expectedSurface, 500) ||
+        receipt.identity?.executionSurfaceExpected !== expectedSurface ||
+        receipt.identity?.executionSurfaceObserved !== expectedSurface) {
+      return { ok: false, code: 'STAGED_REALITY_EXECUTION_SURFACE_MISMATCH' };
+    }
   }
   return { ok: true, code: 'STAGED_REALITY_RECEIPT_VALID', receiptId: receipt.receiptId };
 }
@@ -186,6 +203,7 @@ export function evaluate(input) {
     if (item.kind === 'UI_NATIVE_CLEANUP' && item.status === 'PASS') {
       const cleanup = verifyNativeCleanupReceipt(item.receipt, input.stateId, item.preEvidence);
       if (!cleanup.ok) return stop('UI_NATIVE_CLEANUP_FAILED', { reason: cleanup.reason, reference: item.reference });
+      return stop('UI_NATIVE_CLEANUP_FAILED', { reason: 'TRUSTED_NATIVE_ISSUER_REQUIRED', reference: item.reference });
     }
   }
 

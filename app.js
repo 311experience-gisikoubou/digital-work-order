@@ -347,6 +347,7 @@ function collectFormData() {
   return {
     // 患者・医院情報
     clinicName:   document.getElementById('clinic-name').value.trim(),
+    laboratoryRegistrationNumber: globalThis.LaboratoryNumberSettings?.getSavedNumber() ?? '',
     doctorName:   document.getElementById('doctor-name').value.trim(),
     patientName:  document.getElementById('patient-name').value.trim(),
     patientAge:   document.getElementById('patient-age').value,

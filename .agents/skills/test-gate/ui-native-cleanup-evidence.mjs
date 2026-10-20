@@ -75,6 +75,14 @@ export function verifyNativeCleanupReceipt(receipt, stateId, pre) {
   if (!Array.isArray(pre.trackedPids) || !pre.trackedPids.includes(receipt.nativeProcessPid)) {
     return fail('TRACKED_PIDS_MISSING_NATIVE_PID');
   }
+  if (
+    pre.trackedPids.some(pid => !positiveInt(pid)) ||
+    new Set(pre.trackedPids).size !== pre.trackedPids.length ||
+    !pre.trackedPids.includes(receipt.workerPid) ||
+    receipt.workerPid === receipt.nativeProcessPid
+  ) {
+    return fail('TRACKED_PIDS_INVALID');
+  }
   if (!validTimestamp(pre.observedAt)) return fail('PRE_TIMESTAMP_INVALID');
   if (Date.parse(pre.observedAt) > Date.parse(receipt.postObservedAt)) return fail('TIMESTAMP_ORDER_INVALID');
 

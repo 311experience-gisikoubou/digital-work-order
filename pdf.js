@@ -742,6 +742,9 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml, chartHtml2, memoHt
       '<div class="remarks">' + (remarksText ? esc(remarksText).replace(/\n/g, '<br>') : '') + '</div>' +
       '</div></div>';
     var studioName = '咬み合わせ医療会　こよし技工房';
+    var registrationNumber = typeof order.laboratoryRegistrationNumber === 'string' &&
+      /^\d{2}-\d{2}-\d{5}$/.test(order.laboratoryRegistrationNumber)
+      ? order.laboratoryRegistrationNumber : '';
     var chartMemoHtml = '<div class="chart-memo">' + (slipMemoHtml || '') + '</div>';
     var bottomContactHtml =
       '<div class="bottom-contact">' +
@@ -781,7 +784,8 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml, chartHtml2, memoHt
       '</div>';
 
     return '<div class="slip-header"><div class="title-block"><h1>歯科技工指示書</h1></div>' +
-      '<div class="header-studio">' + esc(studioName) + '</div>' +
+      '<div class="header-studio">' + esc(studioName) +
+      (registrationNumber ? '<span class="header-studio-number">歯科技工所番号：' + esc(registrationNumber) + '</span>' : '') + '</div>' +
       '<div class="issue-date">発行日：' + esc(order.issueDate ? formatJapaneseEraDate(order.issueDate) : '') + '</div></div>' +
       '<div class="print-body">' +
       '<div class="chart-col">' +
@@ -862,6 +866,7 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml, chartHtml2, memoHt
     .title-block { min-width: 0; }
     h1 { font-size: 16pt; font-weight: 900; letter-spacing: 0.03em; color: #102a43; line-height: 1; flex-shrink: 0; }
     .header-studio { color: #34515b; font-size: 8.2pt; font-weight: 700; line-height: 1.2; text-align: center; white-space: nowrap; padding-bottom: 0.4mm; }
+    .header-studio-number { display: block; color: #34515b; font-size: 6.4pt; font-weight: 600; margin-top: 0.5mm; }
     .issue-date { font-size: 6.8pt; color: #102a43; font-weight: 700; white-space: nowrap; padding-bottom: 0.4mm; text-align: right; }
     .key-bar {
       display: grid;
