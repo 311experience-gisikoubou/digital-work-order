@@ -437,3 +437,49 @@ body:has(#view-clinic.active) .app-header .tab-btn.active {
     grid-column:auto!important;
   }
 }
+
+/* iPad Safari: native date input can retain an intrinsic minimum size.
+   The earlier 5px grid gap left no safety margin beside the insurance toggle.
+   Lock each control INSIDE its own grid cell; keep the approved 4-column row. */
+@media (min-width:901px) and (max-width:1200px) {
+  #approved-full-form .approved-shipping-four {
+    column-gap:12px!important;
+  }
+  #approved-full-form .approved-shipping-four > .shipping-input-wrap:first-child {
+    min-width:0!important;
+    max-width:100%!important;
+  }
+  #approved-full-form .approved-shipping-four #shipping-date {
+    display:block;
+    box-sizing:border-box!important;
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    padding:7px 5px!important;
+    font-size:12px!important;
+  }
+  #approved-full-form .approved-shipping-four > .approved-card-insurance {
+    width:100%;
+    min-width:0!important;
+    max-width:100%;
+    grid-column:auto!important;
+  }
+  #approved-full-form .approved-shipping-four .approved-card-insurance .insurance-toggle {
+    display:grid!important;
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+    width:100%!important;
+    max-width:100%!important;
+    gap:4px!important;
+    min-width:0!important;
+  }
+  #approved-full-form .approved-shipping-four .approved-card-insurance .ins-btn {
+    box-sizing:border-box;
+    width:100%;
+    min-width:0!important;
+    max-width:100%;
+    margin:0;
+    padding:3px 2px!important;
+    white-space:nowrap;
+    font-size:10px!important;
+  }
+}
