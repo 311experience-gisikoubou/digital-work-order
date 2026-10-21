@@ -33,3 +33,8 @@ test('Free text shade saves, restores to the original control, without schema ch
  const context=JSON.parse(read('PROJECT_CONTEXT.json'));
  assert.equal(context.canonicalContract.artifacts.filter(x=>x.kind==='DESIGN'&&x.status==='CURRENT').length,1);
 });
+test('iPad landscape layout keeps insurance and order-type inside original delivery row',()=>{
+ assert.match(css,/#approved-full-form \.approved-shipping-four > \.approved-card-insurance\s*\{\s*grid-column:auto!important;/);
+ assert.match(css,/#approved-full-form \.approved-delivery-options > \.approved-card-order-type\s*\{\s*grid-column:auto!important;/);
+ assert.match(css,/#approved-full-form > \.approved-card-delivery:has\(#shade-area\.open\)/);
+});
