@@ -46,3 +46,12 @@
 6. 実機未確認を`PASS`としない。ユーザーの**明示マージ承認**なしに本番`main`へ反映しない。
 
 参考：WebKit `https://webkit.org/blog/14787/webkit-features-in-safari-17-2/`、Apple iPad User Guide `https://support.apple.com/en-gb/guide/ipad/ipad8f1f7a29/27/ipados/27`。
+
+## iPad実表示領域と日付入力欄の重なり（2026-10-22）
+
+- 対象iPad Air 11インチ横向き公称レイアウト **1180×820 CSSピクセル（物理2360×1640）**。Apple Human Interface Guidelines: https://developer.apple.com/design/human-interface-guidelines/layout
+- **この値は実Safariの可視領域・ズーム倍率と同一とは限らない**。Safariアドレスバーや分割表示・文字/ページ倍率で画面が変わるため、実端末の `window.innerWidth`、`window.visualViewport.width`、`devicePixelRatio` と入力欄座標の確認が最終条件。
+- WebKitの入力幅報告 https://bugs.webkit.org/show_bug.cgi?id=301648 （iOS上の`input type=date`等がパディング指定でwidth=100%を超える不具合）を参考に、`app/approved-reference-layout.css`でiPad横向きの発送日`#shipping-date`の水平パディングを0にして、親列のはみ出しを隠し、既存の12px列間隔を保護する。
+- stylesheet参照URLに`?v=20261022-ipad-safari-date`を付け、Safariの旧CSSキャッシュを回避。
+- `?uiDiag=1`を試験用一時URLに付けた場合にだけ、画面端に「画面寸法」を表示。タップするとCSS画面サイズ・visualViewport・拡大率・実入力枠と保険自費欄の距離が表示される。**患者名・医院名・下書き・外部通信は利用しない**。恒久本番URLでは有効にならない。
+- **PC試験をiPad実機合格としない。** 1180/1112/1024/980 CSS幅で、Safariの日付幅バグ相当の30px強制オーバーサイズでも区分欄へのヒット漏れが起きない保護を確認。最終判断はiPad Safariでのユーザースクリーンショット・操作結果。

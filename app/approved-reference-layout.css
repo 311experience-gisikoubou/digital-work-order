@@ -483,3 +483,26 @@ body:has(#view-clinic.active) .app-header .tab-btn.active {
     font-size:10px!important;
   }
 }
+/* iPadOS Safari 26: WebKit issue 301648 — date inputs with horizontal
+   padding can render wider than the explicit 100% column. Zero native padding
+   and clip overflow at the EXISTING date column boundary; prevent insurance
+   overlap even if a future WebKit release mismeasures intrinsic controls. */
+@media (min-width:901px) and (max-width:1200px) {
+  #approved-full-form .approved-shipping-four > .shipping-input-wrap:first-child {
+    overflow:hidden!important;
+    box-sizing:border-box!important;
+    width:100%!important;
+  }
+  #approved-full-form .approved-shipping-four #shipping-date {
+    -webkit-appearance:auto;
+    padding:0!important;
+    padding-inline:0!important;
+    margin:0!important;
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    box-sizing:border-box!important;
+    text-align:center;
+    font-size:12px!important;
+  }
+}
