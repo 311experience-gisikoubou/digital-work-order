@@ -1,0 +1,26 @@
+{
+  "id": "./",
+  "name": "こよし技工房 デジタル歯科技工指示書",
+  "short_name": "歯科技工指示書",
+  "description": "こよし技工房のデジタル歯科技工指示書",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5faf9",
+  "theme_color": "#38b5a3",
+  "icons": [
+    {
+      "src": "assets/pwa-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/pwa-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
