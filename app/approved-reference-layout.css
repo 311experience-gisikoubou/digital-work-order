@@ -506,3 +506,199 @@ body:has(#view-clinic.active) .app-header .tab-btn.active {
     font-size:12px!important;
   }
 }
+
+
+/* Tablet input adaptation (2026-10-22).
+   The approved 1536px PC reference remains unchanged: these overrides are
+   screen-only and require a touch-primary device. No DOM/state/PDF edits. */
+@media screen and (pointer: coarse) {
+  #view-clinic {
+    padding: 12px max(12px, env(safe-area-inset-right))
+             22px max(12px, env(safe-area-inset-left));
+  }
+  #approved-full-form > .approved-card-patient,
+  #approved-full-form > .approved-card-delivery,
+  #approved-full-form > .approved-card-tooth,
+  #approved-full-form > .approved-second-row > .card {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+  }
+  #approved-full-form .approved-chart-shell,
+  #approved-full-form .approved-clasp-panel {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+  }
+  #approved-full-form .approved-chart-body { max-height: none !important; }
+  #approved-full-form .approved-card-remarks textarea {
+    height: auto !important;
+    min-height: 100px !important;
+  }
+  /* iPad Safari does not zoom the form unexpectedly when focusing fields. */
+  #approved-full-form input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=file]),
+  #approved-full-form select,
+  #approved-full-form textarea {
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 44px !important;
+    height: auto !important;
+    font-size: 16px !important;
+  }
+  #approved-full-form .approved-shipping-four #shipping-date {
+    font-size: 16px !important;
+    min-height: 44px !important;
+  }
+  #approved-full-form label,
+  #approved-full-form .approved-form-group label { font-size: 13px; }
+  #approved-full-form .approved-form-actions .submit-area button,
+  #approved-full-form .approved-chart-header .mode-btn,
+  #approved-full-form .approved-total-btn,
+  #approved-full-form .approved-editor-close,
+  #approved-full-form .approved-artificial-card .toggle-btn,
+  #approved-full-form .approved-card-prosthetics .toggle-btn,
+  #approved-full-form .approved-shipping-four .approved-card-insurance .ins-btn,
+  #approved-full-form .approved-card-media .media-actions button,
+  #approved-full-form .approved-clasp-details > summary,
+  #approved-full-form .approved-clasp-details .clasp-btn {
+    min-height: 44px !important;
+    height: auto !important;
+    font-size: 13px !important;
+  }
+  #approved-full-form .approved-artificial-card .check-item,
+  #approved-full-form .approved-card-prosthetics .check-item,
+  #approved-full-form .approved-card-options .check-item {
+    min-height: 38px !important;
+    height: auto !important;
+  }
+  #approved-full-form .approved-chart-header {
+    flex-wrap: wrap !important;
+    height: auto;
+  }
+  #approved-full-form .approved-chart-header .tooth-toolbar {
+    flex-wrap: wrap !important;
+    gap: 6px;
+  }
+  #approved-full-form .approved-chart-foot {
+    position: static !important;
+    margin-top: 8px;
+    font-size: 11px;
+  }
+  #approved-full-form .approved-mini-title { font-size: 12px; }
+  /* Keep both 16-tooth rows and the midline intact; scroll within the
+     numeric panel rather than shrinking individual touch targets. */
+  #approved-full-form .approved-chart-numeric {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  #approved-full-form .approved-numeric-line { min-width: 770px; }
+  #approved-full-form .approved-numeric-line .tooth,
+  #approved-full-form .approved-numeric-line .midline {
+    height: 44px !important;
+    min-height: 44px !important;
+  }
+  #approved-full-form .approved-numeric-line .tooth { font-size: 13px !important; }
+  #approved-full-form .approved-clasp-details #claspToolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  #approved-full-form .approved-card-media .media-actions { flex-wrap: wrap; }
+  #view-lab .order-item { flex-wrap: wrap; gap: 8px; }
+  #view-lab .order-actions { flex-wrap: wrap; gap: 8px; }
+  #view-lab .order-actions button,
+  .app-header .tab-btn { min-height: 44px; }
+}
+
+/* Portrait iPad (including large iPad Pro) and narrow Stage Manager /
+   split-view windows: same fields, same order, one readable column. */
+@media screen and (pointer: coarse) and (orientation: portrait),
+       screen and (pointer: coarse) and (max-width: 900px) {
+  #approved-full-form > .approved-card-patient,
+  #approved-full-form > .approved-card-delivery {
+    grid-column: 1 / -1 !important;
+  }
+  #approved-full-form > .approved-second-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 12px;
+  }
+  #approved-full-form > .approved-second-row > .card {
+    grid-column: 1 / -1 !important;
+  }
+  #approved-full-form > .approved-card-tooth {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 12px !important;
+  }
+  #approved-full-form .approved-chart-body {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 10px;
+  }
+  #approved-full-form .approved-mini-figures {
+    width: 100%;
+    max-width: none;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #approved-full-form .approved-patient-top,
+  #approved-full-form .approved-patient-bottom {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  #approved-full-form .approved-patient-top > .form-group,
+  #approved-full-form .approved-patient-bottom > .form-group {
+    min-width: 0 !important;
+    max-width: none !important;
+    width: auto !important;
+    flex: auto !important;
+  }
+  #approved-full-form .approved-shipping-four {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+  #approved-full-form .approved-shipping-four > .approved-card-insurance,
+  #approved-full-form .approved-delivery-options > .approved-card-order-type {
+    grid-column: auto !important;
+  }
+  #approved-full-form .approved-shipping-four #deliveryResult {
+    grid-column: 1 / -1;
+  }
+  #approved-full-form .approved-shipping-four #deliveryResult .dr-main {
+    margin-top: 0;
+  }
+  #approved-full-form .approved-delivery-options {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+  #approved-full-form .approved-artificial-card .form-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  #approved-full-form > .approved-form-actions {
+    flex-wrap: wrap;
+    height: auto;
+  }
+}
+
+/* Very narrow iPad split view: keep fields usable without page-wide overflow. */
+@media screen and (pointer: coarse) and (max-width: 560px) {
+  #approved-full-form .approved-patient-top,
+  #approved-full-form .approved-patient-bottom,
+  #approved-full-form .approved-delivery-options,
+  #approved-full-form .approved-shipping-four {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  #approved-full-form .approved-artificial-card .form-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  #approved-full-form .approved-shipping-four #deliveryResult {
+    grid-column: 1 / -1;
+  }
+  #approved-full-form .approved-form-actions .submit-area {
+    width: 100%;
+  }
+  #approved-full-form .approved-form-actions .submit-area button {
+    flex: 1 1 150px;
+  }
+}
