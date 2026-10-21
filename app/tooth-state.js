@@ -165,9 +165,13 @@
     refreshCanonicalToothState();
   }
 
-  function setTeethMissing(teeth) {
+  // Same 7-7 ALL semantics as delivery app: first sets all 14 missing;
+  // when all 14 are already missing, the next press clears those 14 only.
+  // Caution remains an independent flag; wisdom teeth and opposite jaw are untouched.
+  function toggleCompleteDentureArch(teeth) {
+    const allMissing = teeth.every(num => toothState[num] && toothState[num].baseState === 'missing');
     teeth.forEach(num => {
-      if (toothState[num]) toothState[num].baseState = 'missing';
+      if (toothState[num]) toothState[num].baseState = allMissing ? 'normal' : 'missing';
     });
     refreshCanonicalToothState();
   }
@@ -245,10 +249,10 @@
   updateResults = updateCanonicalResults;
   resetAll = resetCanonicalToothState;
   selectUpperDenture = function selectUpperDentureCanonical() {
-    setTeethMissing(UPPER_DENTURE_TEETH);
+    toggleCompleteDentureArch(UPPER_DENTURE_TEETH);
   };
   selectLowerDenture = function selectLowerDentureCanonical() {
-    setTeethMissing(LOWER_DENTURE_TEETH);
+    toggleCompleteDentureArch(LOWER_DENTURE_TEETH);
   };
 
   syncToothChart = function syncToothChartCanonical(num, isSelected) {
