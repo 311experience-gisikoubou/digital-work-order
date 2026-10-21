@@ -436,6 +436,8 @@ function restoreDraftFormToUi(form) {
     }
   }
   setDraftElementValue('shade-guide', matchingShade && !form.shadeNumber ? '' : form.shadeGuide);
+  setDraftElementValue(shadeGroup === 'shade' ? 'shade-other-input' : 'shade-jishi-other-input',
+    matchingShade && !form.shadeNumber ? '' : (form.shadeGuide || form.shadeNumber));
   setDraftElementValue('shade-number', matchingShade && !form.shadeNumber ? '' : form.shadeNumber);
 
   setDraftCheckbox('chk-taigoha', form.taigoha);

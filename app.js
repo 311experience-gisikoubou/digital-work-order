@@ -160,7 +160,7 @@ bindExpand('chk-shade-jishi',    'shade-jishi-area');
 document.querySelectorAll('.toggle-btn[data-group="shade"]').forEach(btn => {
   btn.addEventListener('click', () => {
     const area = document.getElementById('shade-other-area');
-    area.classList.toggle('open', btn.dataset.val === 'other' && btn.classList.contains('active'));
+    area.classList.toggle('open', btn.dataset.val === 'other');
   });
 });
 
@@ -168,7 +168,7 @@ document.querySelectorAll('.toggle-btn[data-group="shade"]').forEach(btn => {
 document.querySelectorAll('.toggle-btn[data-group="shade-jishi"]').forEach(btn => {
   btn.addEventListener('click', () => {
     const area = document.getElementById('shade-jishi-other-area');
-    area.classList.toggle('open', btn.dataset.val === 'other' && btn.classList.contains('active'));
+    area.classList.toggle('open', btn.dataset.val === 'other');
   });
 });
 
@@ -324,6 +324,7 @@ function collectFormData() {
 
   // 色調（トグルボタン選択値を優先、「その他」または未選択時はテキスト入力を使用）
   const shadeSel = ins === 'insurance' ? getToggleVal('shade') : getToggleVal('shade-jishi');
+  const shadeFreeText = (document.getElementById(ins === 'insurance' ? 'shade-other-input' : 'shade-jishi-other-input')?.value ?? '').trim();
 
   const memoSnapshot = (typeof memoStrokes !== 'undefined' && Array.isArray(memoStrokes))
     ? JSON.parse(JSON.stringify(memoStrokes))
@@ -393,7 +394,7 @@ function collectFormData() {
     // 色調（トグル選択値を優先、「その他」または未選択はテキスト入力を使用）
     shadeGuide:   (shadeSel && shadeSel !== 'other')
       ? shadeSel
-      : (document.getElementById('shade-guide')?.value ?? ''),
+      : (shadeSel === 'other' ? shadeFreeText : (document.getElementById('shade-guide')?.value ?? '')),
     shadeNumber:  (shadeSel && shadeSel !== 'other')
       ? ''
       : (document.getElementById('shade-number')?.value ?? ''),

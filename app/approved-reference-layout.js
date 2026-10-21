@@ -48,6 +48,12 @@
     const jishi = prosthetics.querySelector('#prosthetics-jishi > .form-row');
     if (ins && jishi) {
       art.append(ins,jishi);
+      // Both the shade title and its existing checkbox open the original selector.
+      for (const shadeCheckboxId of ['chk-shade','chk-shade-jishi']) {
+        const input = document.getElementById(shadeCheckboxId);
+        const heading = input?.closest('.form-group')?.querySelector(':scope > label');
+        if (heading) heading.htmlFor = shadeCheckboxId;
+      }
       ins.classList.add('approved-artificial-insurance');
       jishi.classList.add('approved-artificial-jishi');
       const update = () => {
