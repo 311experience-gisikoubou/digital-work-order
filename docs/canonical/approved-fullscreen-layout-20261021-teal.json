@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "designId": "digital-work-order-layout-20261021-teal-v1",
+  "sourceImage": "docs/canonical/assets/approved-fullscreen-teal-20261021.png",
+  "sourceSha256": "8cc77c1fc9d730357c217919c32ce339c679cf02456d3038323a03cc04f6143f",
+  "referenceViewport": {
+    "width": 1536,
+    "height": 864,
+    "pixelRatio": 1
+  },
+  "sourceStatus": "HUMAN_APPROVED_FULL_SCREEN",
+  "lockedComposition": true,
+  "sourceRectanglesCssPx": {
+    "brandHeader": [
+      27,
+      0,
+      1482,
+      59
+    ],
+    "actionBar": [
+      27,
+      69,
+      1482,
+      64
+    ],
+    "clinicPatient": [
+      27,
+      148,
+      736,
+      207
+    ],
+    "deliveryOrderArtificial": [
+      775,
+      148,
+      734,
+      207
+    ],
+    "prosthetics": [
+      27,
+      373,
+      547,
+      139
+    ],
+    "options": [
+      583,
+      373,
+      238,
+      139
+    ],
+    "media": [
+      829,
+      373,
+      323,
+      139
+    ],
+    "remarks": [
+      1164,
+      373,
+      345,
+      139
+    ],
+    "toothChart": [
+      28,
+      525,
+      1069,
+      302
+    ],
+    "clasp": [
+      1117,
+      525,
+      392,
+      314
+    ],
+    "upperJawImage": [
+      45,
+      596,
+      227,
+      196
+    ],
+    "lowerJawImage": [
+      285,
+      596,
+      236,
+      196
+    ]
+  },
+  "fixedToothFigures": {
+    "upper": {
+      "file": "assets/approved-teeth-upper-20261021.png",
+      "sha256": "345bd4951325faa90575a5e1aac2333c6cafc7492f4888d1c663f0adac2bd12b",
+      "sourceCropCssPx": [
+        45,
+        596,
+        227,
+        196
+      ]
+    },
+    "lower": {
+      "file": "assets/approved-teeth-lower-20261021.png",
+      "sha256": "3a44a0581b8541c07bbdd62e20759d0665366469caf95f0bdfcd94204c649689",
+      "sourceCropCssPx": [
+        285,
+        596,
+        236,
+        196
+      ]
+    }
+  },
+  "palette": {
+    "surface": "#FFFFFF",
+    "background": "#F5FAF9",
+    "teal": "#38B5A3",
+    "tealDark": "#138D80",
+    "border": "#CFEBE5",
+    "navy": "#173451",
+    "missing": "#CB122A"
+  },
+  "functionProvenance": "existing digital-work-order work-order processing, form state, PDF, media, drawing, transfer, numbered tooth state",
+  "preservedIds": [
+    "clinic-name",
+    "doctor-name",
+    "patient-name",
+    "patient-age",
+    "patient-gender",
+    "shipping-date",
+    "next-appointment-date",
+    "next-appointment-time",
+    "issue-date",
+    "laboratory-registration-number",
+    "draft-save-btn",
+    "draft-discard-btn",
+    "submit-btn",
+    "jaw-upper",
+    "jaw-lower",
+    "toothSvg",
+    "claspToolbar",
+    "media-attachments",
+    "remarks"
+  ],
+  "referenceCoordinatesNote": "Geometry refers to human-approved 1536x864 mock; app Safari CSS viewport differs and uses responsive scaling. Do not treat mock as a live screenshot.",
+  "unapprovedChangesForbidden": [
+    "reorder cards",
+    "redraw dental anatomy",
+    "add cards",
+    "delete form fields",
+    "alter order schema",
+    "alter patient data",
+    "alter media or PDF behavior",
+    "invent actions"
+  ]
+}

@@ -12,9 +12,9 @@ const source=read('docs/canonical/approved-fullscreen-design-20261021.md');
 const teeth=read('app/tooth-state.js');
 
 test('approved full-form source is documented with exact approved reference fingerprint',()=>{
-  assert.match(source,/a5faaaabc4c4a1bf365075b3acd55f538a6b09ce5004cbf56ec38772225a2514/);
+  assert.match(source,/8cc77c1fc9d730357c217919c32ce339c679cf02456d3038323a03cc04f6143f/);
   assert.match(source,/入力画面全体/);
-  assert.match(source,/画像バイナリはこのGitHub文書やrepoに格納されていない/);
+  assert.match(source, /approved-fullscreen-teal-20261021\.png/);
 });
 test('UI is loaded in original application without duplicate form inputs',()=>{
   assert.match(html,/<link rel="stylesheet" href="app\/approved-layout.css">/);

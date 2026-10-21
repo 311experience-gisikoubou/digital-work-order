@@ -14,8 +14,10 @@
     nodes.filter(Boolean).forEach(node => details.append(node));
     return details;
   }
+  const approvedJawImages = {};
   function redrawMini(preview) {
-    const img = document.querySelector('.approved-editor-modal .chart-wrap img, #approved-editor-modal .chart-wrap img, .chart-wrap img');
+    const arch = preview.dataset.arch;
+    const img = approvedJawImages[arch];
     if (!img || !img.complete || !img.naturalWidth) return;
     const canvas = preview.querySelector('canvas');
     if (!canvas) return;
@@ -24,14 +26,13 @@
     const upper = preview.dataset.arch === 'upper';
     const viewY = upper ? 0 : 535;
     const viewH = upper ? 535 : 535;
-    const srcY = Math.round(img.naturalHeight * viewY / 1070);
-    const srcH = Math.min(img.naturalHeight - srcY, Math.round(img.naturalHeight * viewH / 1070));
     const renderW = canvas.width;
     const renderH = canvas.height;
     ctx.clearRect(0, 0, renderW, renderH);
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, renderW, renderH);
-    ctx.drawImage(img, 0, srcY, img.naturalWidth, srcH, 0, 0, renderW, renderH);
+    // Real tooth illustrations are byte-for-byte crops of the approved source image.
+    ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, 0, 0, renderW, renderH);
     // The existing SVG coordinates are authoritative; no tooth shape is regenerated.
     if (typeof window.getToothStateSnapshot !== 'function' || typeof window.coords !== 'object') return;
     const selected = window.getToothStateSnapshot();
@@ -154,8 +155,8 @@
       frame.setAttribute('aria-label',label+'歯式図を拡大編集');
       frame.append(element('div','approved-mini-title',label+'（タップで拡大編集）'));
       const canvas = element('canvas','approved-mini-canvas');
-      canvas.width = 290;
-      canvas.height = 270;
+      canvas.width = arch === 'upper' ? 227 : 236;
+      canvas.height = 196;
       frame.append(canvas);
       frame.addEventListener('click',openModal);
       figures.append(frame);
@@ -208,8 +209,12 @@
 
     const img = drawing.querySelector('img');
     const redraw = () => {figures.querySelectorAll('.approved-mini-jaw').forEach(redrawMini);};
-    if (img) img.addEventListener('load',redraw);
-    if (img && img.complete) redraw();
+    for (const arch of ['upper','lower']) {
+      const refImage = new Image();
+      approvedJawImages[arch] = refImage;
+      refImage.addEventListener('load',redraw);
+      refImage.src = new URL('assets/approved-teeth-' + arch + '-20261021.png', document.baseURI).href;
+    }
     // SVG attribute changes are produced by existing canonical tooth state updates.
     const svg = tooth.ownerDocument.getElementById('toothSvg');
     if (svg && typeof MutationObserver === 'function') {
