@@ -85,9 +85,8 @@
       allParts.slice(pivot+1).forEach(node => inner.append(node));
       more.append(inner);
       body.append(more);
-      mainDevices.addEventListener('change',event => {
-        if (event.target?.checked) more.open = true;
-      });
+      // Open this disclosure only when its summary is tapped. Automatically
+      // expanding after GoA etc. covered other fields on narrow iPad viewports.
     }
     // One source-image media button; all existing photo/video/audio/file
     // attachment operations are still one tap away inside the disclosure.

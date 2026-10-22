@@ -86,7 +86,16 @@ function setInsurance(type, options) {
   syncInsuranceUI();
 
   if (shouldRecalculate && typeof onShippingDateChange === 'function') {
-    onShippingDateChange();
+    // Recalculation also opens the large calendar. Switching 保険/自費 must
+    // not unexpectedly expand it over neighboring fields on iPad.
+    const calendar = document.getElementById('vcalWrap');
+    const wasClosed = calendar && getComputedStyle(calendar).display === 'none';
+    const pending = onShippingDateChange();
+    if (wasClosed) {
+      Promise.resolve(pending).finally(() => {
+        if (calendar) calendar.style.display = 'none';
+      });
+    }
   }
 }
 

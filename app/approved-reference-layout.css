@@ -506,3 +506,234 @@ body:has(#view-clinic.active) .app-header .tab-btn.active {
     font-size:12px!important;
   }
 }
+
+/* Narrow iPad in-app Safari / side-by-side (measured 627px visual viewport):
+   this is NOT 1180px landscape. Prior 2 half-width patient and delivery cards
+   truncated inputs and broke the artificial-tooth selectors.
+   Responsive layout is intentionally independent of the approved full-width
+   1536 / 1180 geometry, which remains untouched. */
+@media (max-width:900px) {
+  #approved-full-form > .approved-card-patient,
+  #approved-full-form > .approved-card-delivery {
+    grid-column:1 / -1!important;
+    width:100%;
+    min-width:0;
+    min-height:0!important;
+    height:auto!important;
+    max-height:none!important;
+    box-sizing:border-box;
+  }
+  #approved-full-form .approved-shipping-four {
+    display:grid!important;
+    grid-template-columns:minmax(0,1.12fr) minmax(0,1fr)!important;
+    column-gap:12px!important;
+    row-gap:6px!important;
+    width:100%;
+  }
+  #approved-full-form .approved-shipping-four > .shipping-input-wrap:first-child {
+    min-width:0!important;max-width:100%!important;overflow:hidden;
+  }
+  #approved-full-form .approved-shipping-four #shipping-date {
+    display:block;
+    box-sizing:border-box!important;
+    width:100%!important;max-width:100%!important;min-width:0!important;
+    padding:0!important;margin:0!important;
+  }
+  #approved-full-form .approved-shipping-four > .approved-card-insurance {
+    grid-column:auto!important;
+    width:100%;min-width:0!important;max-width:100%;
+  }
+  #approved-full-form .approved-shipping-four .approved-card-insurance .insurance-toggle {
+    display:grid!important;
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+    gap:5px;width:100%;min-width:0;
+  }
+  #approved-full-form .approved-shipping-four .approved-card-insurance .ins-btn {
+    box-sizing:border-box;
+    width:100%;max-width:100%;min-width:0!important;
+    padding:4px 2px!important;
+  }
+  #approved-full-form .approved-delivery-options {
+    display:grid!important;
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+    gap:10px;
+  }
+  #approved-full-form .approved-delivery-options > .approved-card-order-type,
+  #approved-full-form .approved-delivery-options > .approved-artificial-card {
+    grid-column:auto!important;
+    min-width:0;
+    width:100%;
+    box-sizing:border-box;
+  }
+  #approved-full-form .approved-artificial-card .approved-artificial-insurance,
+  #approved-full-form .approved-artificial-card .approved-artificial-jishi {
+    grid-template-columns:repeat(3,minmax(0,1fr))!important;
+  }
+  #approved-full-form .approved-patient-top,
+  #approved-full-form .approved-patient-bottom {
+    flex-wrap:wrap!important;
+    gap:8px!important;
+  }
+  #approved-full-form .approved-patient-top > .form-group {
+    flex:1 1 155px!important;
+    min-width:0!important;
+  }
+  #approved-full-form .approved-patient-bottom > .form-group {
+    max-width:none!important;min-width:0!important;
+  }
+  #approved-full-form .approved-patient-bottom > .form-group:nth-child(3) {
+    flex:1 1 215px;min-width:180px!important;
+  }
+  #approved-full-form .approved-patient-bottom > .form-group:nth-child(4) {
+    flex:1 1 145px;max-width:none!important;
+  }
+  #approved-full-form .approved-second-row > .card {
+    min-height:0!important;max-height:none!important;
+    height:auto!important;
+  }
+  /* Expanded advanced options MUST occupy space instead of covering
+     the next group or accepting touches meant for another card. */
+  #approved-full-form .approved-second-row .approved-card-prosthetics {
+    isolation:auto;
+  }
+  #approved-full-form .approved-prosthetic-extra {
+    position:relative;
+    top:auto;right:auto;
+    margin:5px 0 0;
+    max-width:100%;
+  }
+  #approved-full-form .approved-prosthetic-extra-inner {
+    position:static;
+    width:100%;min-width:0;max-width:100%;
+    max-height:none;
+    margin-top:8px;
+    box-shadow:none;
+    box-sizing:border-box;
+    padding:8px;
+  }
+  #approved-full-form .approved-media-actions[open] {
+    position:static;
+  }
+  #approved-full-form .approved-media-actions > .media-actions {
+    position:static;
+    max-width:100%;
+    margin-top:6px;
+    box-shadow:none;
+  }
+  #approved-full-form .approved-card-patient .approved-lab-settings[open] > .form-row {
+    position:static;width:100%;max-width:100%;
+    margin:6px 0 0;
+    box-shadow:none;
+  }
+  #approved-full-form .approved-card-patient .card-title:has(.approved-lab-settings[open]) {
+    flex-wrap:wrap;
+    align-items:start;
+  }
+}
+@media (max-width:700px) {
+  #approved-full-form > .approved-second-row {
+    grid-template-columns:minmax(0,1fr)!important;
+  }
+  #approved-full-form > .approved-second-row > .card {
+    grid-column:1 / -1!important;
+  }
+  #approved-full-form .approved-delivery-options {
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;
+  }
+  #approved-full-form .approved-chart-header {
+    flex-wrap:wrap!important;
+  }
+  #approved-full-form .approved-chart-body {
+    grid-template-columns:minmax(0,1fr)!important;
+  }
+}
+/* 627px Safari: three artificial tooth sections cannot fit in a 270px card.
+   Keep the existing fields, but move SHADE onto its own full-width row. */
+@media (max-width:700px) {
+  #approved-full-form .approved-artificial-card .approved-artificial-insurance,
+  #approved-full-form .approved-artificial-card .approved-artificial-jishi {
+    display:grid!important;
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+    gap:6px!important;
+  }
+  #approved-full-form .approved-artificial-card .form-group:last-child {
+    grid-column:1 / -1;
+  }
+  #approved-full-form .approved-artificial-card .form-group .toggle-group {
+    height:auto!important;
+    min-height:30px;
+    display:flex;
+    flex-wrap:nowrap;
+  }
+  #approved-full-form .approved-artificial-card .form-group .toggle-btn {
+    min-width:0;
+    min-height:30px;
+    height:30px;
+    flex:1 1 0;
+    padding:3px 2px;
+    white-space:nowrap;
+    font-size:10px;
+    line-height:1.2;
+  }
+  #approved-full-form .approved-artificial-card .form-group:last-child .check-item {
+    min-height:30px;
+    width:max-content;
+  }
+  #approved-full-form .approved-artificial-card #shade-area,
+  #approved-full-form .approved-artificial-card #shade-jishi-area {
+    width:min(300px, calc(100vw - 44px));
+    right:0;
+  }
+}
+/* 901–1200px: the legacy advanced-settings dropdown extended 96px past
+   the left edge of the iPad canvas because its right edge was anchored to a
+   tiny summary button. Anchor within the viewport instead. */
+@media (min-width:901px) and (max-width:1200px) {
+  #approved-full-form .approved-second-row .approved-card-prosthetics:has(.approved-prosthetic-extra[open]) {
+    z-index:35;
+    isolation:auto;
+  }
+  #approved-full-form .approved-prosthetic-extra-inner {
+    left:0;
+    right:auto;
+    min-width:0;
+    width:min(520px, calc(100vw - 100px));
+    max-width:calc(100vw - 100px);
+    box-sizing:border-box;
+  }
+}
+
+/* An open advanced prosthetics group is an actual accordion, not a floating
+   dropdown covering other controls. Default collapsed appearance is unchanged. */
+#approved-full-form .approved-second-row > .approved-card-prosthetics:has(.approved-prosthetic-extra[open]) {
+  min-height:0!important;
+  max-height:none!important;
+  height:auto!important;
+  overflow:visible!important;
+  z-index:16;
+  isolation:auto;
+}
+#approved-full-form .approved-prosthetic-extra[open] {
+  position:relative;
+  top:auto;right:auto;left:auto;
+  width:100%;max-width:100%;
+  margin-top:8px;
+}
+#approved-full-form .approved-prosthetic-extra[open] > .approved-prosthetic-extra-inner {
+  position:relative;
+  top:auto;right:auto;left:auto;
+  min-width:0;
+  width:100%;max-width:100%;
+  box-sizing:border-box;
+  max-height:420px;
+  overflow-y:auto;
+  overflow-x:hidden;
+  margin-top:6px;
+  box-shadow:none;
+}
+@media(max-width:900px) {
+  #approved-full-form .approved-prosthetic-extra[open] > .approved-prosthetic-extra-inner {
+    max-height:none;
+    overflow:visible;
+  }
+}
