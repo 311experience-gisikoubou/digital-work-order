@@ -605,6 +605,53 @@ body:has(#view-clinic.active) .app-header .tab-btn.active {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
   #approved-full-form .approved-card-media .media-actions { flex-wrap: wrap; }
+
+  /* Expanded controls must take up normal space, not cover the next card.
+     Keep the desktop reference unchanged; only touch layouts use this rule. */
+  #approved-full-form .approved-prosthetic-extra {
+    position: static !important;
+    max-width: 100%;
+    margin-top: 10px;
+  }
+  #approved-full-form .approved-prosthetic-extra-inner,
+  #approved-full-form .approved-media-actions > .media-actions,
+  #approved-full-form .approved-optional-actions[open] #draft-local-note,
+  #approved-full-form .approved-lab-settings[open] > .form-row {
+    position: static !important;
+    inset: auto !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    max-height: none !important;
+    box-sizing: border-box;
+  }
+  #approved-full-form .approved-artificial-card #shade-area.open,
+  #approved-full-form .approved-artificial-card #shade-jishi-area.open {
+    position: static !important;
+    inset: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  #approved-full-form .approved-card-prosthetics .toggle-group {
+    height: auto !important;
+    min-height: 44px;
+    flex-wrap: wrap;
+  }
+  #approved-full-form .approved-card-prosthetics #device-insurance,
+  #approved-full-form .approved-card-prosthetics #device-jishi {
+    max-height: none !important;
+    flex-wrap: wrap;
+  }
+  #approved-full-form .approved-card-prosthetics .check-label,
+  #approved-full-form .approved-card-options .check-label {
+    font-size: 13px !important;
+    white-space: normal !important;
+  }
+  #approved-full-form .approved-card-prosthetics .check-item,
+  #approved-full-form .approved-card-options .check-item {
+    min-height: 44px !important;
+    height: auto !important;
+  }
   #view-lab .order-item { flex-wrap: wrap; gap: 8px; }
   #view-lab .order-actions { flex-wrap: wrap; gap: 8px; }
   #view-lab .order-actions button,

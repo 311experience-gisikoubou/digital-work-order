@@ -65,3 +65,18 @@ test('orientation adaptation is CSS-only: no JS state or PDF storage changes', (
   const adapted = mediaBlocks(responsive).map(block => block.body).join('\n');
   assert.doesNotMatch(adapted, /localStorage|sessionStorage|indexedDB|fetch\s*\(|@media print/);
 });
+
+test('touch-only expansions flow within cards rather than floating over the next field', () => {
+  const touch = mediaBlocks(responsive)[0].body;
+  for (const selector of [
+    'approved-prosthetic-extra-inner',
+    'approved-media-actions > .media-actions',
+    'approved-optional-actions[open] #draft-local-note',
+    'approved-lab-settings[open] > .form-row'
+  ]) assert.ok(touch.includes(selector), selector + ' has an in-flow override');
+  assert.match(touch, /approved-prosthetic-extra\s*\{\s*position:\s*static\s*!important/);
+  assert.match(touch, /approved-prosthetic-extra-inner,[\s\S]*?position:\s*static\s*!important/);
+  assert.match(touch, /#shade-area\.open,[\s\S]*?position:\s*static\s*!important/);
+  assert.match(touch, /approved-card-prosthetics \.toggle-group\s*\{\s*height:\s*auto\s*!important/);
+  assert.match(touch, /#device-jishi\s*\{\s*max-height:\s*none\s*!important/);
+});
