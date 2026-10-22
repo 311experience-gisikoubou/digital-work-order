@@ -284,7 +284,7 @@ CANONICAL_TARGET=<slot>=<artifact-id>
 SUPERSEDED_SPEC_USED=NO
 ```
 
-A Functional Gate PASS never overrides Contract Gate FAIL. Missing/ambiguous CURRENT authority, use of a SUPERSEDED/HISTORICAL/DRAFT spec, a cross-project contract, or an implementation target different from the CURRENT artifact is a merge blocker. Normal Contract PASS adds no human confirmation.
+A Functional Gate PASS never overrides Contract Gate FAIL. Missing/ambiguous CURRENT authority, use of a SUPERSEDED/HISTORICAL/DRAFT spec, a cross-project contract, or an implementation target different from the CURRENT artifact is a merge blocker. When the audited target selection or `usedSpecIds` includes a CURRENT `kind: DESIGN` artifact whose `visual.baseline` is `REFERENCE_IMAGE`, the work state's `taskTypes` must be present and include `UI_REFERENCE_REPRODUCTION`; `UI_REFERENCE_REPRODUCTION_CLASSIFICATION_REQUIRED` (omitted) and `UI_REFERENCE_REPRODUCTION_MISCLASSIFIED` (e.g. declared plain `UI`) are merge blockers regardless of Functional Gate result, so a passing headless/functional screenshot can never stand in for the required approved-reference reproduction evidence above. Normal Contract PASS adds no human confirmation.
 
 When `human-decision-sync` is required, also run `.agents/skills/handoff/human-decision-sync.mjs` against the exact current HEAD `PROJECT_CONTEXT.json` and the decision IDs actually relied on by the audited change. `DECISION_CONFLICT`, `PROPOSED_DECISION_USED`, `UNRESOLVED_DECISION_USED`, missing required decision state, or human-decision worktree drift is a merge blocker. A confirmed decision may bind a canonical artifact only while that artifact remains CURRENT.
 
