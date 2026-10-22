@@ -409,7 +409,14 @@ function collectFormData() {
 
     // メタルアップ
     hasMetalup:   document.getElementById(`chk-metalup-${insKey}`).checked,
-    metalupDetail:document.getElementById(`metalup-${insKey}-detail`)?.value ?? '',
+    metalupDetail: (() => {
+      if (!document.getElementById(`chk-metalup-${insKey}`)?.checked) return '';
+      const existingText = document.getElementById(`metalup-${insKey}-detail`);
+      if (existingText) return existingText.value;
+      // The real existing field is a number input, not *-detail.
+      const raw = Number.parseInt(document.getElementById(`metalup-${insKey}`)?.value, 10);
+      return Number.isInteger(raw) && raw >= 1 && raw <= 28 ? `${raw}本` : '';
+    })(),
 
     // 補強床
     hasKyoko:     document.getElementById(`chk-kyoko-${insKey}`).checked,

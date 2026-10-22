@@ -38,3 +38,10 @@ test('B5 compact PDF exposes selected jaw and retention details without a new ro
   assert.match(pdf,/pushHtmlRow\(\s*'装置'/);
   assert.match(pdf,/R = compactR/);
 });
+
+test('metalup numeric input reaches B5 issued data and restores via existing detail field',()=>{
+  assert.match(app,/document.getElementById\(\`metalup-\$\{insKey\}\`\)\?\.value/);
+  assert.match(app,/\`\$\{raw\}本\`/);
+  assert.match(draft,/const savedMetalupCount =/);
+  assert.match(draft,/setDraftElementValue\(\`metalup-\$\{insKey\}\`, savedMetalupCount\[1\]\)/);
+});

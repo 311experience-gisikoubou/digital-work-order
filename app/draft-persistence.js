@@ -437,6 +437,8 @@ function restoreDraftFormToUi(form) {
 
   setDraftCheckbox(`chk-metalup-${insKey}`, form.hasMetalup);
   setDraftElementValue(`metalup-${insKey}-detail`, form.metalupDetail);
+  const savedMetalupCount = /^([1-9]|1\d|2[0-8])本$/.exec(form.metalupDetail);
+  if (savedMetalupCount) setDraftElementValue(`metalup-${insKey}`, savedMetalupCount[1]);
   setDraftCheckbox(`chk-kyoko-${insKey}`, form.hasKyoko);
   setDraftElementValue(`kyoko-${insKey}-detail`, form.kyokoDetail);
 
