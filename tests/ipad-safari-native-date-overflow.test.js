@@ -12,7 +12,7 @@ test('iPad Safari WebKit date-width defect mitigated with zero padding and overf
  assert.match(css,/box-sizing:border-box!important/);
 });
 test('Safari receives a new CSS URL, not previously cached stylesheet',()=>{
- assert.equal((html.match(/approved-reference-layout\.css\?v=20261022-ipad-safari-date/g)||[]).length,1);
+ assert.equal((html.match(/approved-reference-layout\.css\?v=20261022-expand-data-audit/g)||[]).length,1);
 });
 test('diagnostic is strictly preview-only, local to device, and opt-in',()=>{
  assert.match(diag,/get\('uiDiag'\) !== '1'/);
