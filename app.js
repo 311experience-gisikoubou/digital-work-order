@@ -275,7 +275,10 @@ function collectFormData() {
   // チェックボックスグループ
   function getChecked(containerId) {
     return [...document.querySelectorAll(`#${containerId} input[type="checkbox"]:checked`)]
-      .map(c => c.value);
+      .map(c => c.value && c.value !== 'on'
+        ? c.value
+        : (c.closest('.check-item')?.querySelector('.check-label')?.textContent.trim() || ''))
+      .filter(Boolean);
   }
 
   // トグルボタン。multiクラスのグループは複数activeを保持する。
@@ -294,15 +297,27 @@ function collectFormData() {
   // 補綴物・装置
   const deviceGroup = ins === 'insurance' ? 'device-insurance' : 'device-jishi';
   const devices = getChecked(deviceGroup);
+  // Keep the original v1 string-array contract while retaining jaw-specific
+  // base/occlusion-rim selections and the number of retention points.
+  const selectedDevice = name => devices.includes(name);
+  if (selectedDevice('基礎床')) devices.push(...getChecked(`kisosho-${ins}-area`));
+  if (selectedDevice('ロー提')) devices.push(...getChecked(`rotei-${ins}-area`));
+  if (selectedDevice('保持')) {
+    const raw = Number.parseInt(document.getElementById(`hoji-${insKey}`)?.value, 10);
+    if (Number.isFinite(raw) && raw >= 1 && raw <= 20) devices.push(`保持 ${raw}`);
+  }
 
   // クラスプ（配列を正本、旧単一値は先頭要素から派生）
-  const claspTypes = ins === 'insurance' ? getToggleVals('clasp-ins') : getToggleVals('clasp-jishi');
+  const claspTypes = document.getElementById(`chk-clasp-${insKey}`)?.checked
+    ? getToggleVals(`clasp-${insKey}`) : [];
   const claspType = claspTypes[0] ?? null;
 
   // バー（配列を正本、旧単一値は先頭要素から派生）
-  const barTypes = ins === 'insurance' ? getToggleVals('bar-ins') : getToggleVals('bar-jishi');
+  const barTypes = document.getElementById(`chk-bar-${insKey}`)?.checked
+    ? getToggleVals(`bar-${insKey}`) : [];
   const barType = barTypes[0] ?? null;
-  const castBarSelected = [...document.querySelectorAll(`.toggle-btn[data-group="bar-${insKey}"].active`)]
+  const castBarSelected = document.getElementById(`chk-bar-${insKey}`)?.checked &&
+    [...document.querySelectorAll(`.toggle-btn[data-group="bar-${insKey}"].active`)]
     .some(el => ['鋳造バー', 'キャストバー'].includes(el.dataset.val || el.textContent.trim()));
   function getCastBarCount(jaw) {
     const count = Number.parseInt(document.getElementById(`cast-bar-${jaw}-count-${insKey}`).value, 10);
@@ -321,9 +336,10 @@ function collectFormData() {
     ? Number.parseInt(document.getElementById(`kyokosen-${insKey}`).value, 10) || 1
     : 0;
   const rimountArea = document.getElementById(`rimount-${ins === 'insurance' ? 'insurance' : 'jishi'}-area`);
+  const rimountEnabled = document.getElementById(`chk-rimount-${insKey}`)?.checked ?? false;
   const rimountJaws = {
-    upper: rimountArea?.querySelector('input[value="リマウント上"]')?.checked ?? false,
-    lower: rimountArea?.querySelector('input[value="リマウント下"]')?.checked ?? false
+    upper: rimountEnabled && (rimountArea?.querySelector('input[value="リマウント上"]')?.checked ?? false),
+    lower: rimountEnabled && (rimountArea?.querySelector('input[value="リマウント下"]')?.checked ?? false)
   };
   const rimountCount = (rimountJaws.upper ? 1 : 0) + (rimountJaws.lower ? 1 : 0);
 
@@ -332,7 +348,10 @@ function collectFormData() {
   const toothPost = ins === 'insurance' ? getToggleVal('tooth-post-ins') : getToggleVal('tooth-post-jishi');
 
   // 色調（トグルボタン選択値を優先、「その他」または未選択時はテキスト入力を使用）
-  const shadeSel = ins === 'insurance' ? getToggleVal('shade') : getToggleVal('shade-jishi');
+  const shadeEnabled = document.getElementById(ins === 'insurance' ? 'chk-shade' : 'chk-shade-jishi')?.checked ?? false;
+  const shadeSel = shadeEnabled
+    ? (ins === 'insurance' ? getToggleVal('shade') : getToggleVal('shade-jishi'))
+    : null;
   const shadeFreeText = (document.getElementById(ins === 'insurance' ? 'shade-other-input' : 'shade-jishi-other-input')?.value ?? '').trim();
 
   const memoSnapshot = (typeof memoStrokes !== 'undefined' && Array.isArray(memoStrokes))
@@ -401,10 +420,10 @@ function collectFormData() {
     toothPosterior: toothPost,
 
     // 色調（トグル選択値を優先、「その他」または未選択はテキスト入力を使用）
-    shadeGuide:   (shadeSel && shadeSel !== 'other')
+    shadeGuide:   !shadeEnabled ? '' : (shadeSel && shadeSel !== 'other')
       ? shadeSel
       : (shadeSel === 'other' ? shadeFreeText : (document.getElementById('shade-guide')?.value ?? '')),
-    shadeNumber:  (shadeSel && shadeSel !== 'other')
+    shadeNumber:  !shadeEnabled ? '' : (shadeSel && shadeSel !== 'other')
       ? ''
       : (document.getElementById('shade-number')?.value ?? ''),
 

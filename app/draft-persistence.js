@@ -260,7 +260,12 @@ function collectDraftFormData() {
     orderTypes: [...data.orderTypes],
     repairDetail: data.repairDetail,
     bedType: data.bedType,
-    devices: getDraftCheckedValues(data.insuranceType === 'insurance' ? 'device-insurance' : 'device-jishi'),
+    // The canonical form now carries stable labels plus selected jaw/count details.
+    // Keep these inside the existing v1 devices string array (no schema migration).
+    devices: [...new Set([
+      ...getDraftCheckedValues(data.insuranceType === 'insurance' ? 'device-insurance' : 'device-jishi'),
+      ...data.devices
+    ])],
     claspType: data.claspType,
     claspTypes: getActiveToggleValues(`clasp-${insKey}`),
     barType: data.barType,
@@ -393,6 +398,22 @@ function restoreDraftFormToUi(form) {
   restoreDraftCheckboxValues('device-insurance', []);
   restoreDraftCheckboxValues('device-jishi', []);
   restoreDraftCheckboxValues(form.insuranceType === 'insurance' ? 'device-insurance' : 'device-jishi', form.devices);
+  // Restore additional jaw/count selections saved within the v1 devices array.
+  // Historical drafts containing only the base device names remain valid.
+  const selectedDetails = new Set(form.devices);
+  for (const part of ['kisosho','rotei']) {
+    const area = document.getElementById(`${part}-${form.insuranceType}-area`);
+    if (area && typeof area.querySelectorAll === 'function') {
+      area.querySelectorAll('input[type="checkbox"]').forEach(input => {
+        input.checked = selectedDetails.has(input.value);
+      });
+    }
+  }
+  const savedRetention = form.devices.find(value => /^保持 (?:[1-9]|1\d|20)$/.test(value));
+  if (savedRetention) {
+    setDraftElementValue(`hoji-${form.insuranceType === 'insurance' ? 'ins' : 'jishi'}`,
+      savedRetention.slice(3));
+  }
 
   const insKey = form.insuranceType === 'insurance' ? 'ins' : 'jishi';
   const bedGroup = form.insuranceType === 'insurance' ? 'bed-insurance' : 'bed-jishi';
