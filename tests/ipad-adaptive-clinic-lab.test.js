@@ -80,3 +80,24 @@ test('touch-only expansions flow within cards rather than floating over the next
   assert.match(touch, /approved-card-prosthetics \.toggle-group\s*\{\s*height:\s*auto\s*!important/);
   assert.match(touch, /#device-jishi\s*\{\s*max-height:\s*none\s*!important/);
 });
+
+test('iPad charts stack the existing figures above the full-width numeric panel without distortion', () => {
+  const touch = mediaBlocks(responsive)[0].body;
+  const rule = (selector) => {
+    const start = touch.indexOf(selector + ' {');
+    assert.ok(start >= 0, selector + ' has a touch-only rule');
+    return touch.slice(start, touch.indexOf('}', start) + 1);
+  };
+  assert.match(rule('.approved-chart-body'), /grid-template-columns:\s*minmax\(0, 1fr\)\s*!important/);
+  assert.match(rule('.approved-mini-figures'), /grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(rule('.approved-mini-jaw'), /align-items:\s*center/);
+  const canvas = rule('.approved-mini-canvas');
+  assert.match(canvas, /width:\s*auto/);
+  assert.match(canvas, /height:\s*auto\s*!important/);
+  assert.match(canvas, /max-width:\s*100%/);
+  assert.match(canvas, /max-height:\s*196px/);
+  assert.match(canvas, /object-fit:\s*contain/);
+  assert.match(rule('.approved-chart-numeric'), /overflow-x:\s*auto/);
+  assert.match(rule('.approved-numeric-line'), /min-width:\s*770px/);
+  assert.match(css.slice(0, markerPos), /approved-chart-body\s*\{grid-template-columns:minmax\(0,46%\) minmax\(0,54%\)/);
+});

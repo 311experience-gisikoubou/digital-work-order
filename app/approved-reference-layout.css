@@ -761,7 +761,25 @@ body:has(#view-clinic.active) .app-header .tab-btn.active {
     min-height: 0 !important;
     max-height: none !important;
   }
-  #approved-full-form .approved-chart-body { max-height: none !important; }
+  /* Approved iPad tooth layout: figures above the numeric rows, without
+     changing the PC layout or stretching the original tooth illustrations. */
+  #approved-full-form .approved-chart-body {
+    grid-template-columns: minmax(0, 1fr) !important;
+    max-height: none !important;
+  }
+  #approved-full-form .approved-mini-figures {
+    width: 100%;
+    max-width: none;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #approved-full-form .approved-mini-jaw { align-items: center; }
+  #approved-full-form .approved-mini-canvas {
+    width: auto;
+    height: auto !important;
+    max-width: 100%;
+    max-height: 196px;
+    object-fit: contain;
+  }
   #approved-full-form .approved-card-remarks textarea {
     height: auto !important;
     min-height: 100px !important;
