@@ -2,6 +2,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { classifyFiles } from './verification-scope-gate.mjs';
 
 const SHA_RE = /^[0-9a-f]{40}$/;
 const SHA256_RE = /^[0-9a-f]{64}$/;
@@ -9,14 +10,15 @@ const KIND = 'VERIFICATION_EVIDENCE_V1';
 const MODES = new Set(['issue', 'verify']);
 const PROFILES = new Set([
   'DOCS_ONLY', 'GOVERNANCE_ONLY', 'FRONTEND_ONLY', 'BACKEND_ONLY',
-  'CLI_SCRIPT', 'DB_MIGRATION', 'DEPENDENCY_CHANGE', 'MIXED_RUNTIME', 'UNKNOWN'
+  'CLI_SCRIPT', 'NATIVE_WINDOWS_SECURITY', 'DB_MIGRATION', 'DEPENDENCY_CHANGE', 'MIXED_RUNTIME', 'UNKNOWN'
 ]);
 const SCOPE_DECISIONS = new Set(['PROCEED', 'PROCEED_ESCALATED']);
 const CHECKS = new Set([
   'DIFF_HYGIENE', 'DOCS_CONSISTENCY', 'TARGETED_SELFTEST', 'FORMAT', 'LINT',
   'TYPECHECK', 'TARGETED_FRONTEND_TEST', 'FRONTEND_BUILD', 'FRONTEND_FULL_TEST',
   'TARGETED_BACKEND_TEST', 'BACKEND_BUILD', 'BACKEND_FULL_TEST', 'MIGRATION_TEST',
-  'DEPENDENCY_AUDIT', 'REAL_DEVICE_OBJECTIVE', 'FULL_REPOSITORY_SUITE'
+  'DEPENDENCY_AUDIT', 'REAL_DEVICE_OBJECTIVE', 'NATIVE_STATIC_AUDIT',
+  'NATIVE_BUILD_TEST', 'INDEPENDENT_SECURITY_REVIEW', 'FULL_REPOSITORY_SUITE'
 ]);
 const EVIDENCE_SOURCES = new Set(['local', 'remote', 'github-api', 'connector', 'device', 'provider']);
 
@@ -82,9 +84,16 @@ export function issueReceipt(input) {
   const changedFiles = normalizeFiles(input.changedFiles);
   const plannedChecks = normalizeChecks(input.plannedChecks);
   if (!changedFiles) return fail('INVALID_CHANGED_FILES');
+  if (classifyFiles(changedFiles).profile !== input.profile) return fail('PROFILE_FILE_SCOPE_MISMATCH');
   if (!plannedChecks) return fail('INVALID_PLANNED_CHECKS');
   const results = normalizeResults(input.results, plannedChecks);
   if (!results) return fail('INCOMPLETE_OR_NONPASS_RESULTS');
+  // Native compiler output and an independent reviewer cannot be authenticated
+  // by self-reported success rows. The real issuer belongs to Issue #342.
+  // Until then a caller-crafted SHA/row MUST NOT mint a merge-ready receipt.
+  if (input.profile === 'NATIVE_WINDOWS_SECURITY') {
+    return fail('NATIVE_SECURITY_EVIDENCE_NOT_AUTHENTICATED');
+  }
   const canonicalSourceFingerprint = input.canonicalSourceFingerprint ?? null;
   if (canonicalSourceFingerprint !== null && !SHA256_RE.test(canonicalSourceFingerprint)) return fail('INVALID_CANONICAL_SOURCE_FINGERPRINT');
 
@@ -108,6 +117,8 @@ function validateReceipt(receipt) {
   if (!receipt || typeof receipt !== 'object' || receipt.schemaVersion !== 1 || receipt.kind !== KIND) {
     return fail('INVALID_RECEIPT_SCHEMA');
   }
+  // Older or caller-forged native receipts do not establish trustworthy evidence.
+  if (receipt.profile === 'NATIVE_WINDOWS_SECURITY') return fail('NATIVE_SECURITY_EVIDENCE_NOT_AUTHENTICATED');
   if (!SHA_RE.test(receipt.baseSha ?? '') || !SHA_RE.test(receipt.headSha ?? '')) return fail('INVALID_RECEIPT_SHA');
   if (!PROFILES.has(receipt.profile) || receipt.profile === 'UNKNOWN' || !SCOPE_DECISIONS.has(receipt.scopeDecision)) return fail('INVALID_RECEIPT_SCOPE');
   const changedFiles = normalizeFiles(receipt.changedFiles);
@@ -131,6 +142,7 @@ function validateReceipt(receipt) {
   };
   const expected = digestReceiptCore(core);
   if (receipt.receiptId !== expected) return fail('RECEIPT_TAMPERED');
+  if (classifyFiles(changedFiles).profile !== receipt.profile) return fail('RECEIPT_PROFILE_FILE_SCOPE_MISMATCH');
   return { pass: true, core, receiptId: expected };
 }
 

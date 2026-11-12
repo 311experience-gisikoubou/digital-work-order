@@ -255,6 +255,22 @@ node .agents/skills/preflight-audit/implementation-route-receipt.mjs --input <fi
 - Direct-browser implementation has no runner-generated change-set proof and is accepted only through the existing closed exception vocabulary (`HUMAN_EXPLICIT_DIRECT`, `TRIVIAL_SAFE_LOCAL_EDIT`, or `NO_QUALIFIED_EXECUTOR_LOWER_RISK_DIRECT`) with explicit justification/evidence. The exception does **not** bypass Instruction Clarity; both conditions are required.
 - This receiving-side gate does not claim universal interception of browser turn start. It ensures that source implementation cannot become merge-ready without the required clarity evidence and, for qualified-agent routes, exact execution evidence. It does not change merge-authorization semantics.
 
+For the whole seven-file final provenance of this canonical-wrapper change, three conjunctive, independently issued pieces of evidence are required together, not any one alone:
+
+- (B) the existing qualified-commit implementation-route receipt already issued for the exact qualified commit range;
+- this commit's `verifyCanonicalWrapperMetadataSuffix` single-line `B..C` canonical-wrapper suffix proof; and
+- (C) the existing, separately issued final direct `TRIVIAL_SAFE_LOCAL_EDIT` receipt for the exact final commit.
+
+The new suffix proof only confirms that the `B..C` suffix is the one narrow, canonical-matching wrapper-description edit; it never substitutes for either receipt and never by itself authorizes `MERGE_READY`. Independent review, the exact final-state test results, Draft Lock Mode, and explicit user-specific merge approval remain separately required. Never synthesize or assume any of these three receipts, and never bypass an existing `STOP` result to manufacture one.
+
+For that same proved `A->B` qualified / `B->C` canonical-wrapper case only, the three receipts above may instead be verified together in one call:
+
+```text
+node .agents/skills/preflight-audit/qualified-commit-receipt-audit.mjs --lineage-input <existing receipts JSON> --repo-root <repo> --expect-owner <owner> --expect-name <repo-name> --expect-branch <branch> --expect-base <A> --expect-head <C>
+```
+
+A `ROUTE_LINEAGE_VERIFIED_NOT_MERGE_AUTHORIZATION` result is an allowed special receiving-side route-provenance alternative to a single exact-HEAD qualified receipt, and only for this exact proved case. It is never a waiver of source review, `test-gate`, the native issuer, CI, Draft Lock, or human merge authorization, and it never claims `MERGE_READY` by itself.
+
 ### Final Reality Check Gate
 
 `FINAL_REALITY_CHECK_REQUIRED=YES`
