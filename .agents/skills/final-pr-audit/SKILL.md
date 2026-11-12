@@ -255,6 +255,22 @@ node .agents/skills/preflight-audit/implementation-route-receipt.mjs --input <fi
 - Direct-browser implementation has no runner-generated change-set proof and is accepted only through the existing closed exception vocabulary (`HUMAN_EXPLICIT_DIRECT`, `TRIVIAL_SAFE_LOCAL_EDIT`, or `NO_QUALIFIED_EXECUTOR_LOWER_RISK_DIRECT`) with explicit justification/evidence. The exception does **not** bypass Instruction Clarity; both conditions are required.
 - This receiving-side gate does not claim universal interception of browser turn start. It ensures that source implementation cannot become merge-ready without the required clarity evidence and, for qualified-agent routes, exact execution evidence. It does not change merge-authorization semantics.
 
+For the whole seven-file final provenance of this canonical-wrapper change, three conjunctive, independently issued pieces of evidence are required together, not any one alone:
+
+- (B) the existing qualified-commit implementation-route receipt already issued for the exact qualified commit range;
+- this commit's `verifyCanonicalWrapperMetadataSuffix` single-line `B..C` canonical-wrapper suffix proof; and
+- (C) the existing, separately issued final direct `TRIVIAL_SAFE_LOCAL_EDIT` receipt for the exact final commit.
+
+The new suffix proof only confirms that the `B..C` suffix is the one narrow, canonical-matching wrapper-description edit; it never substitutes for either receipt and never by itself authorizes `MERGE_READY`. Independent review, the exact final-state test results, Draft Lock Mode, and explicit user-specific merge approval remain separately required. Never synthesize or assume any of these three receipts, and never bypass an existing `STOP` result to manufacture one.
+
+For that same proved `A->B` qualified / `B->C` canonical-wrapper case only, the three receipts above may instead be verified together in one call:
+
+```text
+node .agents/skills/preflight-audit/qualified-commit-receipt-audit.mjs --lineage-input <existing receipts JSON> --repo-root <repo> --expect-owner <owner> --expect-name <repo-name> --expect-branch <branch> --expect-base <A> --expect-head <C>
+```
+
+A `ROUTE_LINEAGE_VERIFIED_NOT_MERGE_AUTHORIZATION` result is an allowed special receiving-side route-provenance alternative to a single exact-HEAD qualified receipt, and only for this exact proved case. It is never a waiver of source review, `test-gate`, the native issuer, CI, Draft Lock, or human merge authorization, and it never claims `MERGE_READY` by itself.
+
 ### Final Reality Check Gate
 
 `FINAL_REALITY_CHECK_REQUIRED=YES`
@@ -284,7 +300,7 @@ CANONICAL_TARGET=<slot>=<artifact-id>
 SUPERSEDED_SPEC_USED=NO
 ```
 
-A Functional Gate PASS never overrides Contract Gate FAIL. Missing/ambiguous CURRENT authority, use of a SUPERSEDED/HISTORICAL/DRAFT spec, a cross-project contract, or an implementation target different from the CURRENT artifact is a merge blocker. Normal Contract PASS adds no human confirmation.
+A Functional Gate PASS never overrides Contract Gate FAIL. Missing/ambiguous CURRENT authority, use of a SUPERSEDED/HISTORICAL/DRAFT spec, a cross-project contract, or an implementation target different from the CURRENT artifact is a merge blocker. When the audited target selection or `usedSpecIds` includes a CURRENT `kind: DESIGN` artifact whose `visual.baseline` is `REFERENCE_IMAGE`, the work state's `taskTypes` must be present and include `UI_REFERENCE_REPRODUCTION`; `UI_REFERENCE_REPRODUCTION_CLASSIFICATION_REQUIRED` (omitted) and `UI_REFERENCE_REPRODUCTION_MISCLASSIFIED` (e.g. declared plain `UI`) are merge blockers regardless of Functional Gate result, so a passing headless/functional screenshot can never stand in for the required approved-reference reproduction evidence above. Normal Contract PASS adds no human confirmation.
 
 When `human-decision-sync` is required, also run `.agents/skills/handoff/human-decision-sync.mjs` against the exact current HEAD `PROJECT_CONTEXT.json` and the decision IDs actually relied on by the audited change. `DECISION_CONFLICT`, `PROPOSED_DECISION_USED`, `UNRESOLVED_DECISION_USED`, missing required decision state, or human-decision worktree drift is a merge blocker. A confirmed decision may bind a canonical artifact only while that artifact remains CURRENT.
 

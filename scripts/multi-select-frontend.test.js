@@ -63,9 +63,11 @@ function loadPdf() {
 
 test('collectFormData stores all active clasp/bar values and derives legacy scalar from the first value', () => {
   assert.ok(appSource.includes('function getToggleVals(group)'));
-  assert.ok(appSource.includes("const claspTypes = ins === 'insurance' ? getToggleVals('clasp-ins')"));
+  assert.ok(appSource.includes('const claspTypes = document.getElementById(`chk-clasp-${insKey}`)?.checked'));
+  assert.ok(appSource.includes('? getToggleVals(`clasp-${insKey}`) : [];'));
   assert.ok(appSource.includes('const claspType = claspTypes[0] ?? null;'));
-  assert.ok(appSource.includes("const barTypes = ins === 'insurance' ? getToggleVals('bar-ins')"));
+  assert.ok(appSource.includes('const barTypes = document.getElementById(`chk-bar-${insKey}`)?.checked'));
+  assert.ok(appSource.includes('? getToggleVals(`bar-${insKey}`) : [];'));
   assert.ok(appSource.includes('const barType = barTypes[0] ?? null;'));
   assert.ok(appSource.includes('claspTypes,'));
   assert.ok(appSource.includes('barTypes,'));

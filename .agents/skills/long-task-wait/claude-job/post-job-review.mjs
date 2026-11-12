@@ -92,14 +92,14 @@ const MAX_DIFF_BYTES = 48 * 1024;
 const MAX_AUDIT_PROMPT_BYTES = 64 * 1024;
 const MAX_TEST_LOG_READ_BYTES = 1024 * 1024;
 const MAX_JSON_EVIDENCE_BYTES = 1024 * 1024;
-const AUDIT_TIMEOUT_MIN_MS = 60000;
+const AUDIT_TIMEOUT_MIN_MS = 120000;
 const AUDIT_TIMEOUT_MAX_MS = 300000;
 const AUDIT_TIMEOUT_FREE_BYTES = 10 * 1024;
 const AUDIT_TIMEOUT_MS_PER_EXTRA_BYTE = 8;
 
 // Deterministic, monotonic audit time budget (Issue #332): derived from the
 // original FULL verified diff.bytes so an independent reviewer gets a
-// feasible read window rather than always the 60s default. A caller-supplied
+// feasible read window rather than always the 120s default. A caller-supplied
 // timeoutMs (injected API only; no CLI flag) is honored but still clamped
 // into the same bound, never trusted to exceed it.
 export function computeAuditTimeoutMs(diffBytes, suppliedTimeoutMs) {

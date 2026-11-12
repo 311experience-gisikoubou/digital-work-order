@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { evaluate, classifyFiles } from './verification-scope-gate.mjs';
+import { issueReceipt } from './verification-evidence-receipt.mjs';
 
 const GATE_CLI_PATH = fileURLToPath(new URL('./verification-scope-gate.mjs', import.meta.url));
 
@@ -22,8 +23,62 @@ assert.equal(classifyFiles(['.gitignore']).profile, 'GOVERNANCE_ONLY');
 assert.equal(classifyFiles(['src/cli.mjs']).profile, 'CLI_SCRIPT');
 assert.equal(classifyFiles(['src/cli/windows-gui-adapter.mjs']).profile, 'CLI_SCRIPT');
 assert.equal(classifyFiles(['src/cli/windows-gui.ps1']).profile, 'CLI_SCRIPT');
+// Issue #376: native security code must never pass the ordinary CLI gate.
+const nativeFiles = [
+  'src/cli/windows-hello-user-click.cpp',
+  'src/cli/windows-hello-consent-policy.h',
+  'src/cli/build-windows-hello-user-click.ps1',
+];
+for (const file of nativeFiles) {
+  assert.equal(classifyFiles([file]).profile, 'NATIVE_WINDOWS_SECURITY', file);
+}
+assert.equal(classifyFiles(['src/cli/native-helper.cpp']).profile, 'NATIVE_WINDOWS_SECURITY');
+assert.equal(classifyFiles(['src/cli/native-task.ps1']).profile, 'NATIVE_WINDOWS_SECURITY');
+assert.equal(classifyFiles(['src/cli/issue116-session0-task.ps1']).profile, 'NATIVE_WINDOWS_SECURITY');
+assert.equal(classifyFiles(['src/cli/windows-hello-preflight.ps1']).profile, 'NATIVE_WINDOWS_SECURITY');
+assert.equal(classifyFiles(['src/cli/control-panel.ps1']).profile, 'CLI_SCRIPT');
+assert.equal(classifyFiles(['src-tauri/src/windows_hello_auth.rs']).profile, 'NATIVE_WINDOWS_SECURITY');
+assert.equal(classifyFiles(['src/cli/windows-gui.ps1']).profile, 'CLI_SCRIPT');
+assert.equal(classifyFiles(['src/core/local-mcp-admission.mjs']).profile, 'CLI_SCRIPT');
+const pr110Native = classifyFiles([
+  ...nativeFiles,
+  '.agents/skills/test-gate/verification-scope-gate.mjs',
+  '.agents/skills/test-gate/verification-scope-gate-selftest.mjs',
+  'docs/windows-device-trust-enrollment.md',
+  'tests/windows-hello-user-click.test.mjs',
+]);
+assert.equal(pr110Native.profile, 'NATIVE_WINDOWS_SECURITY');
+const nativeStop = evaluate({
+  changedFiles: nativeFiles,
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_SELFTEST']
+});
+assert.equal(nativeStop.decision, 'STOP');
+assert.equal(nativeStop.code, 'REQUIRED_CHECK_MISSING');
+for (const mandatory of ['NATIVE_STATIC_AUDIT', 'NATIVE_BUILD_TEST', 'INDEPENDENT_SECURITY_REVIEW']) {
+  assert(nativeStop.missingMinimumChecks.includes(mandatory), mandatory);
+}
+const nativeReadyForExternalEvidence = evaluate({
+  changedFiles: nativeFiles,
+  plannedChecks: [
+    'DIFF_HYGIENE', 'NATIVE_STATIC_AUDIT', 'NATIVE_BUILD_TEST',
+    'INDEPENDENT_SECURITY_REVIEW'
+  ],
+});
+assert.equal(nativeReadyForExternalEvidence.profile, 'NATIVE_WINDOWS_SECURITY');
+assert.equal(nativeReadyForExternalEvidence.decision, 'PROCEED');
+// PROCEED is only scope-planning acceptance, not a native verification receipt.
+assert.equal(evaluate({
+  changedFiles: ['src/cli/windows-hello-user-click.cpp'],
+  plannedChecks: ['DIFF_HYGIENE', 'NATIVE_STATIC_AUDIT']
+}).code, 'REQUIRED_CHECK_MISSING');
+assert.equal(evaluate({
+  changedFiles: ['src/cli/windows-gui.ps1'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_SELFTEST', 'NATIVE_BUILD_TEST']
+}).code, 'EXCESSIVE_CHECKS_UNJUSTIFIED');
+
 assert.equal(classifyFiles(['src/gui/windows-gui.ps1']).profile, 'UNKNOWN');
-// AI Job Poller PowerShell scripts and their dedicated tests are CLI; unrelated scripts stay unknown.
+// Only the two reviewed AI Job Poller scripts (poll-once.ps1 and its
+// dedicated tests/ selftest) are CLI; unrelated/nested scripts stay unknown.
 assert.equal(classifyFiles(['scripts/ai-job-poller/poll-once.ps1']).profile, 'CLI_SCRIPT');
 assert.equal(classifyFiles(['scripts/ai-job-poller/tests/poller-windows-selftest.ps1']).profile, 'CLI_SCRIPT');
 assert.equal(classifyFiles(['scripts/ai-job-poller/poll-once.ps1','scripts/ai-job-poller/tests/poller-windows-selftest.ps1']).profile, 'CLI_SCRIPT');
@@ -38,6 +93,121 @@ aiPollerGate=evaluate({changedFiles:aiPollerFiles,plannedChecks:['DIFF_HYGIENE',
 assert.equal(aiPollerGate.code, 'EXCESSIVE_CHECKS_UNJUSTIFIED');
 aiPollerGate=evaluate({changedFiles:['scripts/ai-job-poller/nested/poll.ps1'],plannedChecks:['DIFF_HYGIENE']});
 assert.equal(aiPollerGate.code, 'CHANGE_SCOPE_UNKNOWN');
+
+// Issue #376 repair: every top-level scripts/ai-job-poller/*.ps1 script
+// defaults to NATIVE_WINDOWS_SECURITY (fail-closed), because any such
+// script can perform the same native Windows Task Scheduler registration
+// as install-poller-task.ps1 (New-ScheduledTaskPrincipal /
+// Register-ScheduledTask). Only the two explicitly reviewed non-security
+// scripts (poll-once.ps1 and tests/poller-windows-selftest.ps1) are exempt.
+// This replaces a prior narrow "install"+"task" basename-segment matcher
+// that missed naming variants such as register-poller-task.ps1 and
+// task-register.ps1, incorrectly leaving them CLI_SCRIPT.
+for (const file of [
+  'scripts/ai-job-poller/install-poller-task.ps1',
+  'scripts/ai-job-poller/register-poller-task.ps1',
+  'scripts/ai-job-poller/task-register.ps1',
+  'scripts/ai-job-poller/some-brand-new-script.ps1',
+]) {
+  assert.equal(classifyFiles([file]).profile, 'NATIVE_WINDOWS_SECURITY', file);
+
+  // A TARGETED_SELFTEST-only plan (the ordinary CLI minimum) is insufficient
+  // for any top-level poller script and must STOP, requiring all three
+  // mandatory native checks.
+  const targetedOnlyStop = evaluate({
+    changedFiles: [file],
+    plannedChecks: ['DIFF_HYGIENE', 'TARGETED_SELFTEST'],
+  });
+  assert.equal(targetedOnlyStop.profile, 'NATIVE_WINDOWS_SECURITY', file);
+  assert.equal(targetedOnlyStop.decision, 'STOP', file);
+  assert.equal(targetedOnlyStop.code, 'REQUIRED_CHECK_MISSING', file);
+  for (const mandatory of ['NATIVE_STATIC_AUDIT', 'NATIVE_BUILD_TEST', 'INDEPENDENT_SECURITY_REVIEW']) {
+    assert(targetedOnlyStop.missingMinimumChecks.includes(mandatory), `${file} ${mandatory}`);
+  }
+
+  // With all three mandatory native checks planned, scope-planning PROCEED
+  // is possible (this is not a native verification receipt; see Issue #342).
+  const allNativeChecksProceed = evaluate({
+    changedFiles: [file],
+    plannedChecks: ['DIFF_HYGIENE', 'NATIVE_STATIC_AUDIT', 'NATIVE_BUILD_TEST', 'INDEPENDENT_SECURITY_REVIEW'],
+  });
+  assert.equal(allNativeChecksProceed.profile, 'NATIVE_WINDOWS_SECURITY', file);
+  assert.equal(allNativeChecksProceed.decision, 'PROCEED', file);
+}
+// Unaffected ordinary poller CLI (poll-once.ps1 and its dedicated test)
+// remain CLI_SCRIPT, unchanged by this repair.
+assert.equal(classifyFiles(['scripts/ai-job-poller/poll-once.ps1']).profile, 'CLI_SCRIPT');
+assert.equal(classifyFiles(['scripts/ai-job-poller/tests/poller-windows-selftest.ps1']).profile, 'CLI_SCRIPT');
+// Nested nested poller paths other than the one reviewed tests/ selftest
+// remain UNKNOWN (fail-closed), not swept into NATIVE_WINDOWS_SECURITY.
+assert.equal(classifyFiles(['scripts/ai-job-poller/nested/poll.ps1']).profile, 'UNKNOWN');
+assert.equal(classifyFiles(['scripts/ai-job-poller/tests/other-unreviewed.ps1']).profile, 'UNKNOWN');
+// Unaffected native Hello case and src/cli reviewed exceptions remain correct.
+assert.equal(classifyFiles(['src/cli/windows-hello-user-click.cpp']).profile, 'NATIVE_WINDOWS_SECURITY');
+assert.equal(classifyFiles(['src/cli/windows-gui.ps1']).profile, 'CLI_SCRIPT');
+assert.equal(classifyFiles(['src/cli/control-panel.ps1']).profile, 'CLI_SCRIPT');
+
+// Issue #376: the existing native Job proof toolchain must never fall
+// back to generic CLI, including when a proof parser/test changes alone.
+const nativeProofPaths = [
+  'tools/issue66-native-job-e2e.mjs',
+  'tools/issue66-native-build.mjs',
+  'tools/issue66-tap-result.mjs',
+  'tests/issue66-native-job-driver.test.mjs',
+  'tests/windows-hello-native-job.test.mjs',
+];
+const nativeProofChecks = [
+  'DIFF_HYGIENE', 'TARGETED_SELFTEST', 'NATIVE_STATIC_AUDIT',
+  'NATIVE_BUILD_TEST', 'INDEPENDENT_SECURITY_REVIEW',
+];
+for (const file of nativeProofPaths) {
+  const files = [file];
+  const classification = classifyFiles(files);
+  assert.equal(classification.profile, 'NATIVE_WINDOWS_SECURITY', file);
+  assert.equal(classification.flags.nativeVerification, true, file);
+  assert.equal(classification.flags.cli, false, file);
+  assert.equal(evaluate({ changedFiles: files, plannedChecks: nativeProofChecks }).decision, 'PROCEED', file);
+  for (const missing of nativeProofChecks) {
+    const result = evaluate({ changedFiles: files, plannedChecks: nativeProofChecks.filter(check => check !== missing) });
+    assert.equal(result.decision, 'STOP', file + ' missing ' + missing);
+    assert.equal(result.code, 'REQUIRED_CHECK_MISSING');
+    assert(result.missingMinimumChecks.includes(missing), missing);
+  }
+  // Scope planning is not trusted native execution evidence.
+  const input = {
+    schemaVersion: 1, mode: 'issue', baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40),
+    changedFiles: files, profile: 'NATIVE_WINDOWS_SECURITY', scopeDecision: 'PROCEED',
+    plannedChecks: nativeProofChecks,
+    results: nativeProofChecks.map(check => ({ check, status: 'success', evidenceSource: 'local' })),
+  };
+  assert.equal(issueReceipt(input).code, 'NATIVE_SECURITY_EVIDENCE_NOT_AUTHENTICATED', file);
+  const ordinaryChecks = ['DIFF_HYGIENE', 'TARGETED_SELFTEST'];
+  assert.equal(issueReceipt({
+    ...input, profile: 'CLI_SCRIPT', plannedChecks: ordinaryChecks,
+    results: ordinaryChecks.map(check => ({ check, status: 'success', evidenceSource: 'local' })),
+  }).code, 'PROFILE_FILE_SCOPE_MISMATCH', file);
+}
+assert.equal(classifyFiles(['TOOLS/ISSUE66-TAP-RESULT.MJS']).profile, 'NATIVE_WINDOWS_SECURITY');
+// The exact five files in the pending LocalOps #116 source change.
+const localOps116Files = [
+  'tools/issue66-native-job-e2e.mjs', 'tools/issue66-tap-result.mjs',
+  'tests/issue66-native-job-driver.test.mjs', 'tests/windows-hello-native-job.test.mjs',
+  'docs/issue116-session0-one-lane-runbook.md',
+];
+const localOps116Checks = [...nativeProofChecks, 'DOCS_CONSISTENCY'];
+const localOps116Scope = evaluate({ changedFiles: localOps116Files, plannedChecks: localOps116Checks });
+assert.equal(localOps116Scope.profile, 'NATIVE_WINDOWS_SECURITY');
+assert.equal(localOps116Scope.decision, 'PROCEED');
+for (const missing of localOps116Checks) {
+  const result = evaluate({ changedFiles: localOps116Files, plannedChecks: localOps116Checks.filter(check => check !== missing) });
+  assert.equal(result.code, 'REQUIRED_CHECK_MISSING', missing);
+  assert(result.missingMinimumChecks.includes(missing), missing);
+}
+for (const unknown of ['tools/issue66-native-job-e2e-copy.mjs', 'tools/issue67-native-job-e2e.mjs', 'tools/cleanup.mjs']) {
+  assert.equal(classifyFiles([unknown]).profile, 'UNKNOWN', unknown);
+  assert.equal(evaluate({ changedFiles: [...localOps116Files, unknown], plannedChecks: localOps116Checks }).code, 'CHANGE_SCOPE_UNKNOWN', unknown);
+}
+assert.equal(classifyFiles(['tests/core.test.mjs']).profile, 'CLI_SCRIPT');
 
 assert.equal(classifyFiles(['src/core/audit-log.mjs']).profile, 'CLI_SCRIPT');
 assert.equal(classifyFiles(['src/transport/mcp-server.mjs']).profile, 'CLI_SCRIPT');

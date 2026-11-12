@@ -1,6 +1,6 @@
 ---
 name: local-ai-handoff
-description: Use when handing off state, audit results, or next instructions between local AI CLIs on the same PC (Claude Code and Codex CLI in V1), so the human does not have to copy and paste between them. Also covers Japanese requests such as Claudeからcodexへ引き継ぎ, ローカルhandoff, codexに渡す, or codexの結果をclaudeへ. Does not apply to the browser-based ChatGPT/GPT, which has no local file access and continues to use the existing [AI_HANDOFF] GitHub PR-comment channel (see OPERATIONS.md); do not invent a new GPT-specific handoff format.
+description: Use when handing off state, audit results, or next instructions between local AI CLIs on the same PC (Claude Code and Codex CLI in V1), so the human does not have to copy and paste between them. Also covers Japanese requests such as Claudeからcodexへ引き継ぎ, ローカルhandoff, codexに渡す, or codexの結果をclaudeへ. Does not apply to the browser-based ChatGPT/GPT, which is not a local CLI participant in this protocol; for ordinary handoff it uses existing local state and read-only current GitHub source (an authorized local read-only bridge such as Remote Desktop Commander when available, otherwise already-readable canonical repository state) and never creates a GitHub PR comment just to notify other chats or report progress. The [AI_HANDOFF] GitHub PR-comment channel (see OPERATIONS.md) stays reserved for the official final PR audit result and mandatory merge-authorization receipts; do not invent a new GPT-specific handoff format and do not weaken that audit channel.
 ---
 
 # Local AI Handoff (V1: Claude ↔ Codex)
@@ -11,7 +11,7 @@ Use this skill to pass state, audit results, and next-step instructions between 
 
 - **Claude ↔ Codex**: in scope. Both run locally against the same repository and can read/write local files.
 - **Gemini / Antigravity**: not wired into the default flow in V1. `antigravity chat --mode agent <prompt>` exists and can read local files, so this skill's file protocol is written to extend to it later, but nothing in V1 invokes it automatically. Do not add Gemini to the live routing without an explicit decision to do so.
-- **GPT (browser)**: out of scope for this skill entirely. GPT has no local file access. Continue using the existing `[AI_HANDOFF]` GitHub PR-comment convention (`OPERATIONS.md`) for anything GPT needs to see. Do not create a parallel GPT-specific local format.
+- **GPT (browser)**: not a local CLI participant, so this skill's file-based protocol does not apply to it. For ordinary handoff, GPT uses existing local state and read-only current GitHub source — an authorized local read-only bridge such as Remote Desktop Commander when available, otherwise already-readable canonical repository state — and never creates a GitHub PR comment just to notify other chats or report progress. The official final PR audit result and mandatory merge-authorization receipts still use the `[AI_HANDOFF]` GitHub PR-comment convention (`OPERATIONS.md`); that channel is unchanged and not weakened by this note. Do not create a parallel GPT-specific local format.
 
 ## Runtime Layout (per application repository)
 
@@ -49,7 +49,7 @@ Every message additionally requires four fields, each on its own bullet line so 
 - branch: `<the branch checked out at the moment this message was written>`
 ```
 
-These four fields are local to this file-based protocol; they are unrelated to (and do not need to match the field names of) the `[AI_HANDOFF]` GitHub PR-comment convention, which is a separate channel for GPT. `message_id` only needs to be unique within this repository's `.ai-handoff/runtime/` tree. `repository` must be the canonical `owner/repo` form, matched against the actual repository derived from `git remote get-url origin` (HTTPS or SSH, with or without a trailing `.git`) — not from a folder name, and not the bare repo name alone, since two different owners can have same-named repositories. `branch` and `head_sha` are what "Automated Guards" below compares against the repository's actual state at validation time.
+These four fields are local to this file-based protocol; they are unrelated to (and do not need to match the field names of) the `[AI_HANDOFF]` GitHub PR-comment convention, which is reserved for the official final PR audit result and mandatory merge-authorization receipts (`OPERATIONS.md`, `final-pr-audit`), not a routine-notification channel for GPT. `message_id` only needs to be unique within this repository's `.ai-handoff/runtime/` tree. `repository` must be the canonical `owner/repo` form, matched against the actual repository derived from `git remote get-url origin` (HTTPS or SSH, with or without a trailing `.git`) — not from a folder name, and not the bare repo name alone, since two different owners can have same-named repositories. `branch` and `head_sha` are what "Automated Guards" below compares against the repository's actual state at validation time.
 
 ## Automated Guards (V2 / V2.1)
 
