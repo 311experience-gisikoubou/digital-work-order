@@ -8,9 +8,46 @@ function testHookSource(source){
   assert.doesNotMatch(source,/D2TrialTestHooks/);
   const marker="document.getElementById('pair').onclick=";
   assert.equal(source.split(marker).length,2);
-  return source.replace(marker,'globalThis.D2TrialTestHooks=Object.freeze({validState,isSandboxOrigin,bridgeCall});'+marker);
+  return source.replace(marker,'globalThis.D2TrialTestHooks=Object.freeze({validState,isSandboxOrigin,bridgeCall,buildJobBody,claimPendingJob,markAccepted,queryStatus,attemptUpload,send,pair,withBusy,getState,putState});'+marker);
 }
 const h = bytes => createHash('sha256').update(bytes).digest('hex'); const REF = 'dwo:123e4567-e89b-42d3-a456-426614174000';
+const SANDBOX_ORIGIN='https://n-bcp4qzdfuoczg3utczw3uytot2wyafcdo5lfkuq-0lu-script.googleusercontent.com';
+function fakeTimers(){let nextId=1;const timers=new Map();return{setTimeout(fn,delay){const id=nextId++;timers.set(id,{fn,delay,cleared:false});return id;},clearTimeout(id){const t=timers.get(id);if(t)t.cleared=true;},fire(id){const t=timers.get(id);if(t&&!t.cleared)t.fn();},entries(){return[...timers.entries()];}};}
+// Minimal synthetic IndexedDB double: a single object store, serialized readwrite/readonly transactions
+// (FIFO per call to transaction()), supporting the exact get/put-inside-onsuccess pattern this file's
+// production code uses (never a general-purpose IndexedDB implementation).
+function makeFakeIndexedDB(){
+  const data=new Map();let queueTail=Promise.resolve();
+  const db={close(){},transaction(){const tx={oncomplete:null,onerror:null,_pending:0,_committed:false};const myTurn=queueTail;let advance;queueTail=new Promise(res=>{advance=res;});function scheduleCheck(){queueMicrotask(()=>{if(tx._pending===0&&!tx._committed){tx._committed=true;if(tx.oncomplete)tx.oncomplete();advance();}});}function op(run){const req={result:undefined,onsuccess:null,onerror:null};tx._pending++;myTurn.then(()=>queueMicrotask(()=>{try{req.result=run();}catch(err){tx._pending--;if(req.onerror)req.onerror();scheduleCheck();return;}tx._pending--;if(req.onsuccess)req.onsuccess();scheduleCheck();}));return req;}const store={get(key){return op(()=>data.get(key));},put(value){return op(()=>{data.set(value.id,value);return value;});}};tx.objectStore=()=>store;return tx;}};
+  return{open(){const req={result:db,onsuccess:null,onerror:null};queueMicrotask(()=>{if(req.onsuccess)req.onsuccess();});return req;},seed(value){data.set(value.id,value);},peek(id){return data.get(id);}};
+}
+function readChannel(nodes){return new URL(nodes['relay-bridge'].src).searchParams.get('channel');}
+function driveRound(ctx,ok,value){const channel=readChannel(ctx.nodes),source={postMessage(){}};ctx.getOnMessage()({origin:SANDBOX_ORIGIN,source,data:{version:'dwo-d2-bridge-v1',channel,type:'ready'}});ctx.getOnMessage()({origin:SANDBOX_ORIGIN,source,data:{version:'dwo-d2-bridge-v1',channel,type:'result',ok,value}});return channel;}
+// Polls (real timers, not just microtasks) because production code performs genuine async
+// crypto.subtle digests before the next bridge round starts; a single microtask flush is not
+// reliable for that step.
+async function waitForSrcChange(ctx,previousSrc){
+  for(let i=0;i<2000;i++){
+    const src=ctx.nodes['relay-bridge'].src;
+    if(src&&src!==previousSrc)return src;
+    await new Promise(r=>setTimeout(r,1));
+  }
+  throw new Error('D2_TEST_BRIDGE_ROUND_TIMEOUT');
+}
+async function driveNextRound(ctx,previousSrc,ok,value){const src=await waitForSrcChange(ctx,previousSrc);driveRound(ctx,ok,value);return src;}
+function fakeMediaModules(){let n=0;return{MediaTransferPackage:{buildPackage:async()=>({})},MediaTransferCrypto:{encryptPackage:async()=>({})},MediaRelayTransport:{buildCreateRequest:async()=>{const descriptorSha256=h('synthetic-sender-candidate-'+(n++));return{request:{envelopeHeader:{descriptorSha256},plan:{version:'dwo-relay-plan-v1',totalBytes:16,entries:[{},{},{}]}},parts:[0,1,2].map(i=>({blob:{arrayBuffer:async()=>new Uint8Array([i+1,i+1,i+1,i+1]).buffer}}))};},canonicalJson:v=>JSON.stringify(v)},MediaReceiverBootstrap:{}};}
+function buildSenderSandbox({indexedDB,bridge='https://script.google.com/macros/s/ABC_123/exec',timers}={}){
+  const nodes={status:{},'relay-bridge':{src:''},pair:{},send:{}};let onMessage=null;
+  const fakeWindow={addEventListener:(type,fn)=>{if(type==='message')onMessage=fn;},removeEventListener:(type,fn)=>{if(type==='message'&&onMessage===fn)onMessage=null;}};
+  const media=fakeMediaModules();
+  const sandbox={CryptoKey:globalThis.CryptoKey,crypto:webcrypto,btoa:s=>Buffer.from(s,'binary').toString('base64'),Blob:class{constructor(parts){this._parts=parts;}},Uint8Array,Date,document:{getElementById:id=>nodes[id]},window:fakeWindow,location:{href:'https://311experience-gisikoubou.github.io/digital-work-order/app/drive-relay-d2-trial.html?bridge='+encodeURIComponent(bridge)},URL,TextEncoder,indexedDB,isSecureContext:true,Error,Array,Number,Object,Promise,setTimeout:timers?timers.setTimeout:(()=>1),clearTimeout:timers?timers.clearTimeout:(()=>{}),MediaTransferPackage:media.MediaTransferPackage,MediaTransferCrypto:media.MediaTransferCrypto,MediaRelayTransport:media.MediaRelayTransport,MediaReceiverBootstrap:media.MediaReceiverBootstrap,globalThis:null};
+  sandbox.globalThis=sandbox;
+  return{sandbox,nodes,getOnMessage:()=>onMessage};
+}
+async function makeSenderState(overrides={}){
+  const key=await webcrypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},false,['sign']);
+  return{id:'sender',version:2,clinicDeviceId:'dev_test',signingKeyId:'sk_test',signingPrivateKey:key.privateKey,signingPublicJwk:{kty:'EC',crv:'P-256',x:'x'.repeat(43),y:'y'.repeat(43)},uploadBearer:'A'.repeat(43),paired:true,recipientKeyId:'rk_receiver',recipientPublicJwk:{kty:'EC',crv:'P-256',x:'x'.repeat(43),y:'y'.repeat(43)},...overrides};
+}
 test('browser validator executes fail-closed state checks and CSP has only exact Google origins',async()=>{const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8'),html=await fs.readFile(new URL('../app/drive-relay-d2-trial.html',import.meta.url),'utf8');class FakeCryptoKey{constructor(extractable=false,usages=['sign']){this.type='private';this.extractable=extractable;this.algorithm={name:'ECDSA',namedCurve:'P-256'};this.usages=usages;}}const nodes={status:{},'relay-bridge':{},pair:{},send:{}};const sandbox={CryptoKey:FakeCryptoKey,crypto:{getRandomValues:v=>v,subtle:{}},document:{getElementById:id=>nodes[id]},window:{addEventListener(){},removeEventListener(){}},location:{href:'https://example.invalid/'},URL,TextEncoder,indexedDB:{},isSecureContext:true,Error,Array,Number,Object,Promise,setTimeout,clearTimeout,globalThis:null};sandbox.globalThis=sandbox;vm.runInNewContext(testHookSource(source),sandbox);const key=new FakeCryptoKey(),base={id:'sender',version:2,clinicDeviceId:'dev_test',signingKeyId:'sk_test',signingPrivateKey:key,signingPublicJwk:{kty:'EC',crv:'P-256',x:'x'.repeat(43),y:'y'.repeat(43)},uploadBearer:'A'.repeat(43),paired:false},pending={status:'pending',body:{bearer:base.uploadBearer,jobId:'job_'+'a'.repeat(64),descriptorSha256:'a'.repeat(64),ackProofHash:'b'.repeat(64),planSha256:'c'.repeat(64),plan:{version:'dwo-relay-plan-v1',totalBytes:1,entries:[{}]},objects:[{ordinal:0,size:1,ciphertextSha256:'d'.repeat(64),bytes:'AQ'}]}};assert.equal(sandbox.D2TrialTestHooks.validState(base),true);assert.equal(sandbox.D2TrialTestHooks.validState({...base,pendingJob:{...pending,body:{...pending.body,plan:{...pending.body.plan,entries:[]}}}}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,signingPrivateKey:new FakeCryptoKey(true)}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,signingPrivateKey:new FakeCryptoKey(false,['verify'])}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,uploadBearer:'A'.repeat(42)}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,paired:true}),false);assert.match(source,/MediaRelayTransport\.canonicalJson\(built\.request\.plan\)/);assert.match(html,/frame-src https:\/\/script\.google\.com https:\/\/script\.googleusercontent\.com/);assert.doesNotMatch(html,/\*\.googleusercontent/);});
 test('browser bridge accepts only generated Apps Script sandbox origin and pins nested source/origin',async()=>{
   const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
@@ -36,6 +73,147 @@ test('browser bridge accepts only generated Apps Script sandbox origin and pins 
   await Promise.resolve();assert.equal(settled,false);
   onMessage({origin:goodOrigin,source:goodSource,data:{version:'dwo-d2-bridge-v1',channel,type:'result',ok:true,value:{ready:true}}});
   assert.deepEqual(await promise,{ready:true});assert.equal(settled,true);assert.equal(onMessage,null);
+});
+
+test('D2 sender separates a bounded 15s handshake timer from a 60s action timer and succeeds at the exact historical timing',async()=>{
+  // Actual evidence: iframe begins 21:54:02, d2Bridge begins 21:54:04 (ready at +2s) and runs 13.694s
+  // (result at +15.694s). A single 15s timer covering the whole exchange would fail this; the fix must not.
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const nodes={status:{},'relay-bridge':{src:''},pair:{},send:{}};
+  let onMessage=null;
+  const fakeWindow={addEventListener:(type,fn)=>{if(type==='message')onMessage=fn;},removeEventListener:(type,fn)=>{if(type==='message'&&onMessage===fn)onMessage=null;}};
+  const bridge='https://script.google.com/macros/s/ABC_123/exec';
+  const timers=fakeTimers();
+  const sandbox={CryptoKey:class{},crypto:{getRandomValues:v=>v,subtle:{}},btoa:s=>Buffer.from(s,'binary').toString('base64'),document:{getElementById:id=>nodes[id]},window:fakeWindow,location:{href:'https://311experience-gisikoubou.github.io/digital-work-order/app/drive-relay-d2-trial.html?bridge='+encodeURIComponent(bridge)},URL,TextEncoder,indexedDB:{},isSecureContext:true,Error,Array,Number,Object,Promise,setTimeout:timers.setTimeout,clearTimeout:timers.clearTimeout,globalThis:null};
+  sandbox.globalThis=sandbox;vm.runInNewContext(testHookSource(source),sandbox);
+  const hooks=sandbox.D2TrialTestHooks;
+  const promise=hooks.bridgeCall('putSyntheticJob',{x:1});
+  const initial=timers.entries();assert.equal(initial.length,1);const[handshakeId,handshakeEntry]=initial[0];assert.equal(handshakeEntry.delay,15000);
+  const channel=new URL(nodes['relay-bridge'].src).searchParams.get('channel'),goodSource={postMessage(){}};
+  onMessage({origin:SANDBOX_ORIGIN,source:goodSource,data:{version:'dwo-d2-bridge-v1',channel,type:'ready'}});
+  assert.equal(timers.entries().find(([id])=>id===handshakeId)[1].cleared,true);
+  const afterReady=timers.entries().filter(([id])=>id!==handshakeId);assert.equal(afterReady.length,1);const[actionId,actionEntry]=afterReady[0];assert.equal(actionEntry.delay,60000);
+  timers.fire(handshakeId);let settled=false;promise.then(()=>{settled=true;},()=>{settled=true;});await Promise.resolve();assert.equal(settled,false,'a cleared handshake timer must never fire');
+  const expected={jobId:'job_'+'a'.repeat(64),status:'ready'};
+  onMessage({origin:SANDBOX_ORIGIN,source:goodSource,data:{version:'dwo-d2-bridge-v1',channel,type:'result',ok:true,value:expected}});
+  assert.deepEqual(await promise,expected);
+  assert.equal(timers.entries().find(([id])=>id===actionId)[1].cleared,true);
+  assert.equal(onMessage,null);
+});
+
+function makeBridgeOnlySandbox(timers){
+  const nodes={status:{},'relay-bridge':{src:''},pair:{},send:{}};let onMessage=null;
+  const fakeWindow={addEventListener:(type,fn)=>{if(type==='message')onMessage=fn;},removeEventListener:(type,fn)=>{if(type==='message'&&onMessage===fn)onMessage=null;}};
+  const bridge='https://script.google.com/macros/s/ABC_123/exec';
+  const sandbox={CryptoKey:class{},crypto:{getRandomValues:v=>v,subtle:{}},btoa:s=>Buffer.from(s,'binary').toString('base64'),document:{getElementById:id=>nodes[id]},window:fakeWindow,location:{href:'https://311experience-gisikoubou.github.io/digital-work-order/app/drive-relay-d2-trial.html?bridge='+encodeURIComponent(bridge)},URL,TextEncoder,indexedDB:{},isSecureContext:true,Error,Array,Number,Object,Promise,setTimeout:timers.setTimeout,clearTimeout:timers.clearTimeout,globalThis:null};
+  sandbox.globalThis=sandbox;
+  return{sandbox,nodes,getOnMessage:()=>onMessage};
+}
+
+test('D2 sender rejects a bounded handshake timeout and a separate action timeout, but never fires either while cleared',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const timers1=fakeTimers(),ctx1=makeBridgeOnlySandbox(timers1);
+  vm.runInNewContext(testHookSource(source),ctx1.sandbox);
+  const p1=ctx1.sandbox.D2TrialTestHooks.bridgeCall('getConfig',{});
+  const[h1]=timers1.entries()[0];timers1.fire(h1);
+  await assert.rejects(p1,{message:'BRIDGE_TIMEOUT'});
+
+  const timers2=fakeTimers(),ctx2=makeBridgeOnlySandbox(timers2);
+  vm.runInNewContext(testHookSource(source),ctx2.sandbox);
+  const p2=ctx2.sandbox.D2TrialTestHooks.bridgeCall('getConfig',{});
+  const[h2]=timers2.entries()[0],channel2=new URL(ctx2.nodes['relay-bridge'].src).searchParams.get('channel'),src2={postMessage(){}};
+  ctx2.getOnMessage()({origin:SANDBOX_ORIGIN,source:src2,data:{version:'dwo-d2-bridge-v1',channel:channel2,type:'ready'}});
+  const[a2]=timers2.entries().filter(([id])=>id!==h2)[0];
+  timers2.fire(a2);
+  await assert.rejects(p2,{message:'BRIDGE_ACTION_TIMEOUT'});
+});
+
+test('D2 sender ignores ready messages with the wrong channel or a non-sandbox origin and leaves the handshake timer armed',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const timers=fakeTimers(),ctx=makeBridgeOnlySandbox(timers);
+  vm.runInNewContext(testHookSource(source),ctx.sandbox);
+  const promise=ctx.sandbox.D2TrialTestHooks.bridgeCall('putSyntheticJob',{});
+  const[handshakeId]=timers.entries()[0],channel=new URL(ctx.nodes['relay-bridge'].src).searchParams.get('channel'),src={postMessage(){}};
+  ctx.getOnMessage()({origin:SANDBOX_ORIGIN,source:src,data:{version:'dwo-d2-bridge-v1',channel:'z'.repeat(24),type:'ready'}});
+  assert.equal(timers.entries().find(([id])=>id===handshakeId)[1].cleared,false);
+  ctx.getOnMessage()({origin:'https://evil.googleusercontent.com',source:src,data:{version:'dwo-d2-bridge-v1',channel,type:'ready'}});
+  assert.equal(timers.entries().find(([id])=>id===handshakeId)[1].cleared,false);
+  ctx.getOnMessage()({origin:SANDBOX_ORIGIN,source:src,data:{version:'dwo-d2-bridge-v1',channel,type:'ready'}});
+  assert.equal(timers.entries().find(([id])=>id===handshakeId)[1].cleared,true);
+  promise.catch(()=>{});
+});
+
+test('D2 sender attemptUpload reconciles a rejected or invalid initial result via exactly one status query',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  async function run(firstOk,firstValue,secondValue,expected){
+    const ctx=buildSenderSandbox({indexedDB:{}});
+    vm.runInNewContext(testHookSource(source),ctx.sandbox);
+    const hooks=ctx.sandbox.D2TrialTestHooks;
+    const body={bearer:'A'.repeat(43),jobId:'job_'+'a'.repeat(64),ackProofHash:'b'.repeat(64),planSha256:'c'.repeat(64)};
+    const p=hooks.attemptUpload(body);
+    const firstSrc=await driveNextRound(ctx,'',firstOk,firstValue);
+    await driveNextRound(ctx,firstSrc,true,secondValue);
+    assert.equal(await p,expected);
+  }
+  // Lost/rejected initial result, status query confirms ready for the same job.
+  await run(false,undefined,{jobId:'job_'+'a'.repeat(64),status:'ready'},true);
+  // Invalid (wrong-job) initial result, status query confirms deleted for the same job.
+  await run(true,{jobId:'job_wrong',status:'ready'},{jobId:'job_'+'a'.repeat(64),status:'deleted'},true);
+  // Rejected initial result, status query reports not-started: unconfirmed, no success claimed.
+  await run(false,undefined,{jobId:'job_'+'a'.repeat(64),status:'not-started'},false);
+  // Rejected initial result, malformed status response: unconfirmed, no success claimed.
+  await run(false,undefined,{bad:'shape'},false);
+});
+
+test('D2 sender retains a pending job on an ambiguous status and queries status before reusing the same body on an explicit retry',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const fakeDB=makeFakeIndexedDB();fakeDB.seed(await makeSenderState());
+  const ctx=buildSenderSandbox({indexedDB:fakeDB});
+  vm.runInNewContext(testHookSource(source),ctx.sandbox);
+  const hooks=ctx.sandbox.D2TrialTestHooks;
+  const firstClick=hooks.send();
+  const round1=await driveNextRound(ctx,'',true,{jobId:'job_'+'z'.repeat(64),status:'ready'}); // wrong jobId -> invalid, triggers status query
+  const round2=await driveNextRound(ctx,round1,true,{bad:'shape'}); // malformed status response -> unconfirmed
+  await firstClick;
+  const afterFirst=fakeDB.peek('sender');
+  assert.equal(afterFirst.pendingJob.status,'pending');
+  const jobId=afterFirst.pendingJob.body.jobId;
+  const secondClick=hooks.send();
+  const round3=await driveNextRound(ctx,round2,true,{jobId,status:'not-started'}); // explicit retry queries status first
+  await driveNextRound(ctx,round3,true,{jobId,status:'ready'}); // then uploads the same existing body
+  await secondClick;
+  const afterSecond=fakeDB.peek('sender');
+  assert.equal(afterSecond.pendingJob.status,'accepted');
+  assert.equal(afterSecond.pendingJob.body.jobId,jobId,'retry must reuse the existing body, never a newly generated one');
+});
+
+test('D2 sender concurrent claim adopts an already-pending job rather than overwriting it with a newly generated body',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const fakeDB=makeFakeIndexedDB(),base=await makeSenderState();
+  const existingBody={bearer:base.uploadBearer,jobId:'job_'+'e'.repeat(64),descriptorSha256:'e'.repeat(64),ackProofHash:'b'.repeat(64),planSha256:'c'.repeat(64),plan:{version:'dwo-relay-plan-v1',totalBytes:3,entries:[{},{},{}]},objects:[0,1,2].map(i=>({ordinal:i,size:1,ciphertextSha256:'d'.repeat(64),bytes:'AQ'}))};
+  fakeDB.seed({...base,pendingJob:{status:'pending',body:existingBody}});
+  const ctx=buildSenderSandbox({indexedDB:fakeDB});
+  vm.runInNewContext(testHookSource(source),ctx.sandbox);
+  const hooks=ctx.sandbox.D2TrialTestHooks;
+  const newBody={...existingBody,jobId:'job_'+'f'.repeat(64),descriptorSha256:'f'.repeat(64)};
+  const result=await hooks.claimPendingJob(newBody);
+  assert.equal(result.pendingJob.body.jobId,existingBody.jobId);
+  assert.equal(fakeDB.peek('sender').pendingJob.body.jobId,existingBody.jobId,'a racing writer must adopt the stored job, never overwrite it');
+});
+
+test('D2 sender guards pair and send against same-page concurrent clicks',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const fakeDB=makeFakeIndexedDB();fakeDB.seed(await makeSenderState());
+  const ctx=buildSenderSandbox({indexedDB:fakeDB});
+  vm.runInNewContext(testHookSource(source),ctx.sandbox);
+  const hooks=ctx.sandbox.D2TrialTestHooks;
+  const first=hooks.withBusy(hooks.send);
+  await assert.rejects(hooks.withBusy(hooks.send),{message:'D2_BUSY'});
+  await waitForSrcChange(ctx,'');
+  const jobId=fakeDB.peek('sender').pendingJob.body.jobId;
+  driveRound(ctx,true,{jobId,status:'ready'});
+  await first;
+  assert.equal(fakeDB.peek('sender').pendingJob.status,'accepted');
 });
 
 async function fixture() { const recipient=await C.generateRecipientIdentity('d2-passphrase',{crypto:webcrypto}); const sender=await C.generateSenderIdentity({crypto:webcrypto}); const offer=await C.createPairingOffer(recipient,{crypto:webcrypto,now:()=>1}); const response=await C.createPairingResponse(offer,sender,{crypto:webcrypto,now:()=>2}); const registry=await C.verifyPairingResponse(offer,response,{crypto:webcrypto,now:()=>3}); const marker='SYNTHETIC_CLINICAL_MARKER_NEVER_IN_RELAY_META'; const pkg=await T.buildPackage(REF,{workOrderRef:REF,trialMarker:marker},[{meta:{attachmentId:'att-123e4567-e89b-42d3-a456-426614174001',kind:'file',mime:'application/octet-stream',size:4},blob:new Blob([Uint8Array.from([1,2,3,4])])}],{crypto:webcrypto,now:()=>4,chunkSize:4}); const envelope=await C.encryptPackage(pkg,sender,recipient,{crypto:webcrypto,now:()=>5}); const built=await R.buildCreateRequest(envelope,sender,{crypto:webcrypto,now:()=>6,recipientPublicInfo:recipient,bootstrapApi:B}); return {recipient,registry,built,marker}; }
@@ -64,6 +242,59 @@ test('gateway VM: ACK auth, deletion resume, and staging deletion preserve unrel
 test('gateway VM: folder-deleted/control-delete interruption resumes and lost ACK response is idempotent',async()=>{const e=await fakeGateway(),b=body(e);e.g.d2Put_(b);const rootFile=e.add(e.root,'keep-after-delete.txt'),issued=control(e,{action:'issueAckCapability',jobId:b.jobId}),controlName='control_'+b.jobId+'.json';e.setFailName(controlName);assert.throws(()=>control(e,{action:'ack',jobId:b.jobId,ackCapability:issued.ackCapability,ackProof:b.ackProofHash}),/D2_DELETE_FAILED/);assert.equal(e.file(e.root,b.jobId),undefined);assert.ok(e.file(e.root,controlName));assert.ok(e.rows.has(rootFile.id));assert.equal(control(e,{action:'ack',jobId:b.jobId,ackCapability:issued.ackCapability,ackProof:b.ackProofHash}).status,'deleted');assert.equal(e.file(e.root,controlName),undefined);assert.throws(()=>control(e,{action:'ack',jobId:b.jobId,ackCapability:'B'.repeat(64),ackProof:b.ackProofHash}),/D2_ACK_INVALID/);assert.throws(()=>control(e,{action:'ack',jobId:b.jobId,ackCapability:issued.ackCapability,ackProof:'0'.repeat(64)}),/D2_ACK_INVALID/);assert.equal(control(e,{action:'ack',jobId:b.jobId,ackCapability:issued.ackCapability,ackProof:b.ackProofHash}).status,'deleted');assert.ok(e.rows.has(rootFile.id));});
 test('gateway VM: nonempty job preserves control and doGet permits only exact parent',async()=>{const e=await fakeGateway(),b=body(e);e.g.d2Put_(b);const job=e.file(e.root,b.jobId),extra=e.add(job,'unrelated.bin');let issued=control(e,{action:'issueAckCapability',jobId:b.jobId});assert.throws(()=>control(e,{action:'ack',jobId:b.jobId,ackCapability:issued.ackCapability,ackProof:'0'.repeat(64)}),/D2_ACK_INVALID/);issued=control(e,{action:'issueAckCapability',jobId:b.jobId});assert.throws(()=>control(e,{action:'ack',jobId:b.jobId,ackCapability:issued.ackCapability,ackProof:b.ackProofHash}),/D2_FOLDER_NOT_EMPTY/);assert.ok(e.file(e.root,'control_'+b.jobId+'.json'));assert.ok(e.rows.has(extra.id));const out=e.g.doGet({parameter:{bridge:'1',channel:'A'.repeat(24)}});assert.equal(out.x,'ALLOWALL');assert.match(out.v,/https:\/\/311experience-gisikoubou\.github\.io/);});
 
+
+test('D2 status: bearer auth and malformed status requests are rejected without any mutation',async()=>{
+ const e=await fakeGateway(),b=body(e);e.g.d2Put_(b);
+ const before=[...e.rows.values()].map(r=>({id:r.id,bytes:r.bytes.toString()})),beforeProps=[...e.props.entries()];
+ assert.throws(()=>e.g.d2Status_({bearer:'wrong',jobId:b.jobId,ackProofHash:b.ackProofHash,planSha256:b.planSha256}),/D2_UPLOAD_AUTH_INVALID/);
+ assert.throws(()=>e.g.d2Status_({bearer:e.upload,jobId:'not-a-job',ackProofHash:b.ackProofHash,planSha256:b.planSha256}),/D2_STATUS_INVALID/);
+ assert.throws(()=>e.g.d2Status_({bearer:e.upload,jobId:b.jobId,ackProofHash:'short',planSha256:b.planSha256}),/D2_STATUS_INVALID/);
+ assert.throws(()=>e.g.d2Status_({bearer:e.upload,jobId:b.jobId,ackProofHash:b.ackProofHash,planSha256:'short'}),/D2_STATUS_INVALID/);
+ assert.deepEqual([...e.rows.values()].map(r=>({id:r.id,bytes:r.bytes.toString()})),before);
+ assert.deepEqual([...e.props.entries()],beforeProps);
+});
+test('D2 status: exact not-started, partial, ready, deleting, and deleted outcomes, with mismatches rejected and no mutation',async()=>{
+ const e=await fakeGateway(),proof='a'.repeat(64),b=body(e,proof);
+ const q=(overrides={})=>e.g.d2Status_({bearer:e.upload,jobId:b.jobId,ackProofHash:b.ackProofHash,planSha256:b.planSha256,...overrides});
+ const sizeBefore=e.rows.size;
+ assert.deepEqual(q(),{jobId:b.jobId,status:'not-started'});
+ assert.equal(e.rows.size,sizeBefore);
+ const corrupt=structuredClone(b);corrupt.objects[2].bytes=b64u(Buffer.from('bad'));
+ assert.throws(()=>e.g.d2Put_(corrupt),/D2_OBJECT_HASH_INVALID/);
+ assert.deepEqual(q(),{jobId:b.jobId,status:'partial'});
+ assert.equal(e.g.d2Put_(b).status,'ready');
+ const sizeAtReady=e.rows.size;
+ assert.deepEqual(q(),{jobId:b.jobId,status:'ready'});
+ assert.equal(e.rows.size,sizeAtReady);
+ assert.throws(()=>q({planSha256:'0'.repeat(64)}),/D2_STATUS_MISMATCH/);
+ assert.throws(()=>q({ackProofHash:'0'.repeat(64)}),/D2_STATUS_MISMATCH/);
+ const job=e.file(e.root,b.jobId),cap=control(e,{action:'issueAckCapability',jobId:b.jobId});
+ e.setFail(e.file(job,'obj_0001.bin').id);
+ assert.throws(()=>control(e,{action:'ack',jobId:b.jobId,ackCapability:cap.ackCapability,ackProof:proof}),/D2_DELETE_FAILED/);
+ const sizeAtDeleting=e.rows.size;
+ assert.deepEqual(q(),{jobId:b.jobId,status:'deleting'});
+ assert.equal(e.rows.size,sizeAtDeleting);
+ assert.throws(()=>q({ackProofHash:'0'.repeat(64)}),/D2_STATUS_MISMATCH/);
+ assert.equal(control(e,{action:'ack',jobId:b.jobId,ackCapability:cap.ackCapability,ackProof:proof}).status,'deleted');
+ const sizeAtDeleted=e.rows.size;
+ assert.deepEqual(q(),{jobId:b.jobId,status:'deleted'});
+ assert.equal(e.rows.size,sizeAtDeleted);
+ assert.throws(()=>q({ackProofHash:'0'.repeat(64)}),/D2_STATUS_MISMATCH/);
+});
+test('D2 status: a tampered staging binding or a tampered ciphertext object is never silently accepted as ready',async()=>{
+ const e=await fakeGateway(),b=body(e);e.g.d2Put_(b);
+ const job=e.file(e.root,b.jobId),q=()=>e.g.d2Status_({bearer:e.upload,jobId:b.jobId,ackProofHash:b.ackProofHash,planSha256:b.planSha256});
+ const stage=e.file(job,'staging.json'),stageJson=JSON.parse(stage.bytes.toString());
+ stage.bytes=Buffer.from(JSON.stringify({...stageJson,descriptorSha256:'0'.repeat(64)}));
+ assert.throws(q,/D2_STATUS_INCONSISTENT/);
+ stage.bytes=Buffer.from(JSON.stringify(stageJson));
+ assert.deepEqual(q(),{jobId:b.jobId,status:'ready'});
+ const obj0=e.file(job,'obj_0000.bin'),orig=obj0.bytes;
+ obj0.bytes=Buffer.from('tampered');
+ assert.throws(q,/D2_OBJECT_VERIFY_FAILED/);
+ obj0.bytes=orig;
+ assert.deepEqual(q(),{jobId:b.jobId,status:'ready'});
+});
 
 test('D2 resume never authorizes a new deletion and recovers an existing one without reissuing capability',async()=>{
  const e=await fakeGateway(),proof='a'.repeat(64),b=body(e,proof);e.g.d2Put_(b);
