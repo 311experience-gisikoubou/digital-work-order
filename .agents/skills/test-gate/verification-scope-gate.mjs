@@ -20,6 +20,9 @@ const ALLOWED_CHECKS = new Set([
   'MIGRATION_TEST',
   'DEPENDENCY_AUDIT',
   'REAL_DEVICE_OBJECTIVE',
+  'NATIVE_STATIC_AUDIT',
+  'NATIVE_BUILD_TEST',
+  'INDEPENDENT_SECURITY_REVIEW',
   'FULL_REPOSITORY_SUITE',
 ]);
 
@@ -40,7 +43,25 @@ const MIGRATION_RE = /(^|\/)(migrations?|schema|database|db)(\/|$)|\.sql$/i;
 const FRONTEND_RE = /(^|\/)(src|app|web|frontend|ui|components?|pages?|views?|styles?)(\/|$).+\.(ts|tsx|js|jsx|mjs|cjs|vue|svelte|css|scss|sass|less|html)$/i;
 // Narrow Node/CLI script vocabulary. Keep generic src/*.js|ts frontend behavior unchanged;
 // only explicit CLI/command paths plus ESM/CommonJS core/tests are classified as CLI scripts.
-const FOUNDATION_POLLER_PS1_RE = /^scripts\/ai-job-poller\/(?:[a-z0-9]+(?:[-_][a-z0-9]+)*\.ps1|tests\/[a-z0-9]+(?:[-_][a-z0-9]+)*\.ps1)$/i;
+// Within scripts/ai-job-poller/, every top-level *.ps1 script (one path
+// segment directly under the directory, no further nesting) defaults to
+// NATIVE_WINDOWS_SECURITY: this directory performs Windows Task Scheduler
+// registration, and any top-level script there (install, register, task
+// management, or an as-yet-unreviewed future name) can perform the same
+// native operation. Only the two explicitly reviewed non-security scripts
+// below are exempt and remain CLI_SCRIPT. Nested paths other than the one
+// reviewed tests/ selftest are not matched here and fall through to UNKNOWN.
+const FOUNDATION_POLLER_TOP_LEVEL_PS1_RE = /^scripts\/ai-job-poller\/[a-z0-9]+(?:[-_][a-z0-9]+)*\.ps1$/i;
+const FOUNDATION_POLLER_REVIEWED_CLI_SCRIPTS = new Set([
+  'scripts/ai-job-poller/poll-once.ps1',
+  'scripts/ai-job-poller/tests/poller-windows-selftest.ps1',
+]);
+function isFoundationPollerCliScript(file) {
+  return FOUNDATION_POLLER_REVIEWED_CLI_SCRIPTS.has(file.toLowerCase());
+}
+function isFoundationPollerNativeWindowsSecurity(file) {
+  return FOUNDATION_POLLER_TOP_LEVEL_PS1_RE.test(file) && !isFoundationPollerCliScript(file);
+}
 const CLI_SCRIPT_RE = /^(?:(?:src\/)?(?:cli|command)\.(?:js|ts|mjs|cjs)|src\/(?:cli|commands?)\/.+\.(?:js|ts|mjs|cjs|ps1)|src\/core\/.+\.(?:mjs|cjs)|tests?\/.+\.(?:mjs|cjs))$/i;
 // Narrow local transport executables: only files whose basename contains a
 // delimited `mcp` or `stdio` semantic under src/transport. Generic transport
@@ -50,6 +71,41 @@ const LOCAL_STDIO_TRANSPORT_RE = /^src\/transport\/(?:[^/]+\/)*(?:[A-Za-z0-9]+[-
 // Narrow executable launchers under tools/. This does not classify generic tools/*.mjs;
 // only a basename ending in a delimited `launcher` semantic is treated as CLI runtime.
 const LOCAL_TOOL_LAUNCHER_RE = /^tools\/(?:[^/]+\/)*(?:[A-Za-z0-9]+[-_.])*launcher\.(?:js|ts|mjs|cjs)$/i;
+// Native Windows security/consent binaries must not fall back to CLI_SCRIPT.
+// Native executable source under src/cli is high risk even without auth words.
+// Explicit authentication/security native sources elsewhere are also high risk.
+const REVIEWED_NON_NATIVE_CLI_PS1 = new Set([
+  'src/cli/windows-gui.ps1',
+  'src/cli/control-panel.ps1',
+]);
+const NATIVE_WINDOWS_SECURITY_RE = /^(?:src\/cli\/[^/]+\.(?:c|cc|cpp|cxx|h|hpp|hxx)|(?:src\/|src-tauri\/|tools\/|backend\/)[^/]*(?:\/[^/]*)*(?:hello|consent|credential|dpapi|cng|acl|s4u|session0|security|auth|trust|native-job)[^/]*\.(?:c|cc|cpp|cxx|h|hpp|hxx|cs|rs|ps1))$/i;
+// Native Job drivers and proof tests are security-sensitive even in JS.
+// Only these known paths qualify; unrelated tools remain fail-closed.
+const NATIVE_VERIFICATION_EXACT_PATHS = new Set([
+  'tools/issue66-native-job-e2e.mjs',
+  'tools/issue66-native-build.mjs',
+  'tools/issue66-tap-result.mjs',
+  'tests/issue66-native-job-driver.test.mjs',
+  'tests/windows-hello-native-job.test.mjs',
+]);
+function isNativeVerificationExactPath(file) {
+  return NATIVE_VERIFICATION_EXACT_PATHS.has(file.toLowerCase());
+}
+function isNativeWindowsSecurityFile(file) {
+  // Closed exact native-verification path set takes priority over the
+  // generic CLI/tests classification below.
+  if (isNativeVerificationExactPath(file)) return true;
+  // Future PowerShell names can conceal Task/ACL/auth operations. Default to
+  // native-risk instead of accepting a caller-chosen filename as safe CLI.
+  if (/^src\/cli\/[^/]+\.ps1$/i.test(file)) {
+    return !REVIEWED_NON_NATIVE_CLI_PS1.has(file.toLowerCase());
+  }
+  // Every top-level scripts/ai-job-poller/*.ps1 script defaults to native
+  // risk (Windows Task Scheduler registration), except the two reviewed
+  // non-security scripts carved out by isFoundationPollerCliScript below.
+  if (isFoundationPollerNativeWindowsSecurity(file)) return true;
+  return NATIVE_WINDOWS_SECURITY_RE.test(file);
+}
 const ROOT_INDEX_HTML_RE = /^index\.html$/i;
 const FRONTEND_VERIFICATION_SCRIPT_RE = /^scripts\/(?=[^/]*\.(?:ts|js|mjs)$)(?=[^/]*(?:frontend|ui|browser|render|layout|visual|home-stage|home-invoice))(?=[^/]*(?:verify|verification|selftest|test|smoke|check|scale))[^/]+\.(?:ts|js|mjs)$/i;
 // Strict top-level user-facing text selftests, not generic scripts, are frontend.
@@ -121,7 +177,7 @@ function validRepoPath(value) {
 }
 
 export function classifyFiles(changedFiles) {
-  const hasCliScriptAnchor = changedFiles.some(file => CLI_SCRIPT_RE.test(file) || FOUNDATION_POLLER_PS1_RE.test(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file));
+  const hasCliScriptAnchor = changedFiles.some(file => !isNativeWindowsSecurityFile(file) && (CLI_SCRIPT_RE.test(file) || isFoundationPollerCliScript(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file)));
 
   // Anchor candidates exclude anything already resolved as backend (a
   // dedicated gateway script test, or any BACKEND_RE path such as a
@@ -129,12 +185,14 @@ export function classifyFiles(changedFiles) {
   // backend-classified file can never manufacture a frontend companion
   // anchor for an otherwise-unrelated root JS file.
   const hasStrongFrontendAnchor = changedFiles.some(file => {
-    if (CLI_SCRIPT_RE.test(file) || FOUNDATION_POLLER_PS1_RE.test(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file) || isGatewayDedicatedScriptTest(file) || BACKEND_RE.test(file)) return false;
+    if (isNativeWindowsSecurityFile(file) || CLI_SCRIPT_RE.test(file) || isFoundationPollerCliScript(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file) || isGatewayDedicatedScriptTest(file) || BACKEND_RE.test(file)) return false;
     return ROOT_INDEX_HTML_RE.test(file) || FRONTEND_VERIFICATION_SCRIPT_RE.test(file) || isUserFacingFrontendSelftest(file) || isRealDeviceVerificationScript(file) || FRONTEND_RE.test(file);
   });
 
   const flags = {
     docs: false,
+    nativeSecurity: false,
+    nativeVerification: false,
     governance: false,
     dependency: false,
     migration: false,
@@ -145,6 +203,18 @@ export function classifyFiles(changedFiles) {
   };
 
   for (const file of changedFiles) {
+    // Priority must precede ordinary CLI/backend/governance classification.
+    if (isNativeWindowsSecurityFile(file)) {
+      flags.nativeSecurity = true;
+      // The closed native-verification JS proof-script/test path set is
+      // still native-security-priority, but it is also a targeted-test
+      // surface in its own right: mark it separately so the mandatory
+      // TARGETED_SELFTEST requirement below is not lost for these JS paths
+      // merely because they resolved as NATIVE_WINDOWS_SECURITY rather than
+      // CLI_SCRIPT.
+      if (isNativeVerificationExactPath(file)) flags.nativeVerification = true;
+      continue;
+    }
     if (DEPENDENCY_RE.test(file)) {
       flags.dependency = true;
       if (FRONTEND_DEPENDENCY_RE.test(file)) {
@@ -171,7 +241,7 @@ export function classifyFiles(changedFiles) {
       flags.backend = true;
       continue;
     }
-    if (CLI_SCRIPT_RE.test(file) || FOUNDATION_POLLER_PS1_RE.test(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file)) {
+    if (CLI_SCRIPT_RE.test(file) || isFoundationPollerCliScript(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file)) {
       flags.cli = true;
       continue;
     }
@@ -187,6 +257,7 @@ export function classifyFiles(changedFiles) {
   }
 
   if (flags.unknown) return { profile: 'UNKNOWN', flags };
+  if (flags.nativeSecurity) return { profile: 'NATIVE_WINDOWS_SECURITY', flags };
   if (flags.dependency) return { profile: 'DEPENDENCY_CHANGE', flags };
   if (flags.migration) return { profile: 'DB_MIGRATION', flags };
   const runtimeKinds = Number(flags.frontend) + Number(flags.backend) + Number(flags.cli);
@@ -232,11 +303,25 @@ function minimumChecksFor(flags) {
     checks.push('DEPENDENCY_AUDIT', 'FULL_REPOSITORY_SUITE');
   }
 
+  if (flags.nativeSecurity) {
+    // A skipped compiled self-test does NOT satisfy NATIVE_BUILD_TEST.
+    checks.push('NATIVE_STATIC_AUDIT', 'NATIVE_BUILD_TEST', 'INDEPENDENT_SECURITY_REVIEW');
+  }
+
+  // The closed native-verification JS proof-script/test path set keeps the
+  // ordinary targeted-test requirement in addition to the native static/
+  // build/independent-review checks above; native priority (profile,
+  // verificationLevel, and the three native checks) is unchanged.
+  if (flags.nativeVerification) {
+    checks.push('TARGETED_SELFTEST');
+  }
+
   return unique(checks);
 }
 
 function verificationLevelFor(flags, escalationReason) {
   if (flags.migration || flags.dependency || escalationReason === 'RELEASE_GATE') return 'FULL';
+  if (flags.nativeSecurity) return 'NATIVE_SECURITY';
   if (Number(flags.frontend) + Number(flags.backend) + Number(flags.cli) > 1) return 'AFFECTED';
   if (flags.governance || flags.frontend || flags.backend || flags.cli) return 'TARGETED';
   return 'MINIMAL';
@@ -257,6 +342,7 @@ function excessiveChecksFor(flags, plannedChecks) {
     if (check === 'MIGRATION_TEST' && !flags.migration) excessive.push(check);
     if (check === 'DEPENDENCY_AUDIT' && !flags.dependency) excessive.push(check);
     if (check === 'REAL_DEVICE_OBJECTIVE' && !flags.frontend) excessive.push(check);
+    if (['NATIVE_STATIC_AUDIT', 'NATIVE_BUILD_TEST', 'INDEPENDENT_SECURITY_REVIEW'].includes(check) && !flags.nativeSecurity) excessive.push(check);
   }
 
   return unique(excessive);

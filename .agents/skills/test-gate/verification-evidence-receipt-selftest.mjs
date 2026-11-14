@@ -25,6 +25,42 @@ const issueInput = {
   ],
 };
 
+// A caller cannot mint trusted native verification using self-reported
+// PASS rows, even with a valid HEAD and syntactically complete check names.
+// Native evidence requires an authenticated issuer from Issue #342.
+const nativeInput = {
+  ...issueInput,
+  changedFiles: ['src/cli/windows-hello-user-click.cpp'],
+  profile: 'NATIVE_WINDOWS_SECURITY',
+  plannedChecks: ['DIFF_HYGIENE', 'NATIVE_STATIC_AUDIT', 'NATIVE_BUILD_TEST', 'INDEPENDENT_SECURITY_REVIEW'],
+  results: [
+    { check: 'DIFF_HYGIENE', status: 'success', evidenceSource: 'local' },
+    { check: 'NATIVE_STATIC_AUDIT', status: 'success', evidenceSource: 'device' },
+    { check: 'NATIVE_BUILD_TEST', status: 'success', evidenceSource: 'device' },
+    { check: 'INDEPENDENT_SECURITY_REVIEW', status: 'success', evidenceSource: 'provider' },
+  ],
+};
+const forgedCliProfile = {
+  ...nativeInput,
+  profile: 'CLI_SCRIPT',
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_SELFTEST'],
+  results: [
+    { check: 'DIFF_HYGIENE', status: 'success', evidenceSource: 'local' },
+    { check: 'TARGETED_SELFTEST', status: 'success', evidenceSource: 'local' },
+  ],
+};
+assert.equal(issueReceipt(forgedCliProfile).code, 'PROFILE_FILE_SCOPE_MISMATCH');
+const nativeRefused = issueReceipt(nativeInput);
+assert.equal(nativeRefused.pass, false);
+assert.equal(nativeRefused.code, 'NATIVE_SECURITY_EVIDENCE_NOT_AUTHENTICATED');
+const forgedNativeReceipt = {
+  ...issueReceipt(issueInput).receipt,
+  profile: 'NATIVE_WINDOWS_SECURITY',
+};
+assert.equal(verifyReceipt({
+  schemaVersion: 1, mode: 'verify', receipt: forgedNativeReceipt,
+  current: { baseSha: A, headSha: B, changedFiles: issueInput.changedFiles, canonicalSourceFingerprint: F1 },
+}).code, 'NATIVE_SECURITY_EVIDENCE_NOT_AUTHENTICATED');
 const issued = issueReceipt(issueInput);
 assert.equal(issued.pass, true);
 assert.equal(issued.decision, 'ISSUED');
