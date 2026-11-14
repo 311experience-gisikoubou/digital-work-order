@@ -416,16 +416,16 @@ async function main() {
   }
 
   // 7) Deterministic audit time budget (Issue #332): exact synthetic
-  // boundary values derived from the defined parameters (60000 base,
+  // boundary values derived from the defined parameters (120000 base,
   // 10KiB free allowance, 8ms/extra-byte, hard-clamped to 300000), never a
   // loose/inexact bound.
-  report('timeout-1kib-exact-60000', computeAuditTimeoutMs(1024) === 60000);
-  // 42KiB: 60000 + max(0, (42-10)*1024)*8 = 60000 + 262144 = 322144, hard
+  report('timeout-1kib-exact-120000', computeAuditTimeoutMs(1024) === 120000);
+  // 42KiB: 120000 + max(0, (42-10)*1024)*8 = 120000 + 262144 = 382144, hard
   // clamped to the 300000 ceiling -- an exact expected value, not merely
   // "> 120000".
   report('timeout-42kib-clamped-exact-300000', computeAuditTimeoutMs(42 * 1024) === 300000);
   report('timeout-huge-exact-300000', computeAuditTimeoutMs(10 * 1024 * 1024) === 300000);
-  report('timeout-supplied-clamped-low-exact-60000', computeAuditTimeoutMs(0, 10) === 60000);
+  report('timeout-supplied-clamped-low-exact-120000', computeAuditTimeoutMs(0, 10) === 120000);
   report('timeout-supplied-clamped-high-exact-300000', computeAuditTimeoutMs(0, 999999) === 300000);
   // Monotonic: a strictly larger diff never yields a smaller derived budget.
   report('timeout-monotonic-non-decreasing',
@@ -443,7 +443,7 @@ async function main() {
         runAuditReviewer: (payload, opts) => { seenTimeoutMs = opts.timeoutMs; return { result: 'FAILED', code: 'PROVIDER_TIMEOUT' }; },
         observeProcessStartTicks: f.deps.observeProcessStartTicks, launcherPid: f.deps.launcherPid,
       });
-      report('timeout-threaded-to-reviewer', seenTimeoutMs === 60000, String(seenTimeoutMs));
+      report('timeout-threaded-to-reviewer', seenTimeoutMs === 120000, String(seenTimeoutMs));
       report('provider-timeout-stop-no-receipt', result.ok === false && result.code === 'AUDIT_INVOCATION_NOT_COMPLETED' &&
         !fs.existsSync(path.join(f.jobDir, 'post-job-review-receipt.json')));
     } finally { f.cleanup(); }

@@ -4,15 +4,25 @@
 // independently verifies MERGE_READY via the existing final-receipt verifier.
 // This does NOT prove who historically wrote the commit and does NOT
 // authorize a merge; it only binds one commit to one qualified-agent receipt.
+import fs from 'node:fs';
+import path from 'node:path';
+import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { verifyFinalReceipt } from './implementation-route-receipt.mjs';
 import {
   computeChangeSetSha256, verifyRepositoryIdentity, verifyFeatureRepository, changedPathsWithinScope,
+  readHeadSha, verifyWorktreeClean,
 } from './implementation-runner.mjs';
 import { validateResearchEnvelopeShape, computeConstraintsDigest } from './research-gate.mjs';
+import { verifyCanonicalWrapperMetadataSuffix } from './qualified-docs-suffix-audit.mjs';
 
 const SHA_RE = /^[0-9a-f]{40}$/i;
 const CHANGE_SET_SHA256_RE = /^[0-9A-Fa-f]{64}$/;
+// The single canonical native-skill wrapper template path this narrow,
+// two-commit lineage mode is allowed to bind as the (C) exception's exact
+// allowedScope. Fixed here, never caller-widenable.
+const WRAPPER_TEMPLATE_PATH = 'templates/.claude/skills/local-ai-handoff/SKILL.md.template';
 
 function safeToken(value) {
   return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/.test(value);
@@ -399,3 +409,294 @@ export function triageHistoricalCommitEvidence({
     ],
   };
 }
+
+// Returns a single commit's exact one real parent, independently re-derived
+// from Git, never from any receipt or caller claim. A merge commit (more
+// than one parent), a root commit (zero parents), or an unreadable commit
+// all fail closed with a distinct, caller-identifiable code prefix so a
+// merge/rebase/wrong-parent condition on either B or C is never conflated.
+function singleParentOf(repoRoot, commitSha, codePrefix) {
+  const result = runGit(repoRoot, ['rev-list', '--parents', '-n', '1', commitSha]);
+  if (result.error || result.status !== 0) return { ok: false, code: `${codePrefix}_PARENTS_UNKNOWN` };
+  const parts = String(result.stdout || '').trim().split(/\s+/).filter((part) => part.length > 0);
+  const parents = parts.slice(1);
+  if (parents.length !== 1) return { ok: false, code: `${codePrefix}_NOT_EXACTLY_ONE_PARENT` };
+  const parent = parents[0].toLowerCase();
+  if (!SHA_RE.test(parent)) return { ok: false, code: `${codePrefix}_PARENT_SHA_INVALID` };
+  return { ok: true, parent };
+}
+
+// Narrow, opt-in, two-commit route-lineage receiver for the exact
+// A(base) -> B(qualified) -> C(final direct wrapper-suffix) shape that
+// PR #398/#399 require. This is NOT a general multi-agent gate: it only
+// binds three ALREADY-independently-issued pieces of evidence --
+// verifyQualifiedCommitReceipt(B), verifyFinalReceipt(C), and
+// verifyCanonicalWrapperMetadataSuffix(B..C) -- to the exact, freshly
+// re-derived current repository state, and fails closed on any mismatch,
+// extra/missing commit, merge, wrong parent, scope drift, or stale evidence.
+// It NEVER returns MERGE_READY and NEVER substitutes for independent
+// security review, CI, test-gate, Draft Lock, or explicit human merge
+// authorization: prMergeAuthorized is always false, including on success.
+export function verifyCanonicalWrapperRouteLineage({
+  repoRoot, repository, branch, baseHead, finalHead, qualifiedCommit, qualifiedReceipt, finalDirectReceipt,
+} = {}) {
+  if (typeof repoRoot !== 'string' || repoRoot.trim().length === 0) return stop('REPO_ROOT_INVALID');
+  if (!repository || typeof repository !== 'object' || Array.isArray(repository) ||
+      !safeToken(repository.owner) || !safeToken(repository.name)) {
+    return stop('REPOSITORY_INVALID');
+  }
+  if (typeof branch !== 'string' || branch.trim().length === 0) return stop('BRANCH_INVALID');
+
+  if (!SHA_RE.test(baseHead || '')) return stop('BASE_HEAD_INVALID');
+  if (!SHA_RE.test(qualifiedCommit || '')) return stop('QUALIFIED_COMMIT_INVALID');
+  if (!SHA_RE.test(finalHead || '')) return stop('FINAL_HEAD_INVALID');
+  const normalizedBaseHead = baseHead.toLowerCase();
+  const normalizedQualifiedCommit = qualifiedCommit.toLowerCase();
+  const normalizedFinalHead = finalHead.toLowerCase();
+  if (normalizedBaseHead === normalizedQualifiedCommit ||
+      normalizedQualifiedCommit === normalizedFinalHead ||
+      normalizedBaseHead === normalizedFinalHead) {
+    return stop('HEADS_NOT_DISTINCT');
+  }
+
+  // --- current actual repository state: exact current feature branch,
+  // clean working tree (including untracked), verified origin identity, and
+  // exact current HEAD == C. None of this is ever trusted from caller text.
+  const repoCheck = verifyFeatureRepository(repoRoot, branch);
+  if (!repoCheck.ok) return stop(repoCheck.code);
+  const resolvedRoot = repoCheck.resolvedRoot;
+
+  const cleanCheck = verifyWorktreeClean(resolvedRoot);
+  if (!cleanCheck.ok) return stop(cleanCheck.code);
+
+  const identityCheck = verifyRepositoryIdentity(resolvedRoot, repository.owner, repository.name);
+  if (!identityCheck.ok) return stop(identityCheck.code);
+
+  const currentHead = readHeadSha(resolvedRoot);
+  if (!currentHead) return stop('CURRENT_HEAD_UNKNOWN');
+  if (currentHead !== normalizedFinalHead) return stop('CURRENT_HEAD_MISMATCH');
+
+  // --- exact two-commit chain A -> B -> C, derived from Git, never from any
+  // caller claim. Any extra, missing, merge, rebase, or wrong-parent commit
+  // fails closed rather than being silently accepted.
+  const existsA = runGit(resolvedRoot, ['cat-file', '-e', `${normalizedBaseHead}^{commit}`]);
+  if (existsA.error || existsA.status !== 0) return stop('BASE_HEAD_NOT_FOUND');
+  const existsB = runGit(resolvedRoot, ['cat-file', '-e', `${normalizedQualifiedCommit}^{commit}`]);
+  if (existsB.error || existsB.status !== 0) return stop('QUALIFIED_COMMIT_NOT_FOUND');
+  const existsC = runGit(resolvedRoot, ['cat-file', '-e', `${normalizedFinalHead}^{commit}`]);
+  if (existsC.error || existsC.status !== 0) return stop('FINAL_HEAD_NOT_FOUND');
+
+  const commitListResult = runGit(resolvedRoot, ['rev-list', '--reverse', `${normalizedBaseHead}..${normalizedFinalHead}`]);
+  if (commitListResult.error || commitListResult.status !== 0) return stop('COMMIT_LIST_UNVERIFIABLE');
+  const commits = String(commitListResult.stdout || '').split('\n').map((entry) => entry.trim().toLowerCase()).filter((entry) => entry.length > 0);
+  if (commits.length !== 2) return stop('COMMIT_CHAIN_LENGTH_INVALID');
+  if (commits[0] !== normalizedQualifiedCommit || commits[1] !== normalizedFinalHead) {
+    return stop('COMMIT_CHAIN_ORDER_MISMATCH');
+  }
+
+  const parentB = singleParentOf(resolvedRoot, normalizedQualifiedCommit, 'QUALIFIED_COMMIT');
+  if (!parentB.ok) return stop(parentB.code);
+  if (parentB.parent !== normalizedBaseHead) return stop('QUALIFIED_COMMIT_PARENT_MISMATCH_BASE');
+
+  const parentC = singleParentOf(resolvedRoot, normalizedFinalHead, 'FINAL_HEAD');
+  if (!parentC.ok) return stop(parentC.code);
+  if (parentC.parent !== normalizedQualifiedCommit) return stop('FINAL_HEAD_PARENT_MISMATCH_QUALIFIED');
+
+  // --- (B) the existing qualified-agent implementation-route receipt for
+  // the exact qualified commit B, reused UNMODIFIED. Branch/preHead are
+  // additionally bound here against the caller's own expected branch/base,
+  // since verifyQualifiedCommitReceipt itself only trusts receipt.branch for
+  // its own internal verifyFinalReceipt call.
+  if (!qualifiedReceipt || typeof qualifiedReceipt !== 'object' || Array.isArray(qualifiedReceipt)) {
+    return stop('QUALIFIED_RECEIPT_INVALID');
+  }
+  if (qualifiedReceipt.branch !== branch) return stop('QUALIFIED_RECEIPT_BRANCH_MISMATCH');
+  if (!qualifiedReceipt.executionEvidence || typeof qualifiedReceipt.executionEvidence !== 'object' ||
+      qualifiedReceipt.executionEvidence.preHead !== normalizedBaseHead) {
+    return stop('QUALIFIED_RECEIPT_PRE_HEAD_MISMATCH_BASE');
+  }
+
+  const qualifiedVerification = verifyQualifiedCommitReceipt({
+    repoRoot: resolvedRoot, repository, commit: normalizedQualifiedCommit, receipt: qualifiedReceipt,
+  });
+  if (!qualifiedVerification || qualifiedVerification.result !== 'QUALIFIED_COMMIT_VERIFIED_NOT_MERGE_AUTHORIZATION') {
+    return stop('QUALIFIED_COMMIT_VERIFICATION_FAILED', { qualifiedVerification });
+  }
+
+  // --- (C) the existing, separately issued final direct-browser receipt
+  // for the exact final commit C. Route type, the exact TRIVIAL_SAFE_LOCAL_
+  // EDIT exception vocabulary, and the exact single-path allowedScope are
+  // all required before the receipt is even handed to the unmodified
+  // verifyFinalReceipt for a fresh, current-clock re-verification (which
+  // includes Instruction Clarity and the Research Gate for source-write
+  // task kinds, exactly as every other final receipt).
+  if (!finalDirectReceipt || typeof finalDirectReceipt !== 'object' || Array.isArray(finalDirectReceipt)) {
+    return stop('FINAL_DIRECT_RECEIPT_INVALID');
+  }
+  if (!finalDirectReceipt.executor || finalDirectReceipt.executor.routeType !== 'direct-browser') {
+    return stop('FINAL_DIRECT_ROUTE_TYPE_NOT_DIRECT_BROWSER');
+  }
+  const exception = finalDirectReceipt.exception;
+  if (!exception || typeof exception !== 'object' || Array.isArray(exception) ||
+      exception.reason !== 'TRIVIAL_SAFE_LOCAL_EDIT') {
+    return stop('FINAL_DIRECT_EXCEPTION_REASON_INVALID');
+  }
+  if (typeof exception.justification !== 'string' || exception.justification.trim().length === 0) {
+    return stop('FINAL_DIRECT_EXCEPTION_JUSTIFICATION_INVALID');
+  }
+  if (exception.evidenceConfirmed !== true) return stop('FINAL_DIRECT_EXCEPTION_EVIDENCE_NOT_CONFIRMED');
+  if (!Array.isArray(finalDirectReceipt.allowedScope) || finalDirectReceipt.allowedScope.length !== 1 ||
+      finalDirectReceipt.allowedScope[0] !== WRAPPER_TEMPLATE_PATH) {
+    return stop('FINAL_DIRECT_ALLOWED_SCOPE_INVALID');
+  }
+
+  const finalVerification = verifyFinalReceipt(finalDirectReceipt, {
+    owner: repository.owner, name: repository.name, branch, head: normalizedFinalHead, repoRoot: resolvedRoot,
+  });
+  if (!finalVerification || finalVerification.result !== 'MERGE_READY') {
+    return stop('FINAL_RECEIPT_VERIFICATION_FAILED', { finalVerification });
+  }
+
+  // --- the strict, narrow B..C canonical-wrapper-description suffix proof,
+  // reused UNMODIFIED. This independently re-confirms the single-commit,
+  // single-line, canonical-matching wrapper description edit.
+  const wrapperVerification = verifyCanonicalWrapperMetadataSuffix({
+    repoRoot: resolvedRoot, fromHead: normalizedQualifiedCommit, toHead: normalizedFinalHead,
+  });
+  if (!wrapperVerification || wrapperVerification.result !== 'CANONICAL_WRAPPER_METADATA_SUFFIX_CONFIRMED_NOT_MERGE_AUTHORIZATION') {
+    return stop('CANONICAL_WRAPPER_SUFFIX_VERIFICATION_FAILED', { wrapperVerification });
+  }
+
+  // --- exact final A->C net changed path set: must equal the disjoint union
+  // of B's real changed paths (independently recomputed by
+  // verifyQualifiedCommitReceipt above) and the wrapper suffix's one real
+  // changed path. Overlap, a hidden intermediate change, or any other
+  // scope drift fails closed rather than being accepted on say-so.
+  const qualifiedChangedPaths = sortedUnique(qualifiedVerification.changedPaths);
+  const wrapperChangedPaths = sortedUnique(wrapperVerification.changedPaths);
+  if (wrapperChangedPaths.length !== 1 || wrapperChangedPaths[0] !== WRAPPER_TEMPLATE_PATH) {
+    return stop('WRAPPER_CHANGED_PATHS_INVALID');
+  }
+  if (qualifiedChangedPaths.includes(WRAPPER_TEMPLATE_PATH)) {
+    return stop('QUALIFIED_CHANGED_PATHS_OVERLAP_WRAPPER_PATH');
+  }
+
+  const netDiffResult = runGit(resolvedRoot, ['diff', '--name-status', '--no-renames', '-z', normalizedBaseHead, normalizedFinalHead]);
+  if (netDiffResult.error || netDiffResult.status !== 0) return stop('FINAL_NET_DIFF_UNVERIFIABLE');
+  const actualNetChangedPaths = sortedUnique(parseNameStatusZ(netDiffResult.stdout));
+  const expectedNetChangedPaths = sortedUnique([...qualifiedChangedPaths, ...wrapperChangedPaths]);
+  if (!pathsEqual(actualNetChangedPaths, expectedNetChangedPaths)) {
+    return stop('FINAL_NET_CHANGED_PATHS_MISMATCH');
+  }
+
+  return {
+    schemaVersion: 1,
+    result: 'ROUTE_LINEAGE_VERIFIED_NOT_MERGE_AUTHORIZATION',
+    code: 'ROUTE_LINEAGE_VERIFIED_NOT_MERGE_AUTHORIZATION',
+    repository: { owner: repository.owner, name: repository.name },
+    branch,
+    baseHead: normalizedBaseHead,
+    qualifiedCommit: normalizedQualifiedCommit,
+    finalHead: normalizedFinalHead,
+    qualifiedChangedPaths,
+    wrapperChangedPaths,
+    finalNetChangedPaths: actualNetChangedPaths,
+    prMergeAuthorized: false,
+    notes: [
+      'This result only proves the exact two-commit A->B->C lineage, the qualified-agent implementation-route receipt for B, the canonical-wrapper-description B..C suffix proof, and the final direct-browser TRIVIAL_SAFE_LOCAL_EDIT receipt for C.',
+      'This result does NOT by itself authorize a merge. Independent security review, exact-HEAD test/CI results, Draft Lock Mode, and explicit human merge authorization remain separately required.',
+    ],
+  };
+}
+
+const LINEAGE_INPUT_ALLOWED_KEYS = new Set([
+  'schemaVersion', 'baseHead', 'finalHead', 'qualifiedCommit', 'qualifiedReceipt', 'finalDirectReceipt',
+]);
+
+// Each documented flag below is required EXACTLY ONCE: an unknown flag, a
+// missing/empty value, or ANY repeated flag (e.g. a wrong --expect-head
+// followed by a correct one, relying on last-wins) all fail closed here
+// rather than silently resolving to a single ambiguous "winning" value.
+const LINEAGE_CLI_FLAG_TO_KEY = {
+  '--lineage-input': 'lineageInputPath',
+  '--repo-root': 'repoRoot',
+  '--expect-owner': 'expectOwner',
+  '--expect-name': 'expectName',
+  '--expect-branch': 'expectBranch',
+  '--expect-base': 'expectBase',
+  '--expect-head': 'expectHead',
+};
+
+function parseLineageCliArgs(argv) {
+  const out = {
+    lineageInputPath: null, repoRoot: null, expectOwner: null, expectName: null,
+    expectBranch: null, expectBase: null, expectHead: null, valid: true,
+  };
+  const seenFlags = new Set();
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    const key = LINEAGE_CLI_FLAG_TO_KEY[arg];
+    if (key === undefined) { out.valid = false; continue; }
+    const value = argv[i + 1];
+    i += 1;
+    if (typeof value !== 'string' || value.length === 0) { out.valid = false; continue; }
+    if (seenFlags.has(arg)) { out.valid = false; continue; }
+    seenFlags.add(arg);
+    out[key] = value;
+  }
+  if (!out.lineageInputPath || !out.repoRoot || !out.expectOwner || !out.expectName ||
+      !out.expectBranch || !out.expectBase || !out.expectHead) {
+    out.valid = false;
+  }
+  return out;
+}
+
+// Machine-invokable CLI for the narrow two-commit canonical-wrapper
+// lineage receiver. The JSON input file may carry ONLY the six listed
+// fields (no runtime repo selection, no arbitrary privilege field); every
+// expectation flag is required, and the input's own baseHead/finalHead must
+// exactly match the caller's external --expect-base/--expect-head before
+// verifyCanonicalWrapperRouteLineage is ever invoked, so this CLI cannot be
+// used to quietly audit a different range than the one actually expected.
+export function runCanonicalWrapperRouteLineageCli(argv) {
+  const args = parseLineageCliArgs(argv);
+  if (!args.valid) return stop('CLI_ARGUMENTS_INVALID');
+
+  let input;
+  try {
+    input = JSON.parse(fs.readFileSync(path.resolve(args.lineageInputPath), 'utf8'));
+  } catch {
+    return stop('LINEAGE_INPUT_UNREADABLE_OR_INVALID_JSON');
+  }
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return stop('LINEAGE_INPUT_INVALID');
+  if (Object.keys(input).some((key) => !LINEAGE_INPUT_ALLOWED_KEYS.has(key))) {
+    return stop('LINEAGE_INPUT_UNKNOWN_FIELD');
+  }
+  if (input.schemaVersion !== 1) return stop('LINEAGE_INPUT_SCHEMA_VERSION_INVALID');
+  if (!SHA_RE.test(input.baseHead || '') || input.baseHead.toLowerCase() !== String(args.expectBase).toLowerCase()) {
+    return stop('LINEAGE_INPUT_BASE_HEAD_MISMATCH_EXPECTED');
+  }
+  if (!SHA_RE.test(input.finalHead || '') || input.finalHead.toLowerCase() !== String(args.expectHead).toLowerCase()) {
+    return stop('LINEAGE_INPUT_FINAL_HEAD_MISMATCH_EXPECTED');
+  }
+
+  return verifyCanonicalWrapperRouteLineage({
+    repoRoot: path.resolve(args.repoRoot),
+    repository: { owner: args.expectOwner, name: args.expectName },
+    branch: args.expectBranch,
+    baseHead: input.baseHead,
+    finalHead: input.finalHead,
+    qualifiedCommit: input.qualifiedCommit,
+    qualifiedReceipt: input.qualifiedReceipt,
+    finalDirectReceipt: input.finalDirectReceipt,
+  });
+}
+
+function mainLineageCli() {
+  const result = runCanonicalWrapperRouteLineageCli(process.argv.slice(2));
+  process.stdout.write(`${JSON.stringify(result)}\n`);
+  process.exitCode = result.result === 'ROUTE_LINEAGE_VERIFIED_NOT_MERGE_AUTHORIZATION' ? 0 : 2;
+}
+
+const isMainLineageCli = process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
+if (isMainLineageCli) mainLineageCli();

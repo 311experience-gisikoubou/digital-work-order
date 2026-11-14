@@ -43,6 +43,7 @@ Reality evidence is task-aware rather than UI-centric:
 - `BACKEND_API`: API response, runtime, or targeted-test evidence.
 - `DB_SCHEMA`: schema/state evidence; FINAL requires live DB-state or runtime evidence as well.
 - `CLI_SCRIPT`: CLI output or targeted-test evidence.
+- `NATIVE_WINDOWS_SECURITY` (scope profile, Issue #376): native Windows security-sensitive C/C++/C#/Rust/PowerShell sources, including native executable sources under `src/cli/`, are **not** ordinary CLI. The exact existing native Job verification driver/build/TAP parser under `tools/` and their two dedicated tests under `tests/` also use this native profile; their plans additionally require `TARGETED_SELFTEST`. Unrelated tools remain `UNKNOWN`. Scope planning requires `NATIVE_STATIC_AUDIT`, `NATIVE_BUILD_TEST`, and `INDEPENDENT_SECURITY_REVIEW`; a skipped native compiled test never satisfies the build check. Scope `PROCEED` is **planning only**. Because a JSON `success` row and SHA-256 do not authenticate native compiler/reviewer identity or executable provenance, `verification-evidence-receipt.mjs` currently **refuses issuance/reuse** for this profile (`NATIVE_SECURITY_EVIDENCE_NOT_AUTHENTICATED`) until a real independently authenticated native issuer (#342) is in place. Do not relabel the scope as `CLI_SCRIPT` to evade STOP, claim native QA PASS based on static grep, or approve Windows Hello/real keys/OS ACL/Tasks. Source-only code/negative tests may proceed into a Draft; merging production native behavior requires separate provenance and security authorization.
 - `GENERATED_ARTIFACT`: generated artifact evidence; FINAL also requires its hash.
 - `DOCS_CONFIG`: document/config consistency or generated-artifact evidence.
 - `FOUNDATION_GOVERNANCE`: Foundation common-rule/governance work. EARLY requires document-consistency evidence showing the approved common-rule/preflight authority; MILESTONE adds targeted selftest evidence; FINAL keeps both and additionally consumes the normal `TEST_GATE_RESULT`. This makes the three checkpoints meaningful for Foundation changes instead of treating UI-style evidence as applicable.
@@ -162,6 +163,9 @@ Supported `plannedChecks`:
 - `MIGRATION_TEST`
 - `DEPENDENCY_AUDIT`
 - `REAL_DEVICE_OBJECTIVE`
+- `NATIVE_STATIC_AUDIT`
+- `NATIVE_BUILD_TEST`
+- `INDEPENDENT_SECURITY_REVIEW`
 - `FULL_REPOSITORY_SUITE`
 
 The gate classifies the changed files into one of these profiles:
@@ -171,6 +175,7 @@ The gate classifies the changed files into one of these profiles:
 - `FRONTEND_ONLY`
 - `BACKEND_ONLY`
 - `CLI_SCRIPT`
+- `NATIVE_WINDOWS_SECURITY`
 - `DB_MIGRATION`
 - `DEPENDENCY_CHANGE`
 - `MIXED_RUNTIME`
