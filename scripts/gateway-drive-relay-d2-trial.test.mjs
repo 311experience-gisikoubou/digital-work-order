@@ -21,6 +21,13 @@ function makeFakeIndexedDB(){
   const db={close(){},transaction(){const tx={oncomplete:null,onerror:null,_pending:0,_committed:false};const myTurn=queueTail;let advance;queueTail=new Promise(res=>{advance=res;});function scheduleCheck(){queueMicrotask(()=>{if(tx._pending===0&&!tx._committed){tx._committed=true;if(tx.oncomplete)tx.oncomplete();advance();}});}function op(run){const req={result:undefined,onsuccess:null,onerror:null};tx._pending++;myTurn.then(()=>queueMicrotask(()=>{try{req.result=run();}catch(err){tx._pending--;if(req.onerror)req.onerror();scheduleCheck();return;}tx._pending--;if(req.onsuccess)req.onsuccess();scheduleCheck();}));return req;}const store={get(key){return op(()=>data.get(key));},put(value){return op(()=>{data.set(value.id,value);return value;});}};tx.objectStore=()=>store;return tx;}};
   return{open(){const req={result:db,onsuccess:null,onerror:null};queueMicrotask(()=>{if(req.onsuccess)req.onsuccess();});return req;},seed(value){data.set(value.id,value);},peek(id){return data.get(id);}};
 }
+// A minimal double whose readwrite transaction always fails its write (onabort fires with a
+// distinguishable error) after returning the given seeded record from get() -- used to prove
+// that an aborted/erroring transaction rejects promptly instead of hanging or resolving.
+function makeAbortingIndexedDB(seedValue){
+  const db={close(){},transaction(){const tx={oncomplete:null,onerror:null,onabort:null,error:null};const store={get(){const req={result:seedValue,onsuccess:null,onerror:null};queueMicrotask(()=>{if(req.onsuccess)req.onsuccess();});return req;},put(){const req={result:undefined,onsuccess:null,onerror:null};queueMicrotask(()=>{tx.error=Error('SIMULATED_TX_ABORT');if(tx.onabort)tx.onabort();});return req;}};tx.objectStore=()=>store;return tx;}};
+  return{open(){const req={result:db,onsuccess:null,onerror:null};queueMicrotask(()=>{if(req.onsuccess)req.onsuccess();});return req;}};
+}
 function readChannel(nodes){return new URL(nodes['relay-bridge'].src).searchParams.get('channel');}
 function driveRound(ctx,ok,value){const channel=readChannel(ctx.nodes),source={postMessage(){}};ctx.getOnMessage()({origin:SANDBOX_ORIGIN,source,data:{version:'dwo-d2-bridge-v1',channel,type:'ready'}});ctx.getOnMessage()({origin:SANDBOX_ORIGIN,source,data:{version:'dwo-d2-bridge-v1',channel,type:'result',ok,value}});return channel;}
 // Polls (real timers, not just microtasks) because production code performs genuine async
@@ -35,7 +42,7 @@ async function waitForSrcChange(ctx,previousSrc){
   throw new Error('D2_TEST_BRIDGE_ROUND_TIMEOUT');
 }
 async function driveNextRound(ctx,previousSrc,ok,value){const src=await waitForSrcChange(ctx,previousSrc);driveRound(ctx,ok,value);return src;}
-function fakeMediaModules(){let n=0;return{MediaTransferPackage:{buildPackage:async()=>({})},MediaTransferCrypto:{encryptPackage:async()=>({})},MediaRelayTransport:{buildCreateRequest:async()=>{const descriptorSha256=h('synthetic-sender-candidate-'+(n++));return{request:{envelopeHeader:{descriptorSha256},plan:{version:'dwo-relay-plan-v1',totalBytes:16,entries:[{},{},{}]}},parts:[0,1,2].map(i=>({blob:{arrayBuffer:async()=>new Uint8Array([i+1,i+1,i+1,i+1]).buffer}}))};},canonicalJson:v=>JSON.stringify(v)},MediaReceiverBootstrap:{}};}
+function fakeMediaModules(){let n=0;return{MediaTransferPackage:{buildPackage:async()=>({})},MediaTransferCrypto:{encryptPackage:async()=>({}),generateSenderIdentity:async()=>{const key=await webcrypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},false,['sign']);return{clinicDeviceId:'dev_synthetic',signingKeyId:'sk_synthetic',privateKey:key.privateKey,publicJwk:{kty:'EC',crv:'P-256',x:'x'.repeat(43),y:'y'.repeat(43)}};}},MediaRelayTransport:{buildCreateRequest:async()=>{const descriptorSha256=h('synthetic-sender-candidate-'+(n++));return{request:{envelopeHeader:{descriptorSha256},plan:{version:'dwo-relay-plan-v1',totalBytes:16,entries:[{},{},{}]}},parts:[0,1,2].map(i=>({blob:{arrayBuffer:async()=>new Uint8Array([i+1,i+1,i+1,i+1]).buffer}}))};},canonicalJson:v=>JSON.stringify(v)},MediaReceiverBootstrap:{}};}
 function buildSenderSandbox({indexedDB,bridge='https://script.google.com/macros/s/ABC_123/exec',timers}={}){
   const nodes={status:{},'relay-bridge':{src:''},pair:{},send:{}};let onMessage=null;
   const fakeWindow={addEventListener:(type,fn)=>{if(type==='message')onMessage=fn;},removeEventListener:(type,fn)=>{if(type==='message'&&onMessage===fn)onMessage=null;}};
@@ -216,6 +223,126 @@ test('D2 sender guards pair and send against same-page concurrent clicks',async(
   assert.equal(fakeDB.peek('sender').pendingJob.status,'accepted');
 });
 
+// Issue #168 finding #3: pair() must finalize against the current durable state, not a
+// pre-bridge snapshot, so a pendingJob a concurrent tab creates while the bridge round-trips
+// are in flight is never overwritten/lost.
+test('D2 sender pair() preserves a pendingJob created by a concurrent tab instead of overwriting it with a stale snapshot',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const base=await makeSenderState({paired:false,recipientKeyId:undefined,recipientPublicJwk:undefined});
+  const fakeDB=makeFakeIndexedDB();fakeDB.seed(base);
+  const ctx=buildSenderSandbox({indexedDB:fakeDB});
+  vm.runInNewContext(testHookSource(source),ctx.sandbox);
+  const hooks=ctx.sandbox.D2TrialTestHooks;
+  const recipientJwk={kty:'EC',crv:'P-256',x:'p'.repeat(43),y:'q'.repeat(43)};
+  const pairPromise=hooks.pair();
+  const round1=await driveNextRound(ctx,'',true,{recipientKeyId:'rk_receiver',publicJwk:recipientJwk}); // getConfig
+  // A concurrent tab claims a pending job for this exact identity while pair() is still
+  // awaiting the bridge round-trips above.
+  const concurrentBody={bearer:base.uploadBearer,jobId:'job_'+'c'.repeat(64),descriptorSha256:'c'.repeat(64),ackProofHash:'b'.repeat(64),planSha256:'d'.repeat(64),plan:{version:'dwo-relay-plan-v1',totalBytes:3,entries:[{},{},{}]},objects:[0,1,2].map(i=>({ordinal:i,size:1,ciphertextSha256:'e'.repeat(64),bytes:'AQ'}))};
+  fakeDB.seed({...base,pendingJob:{status:'pending',body:concurrentBody}});
+  await driveNextRound(ctx,round1,true,{status:'paired'}); // pair
+  await pairPromise;
+  const finalState=fakeDB.peek('sender');
+  assert.equal(finalState.paired,true);
+  assert.equal(finalState.recipientKeyId,'rk_receiver');
+  assert.ok(finalState.pendingJob,"a racing tab's pendingJob must survive pairing completion");
+  assert.equal(finalState.pendingJob.body.jobId,concurrentBody.jobId);
+});
+
+// Issue #168 finding #3/#4: markAccepted must reject a missing/mismatched job and a
+// transaction that errors/aborts while committing, never hang, and never mutate the stored
+// pending job when it rejects.
+test('D2 sender markAccepted rejects a mismatched job and an aborted transaction without ever hanging',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const base=await makeSenderState();
+  {
+    const fakeDB=makeFakeIndexedDB();fakeDB.seed(base);
+    const ctx=buildSenderSandbox({indexedDB:fakeDB});
+    vm.runInNewContext(testHookSource(source),ctx.sandbox);
+    await assert.rejects(ctx.sandbox.D2TrialTestHooks.markAccepted('job_'+'a'.repeat(64)),{message:'PAIRING_STATE_INVALID'});
+  }
+  {
+    const body={bearer:base.uploadBearer,jobId:'job_'+'1'.repeat(64),descriptorSha256:'1'.repeat(64),ackProofHash:'b'.repeat(64),planSha256:'c'.repeat(64),plan:{version:'dwo-relay-plan-v1',totalBytes:3,entries:[{},{},{}]},objects:[0,1,2].map(i=>({ordinal:i,size:1,ciphertextSha256:'d'.repeat(64),bytes:'AQ'}))};
+    const fakeDB=makeFakeIndexedDB();fakeDB.seed({...base,pendingJob:{status:'pending',body}});
+    const ctx=buildSenderSandbox({indexedDB:fakeDB});
+    vm.runInNewContext(testHookSource(source),ctx.sandbox);
+    await assert.rejects(ctx.sandbox.D2TrialTestHooks.markAccepted('job_'+'2'.repeat(64)),{message:'PAIRING_STATE_INVALID'});
+    assert.equal(fakeDB.peek('sender').pendingJob.status,'pending','a mismatched jobId must never mutate the stored pending job');
+  }
+  {
+    const body={bearer:base.uploadBearer,jobId:'job_'+'3'.repeat(64),descriptorSha256:'3'.repeat(64),ackProofHash:'b'.repeat(64),planSha256:'c'.repeat(64),plan:{version:'dwo-relay-plan-v1',totalBytes:3,entries:[{},{},{}]},objects:[0,1,2].map(i=>({ordinal:i,size:1,ciphertextSha256:'d'.repeat(64),bytes:'AQ'}))};
+    const abortingDB=makeAbortingIndexedDB({...base,pendingJob:{status:'pending',body}});
+    const ctx=buildSenderSandbox({indexedDB:abortingDB});
+    vm.runInNewContext(testHookSource(source),ctx.sandbox);
+    await assert.rejects(ctx.sandbox.D2TrialTestHooks.markAccepted(body.jobId),{message:'SIMULATED_TX_ABORT'});
+  }
+});
+
+// Issue #168 finding #3/#4 two-tab regression: a second tab's actual send(), finding an
+// already-pending job left by the first tab's real put, must always query status before any
+// retry and must never issue a redundant put for a terminal/ambiguous/deleting status; it may
+// retry with the exact same stored body only for partial/not-started.
+test('D2 sender two-tab regression: adopter queries status before any retry and only retries the same body for partial/not-started',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  function trackedDriveRound(ctx,ok,value,log){
+    const channel=readChannel(ctx.nodes),source={postMessage(message){log.push(message);}};
+    ctx.getOnMessage()({origin:SANDBOX_ORIGIN,source,data:{version:'dwo-d2-bridge-v1',channel,type:'ready'}});
+    ctx.getOnMessage()({origin:SANDBOX_ORIGIN,source,data:{version:'dwo-d2-bridge-v1',channel,type:'result',ok,value}});
+    return channel;
+  }
+  async function trackedDriveNextRound(ctx,previousSrc,ok,value,log){const src=await waitForSrcChange(ctx,previousSrc);trackedDriveRound(ctx,ok,value,log);return src;}
+  async function scenario(status,expectRetry){
+    const fakeDB=makeFakeIndexedDB(),base=await makeSenderState();fakeDB.seed(base);
+    // Tab 1 ("creator"): a real claim + a real, successful single put via the exact production
+    // functions, leaving the stored pendingJob at 'pending' (the local accepted-commit has not
+    // yet happened), which is the exact durable state a second tab would observe.
+    const ctxCreator=buildSenderSandbox({indexedDB:fakeDB});
+    vm.runInNewContext(testHookSource(source),ctxCreator.sandbox);
+    const creatorHooks=ctxCreator.sandbox.D2TrialTestHooks,creatorLog=[];
+    const creatorBody=await creatorHooks.buildJobBody(base);
+    const claimed=await creatorHooks.claimPendingJob(creatorBody);
+    assert.equal(claimed.created,true);assert.equal(claimed.adopted,false);
+    const uploadPromise=creatorHooks.attemptUpload(creatorBody);
+    await trackedDriveNextRound(ctxCreator,'',true,{jobId:creatorBody.jobId,status:'ready'},creatorLog);
+    assert.equal(await uploadPromise,true);
+    assert.deepEqual(creatorLog.map(m=>m.action),['putSyntheticJob'],'creator must perform exactly one put');
+    assert.equal(creatorLog[0].body.jobId,creatorBody.jobId);
+    assert.equal(fakeDB.peek('sender').pendingJob.status,'pending');
+    assert.equal(fakeDB.peek('sender').pendingJob.body.jobId,creatorBody.jobId);
+
+    // Tab 2 ("adopter"): the actual production send(), exercised end to end.
+    const ctxAdopter=buildSenderSandbox({indexedDB:fakeDB});
+    vm.runInNewContext(testHookSource(source),ctxAdopter.sandbox);
+    const adopterHooks=ctxAdopter.sandbox.D2TrialTestHooks,adopterLog=[];
+    const sendPromise=adopterHooks.send();
+    const src=await trackedDriveNextRound(ctxAdopter,'',true,{jobId:creatorBody.jobId,status},adopterLog);
+    assert.equal(adopterLog[0].action,'getSyntheticJobStatus','adopter must query status before any retry');
+    assert.equal(adopterLog[0].body.jobId,creatorBody.jobId,'adopter must query the exact same job as the creator put');
+    if(expectRetry)await trackedDriveNextRound(ctxAdopter,src,true,{jobId:creatorBody.jobId,status:'ready'},adopterLog);
+    await sendPromise;
+    assert.equal(adopterLog.length,expectRetry?2:1,`${status}: unexpected adopter bridge actions ${JSON.stringify(adopterLog.map(m=>m.action))}`);
+    if(expectRetry){
+      assert.equal(adopterLog[1].action,'putSyntheticJob','partial/not-started may retry exactly once');
+      assert.deepEqual(adopterLog[1].body,creatorBody,'retry must reuse the exact same body, never a newly generated one');
+    }
+    const finalPending=fakeDB.peek('sender').pendingJob;
+    assert.equal(finalPending.body.jobId,creatorBody.jobId,'same job throughout');
+    return finalPending;
+  }
+  for(const status of ['ready','deleted']){
+    const p=await scenario(status,false);
+    assert.equal(p.status,'accepted',`${status} must mark the job accepted with no adopter put`);
+  }
+  for(const status of ['deleting','unknown']){
+    const p=await scenario(status,false);
+    assert.equal(p.status,'pending',`${status} must retain the pending job unresolved with no adopter put`);
+  }
+  for(const status of ['partial','not-started']){
+    const p=await scenario(status,true);
+    assert.equal(p.status,'accepted',`${status} same-body retry must mark the job accepted on success`);
+  }
+});
+
 async function fixture() { const recipient=await C.generateRecipientIdentity('d2-passphrase',{crypto:webcrypto}); const sender=await C.generateSenderIdentity({crypto:webcrypto}); const offer=await C.createPairingOffer(recipient,{crypto:webcrypto,now:()=>1}); const response=await C.createPairingResponse(offer,sender,{crypto:webcrypto,now:()=>2}); const registry=await C.verifyPairingResponse(offer,response,{crypto:webcrypto,now:()=>3}); const marker='SYNTHETIC_CLINICAL_MARKER_NEVER_IN_RELAY_META'; const pkg=await T.buildPackage(REF,{workOrderRef:REF,trialMarker:marker},[{meta:{attachmentId:'att-123e4567-e89b-42d3-a456-426614174001',kind:'file',mime:'application/octet-stream',size:4},blob:new Blob([Uint8Array.from([1,2,3,4])])}],{crypto:webcrypto,now:()=>4,chunkSize:4}); const envelope=await C.encryptPackage(pkg,sender,recipient,{crypto:webcrypto,now:()=>5}); const built=await R.buildCreateRequest(envelope,sender,{crypto:webcrypto,now:()=>6,recipientPublicInfo:recipient,bootstrapApi:B}); return {recipient,registry,built,marker}; }
 async function writeJob(f) { const root=await fs.mkdtemp(path.join(os.tmpdir(),'d2-synced-root-')),dir=path.join(root,'job');await fs.mkdir(dir);const objects=[]; for(const [ordinal,part] of f.built.parts.entries()){const bytes=Buffer.from(await part.blob.arrayBuffer());const name=`obj_${String(ordinal).padStart(4,'0')}.bin`;await fs.writeFile(path.join(dir,name),bytes);objects.push({ordinal,name,fileId:`synthetic_${ordinal}`,size:bytes.length,ciphertextSha256:h(bytes)});} const first=f.built.request.plan.entries[0],descriptorSha256=f.built.request.envelopeHeader.descriptorSha256,planSha256=h(Buffer.from(R.canonicalJson(f.built.request.plan))),totalBytes=objects.reduce((n,o)=>n+o.size,0);const meta={version:constants.META_VERSION,state:'ready',jobId:'job_'+descriptorSha256,descriptorSha256,ackProofHash:'b'.repeat(64),planSha256,totalBytes,objects,bootstrap:{version:first.bootstrapVersion,recipientKeyId:first.recipientKeyId,ephemeralPublicJwk:first.ephemeralPublicJwk,hkdfSalt:first.hkdfSalt,iv:first.iv,ciphertextSize:objects[0].size,ciphertextSha256:objects[0].ciphertextSha256}};const metaText=JSON.stringify(meta);await fs.writeFile(path.join(dir,'meta.json'),metaText);await fs.writeFile(path.join(dir,'ready.json'),JSON.stringify({version:constants.META_VERSION,jobId:meta.jobId,state:'ready',planSha256,metaSha256:h(Buffer.from(metaText))}));return {root,dir,meta}; }
 test('D2 package/envelope is buildable and relay metadata is opaque',async()=>{const f=await fixture(),{root,dir,meta}=await writeJob(f);try{const text=JSON.stringify(meta);assert.equal(text.includes(f.marker),false);assert.equal(text.includes(REF),false);assert.equal((await readVerifiedSyncedJob(dir)).blobs.length,meta.objects.length);}finally{await fs.rm(root,{recursive:true,force:true});}});
@@ -250,6 +377,8 @@ test('D2 status: bearer auth and malformed status requests are rejected without 
  assert.throws(()=>e.g.d2Status_({bearer:e.upload,jobId:'not-a-job',ackProofHash:b.ackProofHash,planSha256:b.planSha256}),/D2_STATUS_INVALID/);
  assert.throws(()=>e.g.d2Status_({bearer:e.upload,jobId:b.jobId,ackProofHash:'short',planSha256:b.planSha256}),/D2_STATUS_INVALID/);
  assert.throws(()=>e.g.d2Status_({bearer:e.upload,jobId:b.jobId,ackProofHash:b.ackProofHash,planSha256:'short'}),/D2_STATUS_INVALID/);
+ assert.throws(()=>e.g.d2Status_({bearer:e.upload,jobId:b.jobId,ackProofHash:b.ackProofHash,planSha256:b.planSha256,extra:1}),/D2_UPLOAD_AUTH_INVALID/);
+ assert.throws(()=>e.g.d2Status_({bearer:e.upload,jobId:b.jobId,ackProofHash:b.ackProofHash}),/D2_UPLOAD_AUTH_INVALID/);
  assert.deepEqual([...e.rows.values()].map(r=>({id:r.id,bytes:r.bytes.toString()})),before);
  assert.deepEqual([...e.props.entries()],beforeProps);
 });
@@ -257,14 +386,14 @@ test('D2 status: exact not-started, partial, ready, deleting, and deleted outcom
  const e=await fakeGateway(),proof='a'.repeat(64),b=body(e,proof);
  const q=(overrides={})=>e.g.d2Status_({bearer:e.upload,jobId:b.jobId,ackProofHash:b.ackProofHash,planSha256:b.planSha256,...overrides});
  const sizeBefore=e.rows.size;
- assert.deepEqual(q(),{jobId:b.jobId,status:'not-started'});
+ assert.deepEqual(JSON.parse(JSON.stringify(q())),{jobId:b.jobId,status:'not-started'});
  assert.equal(e.rows.size,sizeBefore);
  const corrupt=structuredClone(b);corrupt.objects[2].bytes=b64u(Buffer.from('bad'));
  assert.throws(()=>e.g.d2Put_(corrupt),/D2_OBJECT_HASH_INVALID/);
- assert.deepEqual(q(),{jobId:b.jobId,status:'partial'});
+ assert.deepEqual(JSON.parse(JSON.stringify(q())),{jobId:b.jobId,status:'partial'});
  assert.equal(e.g.d2Put_(b).status,'ready');
  const sizeAtReady=e.rows.size;
- assert.deepEqual(q(),{jobId:b.jobId,status:'ready'});
+ assert.deepEqual(JSON.parse(JSON.stringify(q())),{jobId:b.jobId,status:'ready'});
  assert.equal(e.rows.size,sizeAtReady);
  assert.throws(()=>q({planSha256:'0'.repeat(64)}),/D2_STATUS_MISMATCH/);
  assert.throws(()=>q({ackProofHash:'0'.repeat(64)}),/D2_STATUS_MISMATCH/);
@@ -272,12 +401,12 @@ test('D2 status: exact not-started, partial, ready, deleting, and deleted outcom
  e.setFail(e.file(job,'obj_0001.bin').id);
  assert.throws(()=>control(e,{action:'ack',jobId:b.jobId,ackCapability:cap.ackCapability,ackProof:proof}),/D2_DELETE_FAILED/);
  const sizeAtDeleting=e.rows.size;
- assert.deepEqual(q(),{jobId:b.jobId,status:'deleting'});
+ assert.deepEqual(JSON.parse(JSON.stringify(q())),{jobId:b.jobId,status:'deleting'});
  assert.equal(e.rows.size,sizeAtDeleting);
  assert.throws(()=>q({ackProofHash:'0'.repeat(64)}),/D2_STATUS_MISMATCH/);
  assert.equal(control(e,{action:'ack',jobId:b.jobId,ackCapability:cap.ackCapability,ackProof:proof}).status,'deleted');
  const sizeAtDeleted=e.rows.size;
- assert.deepEqual(q(),{jobId:b.jobId,status:'deleted'});
+ assert.deepEqual(JSON.parse(JSON.stringify(q())),{jobId:b.jobId,status:'deleted'});
  assert.equal(e.rows.size,sizeAtDeleted);
  assert.throws(()=>q({ackProofHash:'0'.repeat(64)}),/D2_STATUS_MISMATCH/);
 });
@@ -288,12 +417,89 @@ test('D2 status: a tampered staging binding or a tampered ciphertext object is n
  stage.bytes=Buffer.from(JSON.stringify({...stageJson,descriptorSha256:'0'.repeat(64)}));
  assert.throws(q,/D2_STATUS_INCONSISTENT/);
  stage.bytes=Buffer.from(JSON.stringify(stageJson));
- assert.deepEqual(q(),{jobId:b.jobId,status:'ready'});
+ assert.deepEqual(JSON.parse(JSON.stringify(q())),{jobId:b.jobId,status:'ready'});
  const obj0=e.file(job,'obj_0000.bin'),orig=obj0.bytes;
  obj0.bytes=Buffer.from('tampered');
  assert.throws(q,/D2_OBJECT_VERIFY_FAILED/);
  obj0.bytes=orig;
- assert.deepEqual(q(),{jobId:b.jobId,status:'ready'});
+ assert.deepEqual(JSON.parse(JSON.stringify(q())),{jobId:b.jobId,status:'ready'});
+});
+
+// Issue #168 finding #1: a tampered metadata fileId pointing at a different real Drive file
+// (whose bytes still happen to match some other slot) must never verify, even when the
+// attacker recomputes ready.metaSha256 so the marker/metadata binding itself still matches.
+test('D2 status rejects a metadata object fileId swapped to a different real file even when ciphertext bytes still match',async()=>{
+ const e=await fakeGateway(),b=body(e);e.g.d2Put_(b);
+ const job=e.file(e.root,b.jobId),metaFile=e.file(job,'meta.json'),readyFile=e.file(job,'ready.json');
+ const meta=JSON.parse(metaFile.bytes.toString());
+ meta.objects[0]={...meta.objects[0],fileId:job.id};
+ const metaText=JSON.stringify(meta);
+ metaFile.bytes=Buffer.from(metaText);
+ const ready=JSON.parse(readyFile.bytes.toString());
+ readyFile.bytes=Buffer.from(JSON.stringify({...ready,metaSha256:h(Buffer.from(metaText))}));
+ assert.throws(()=>e.g.d2Status_({bearer:e.upload,jobId:b.jobId,ackProofHash:b.ackProofHash,planSha256:b.planSha256}),/D2_OBJECT_VERIFY_FAILED/);
+});
+// Issue #168 finding #1: a staging ciphertext hash zeroed out must never be silently accepted
+// as ready just because the authoritative metadata/ready marker still bind correctly.
+test('D2 status rejects a staging object hash zeroed out even though metadata/ready still bind correctly',async()=>{
+ const e=await fakeGateway(),b=body(e);e.g.d2Put_(b);
+ const job=e.file(e.root,b.jobId),stageFile=e.file(job,'staging.json');
+ const stage=JSON.parse(stageFile.bytes.toString());
+ stage.objects[0]={...stage.objects[0],ciphertextSha256:'0'.repeat(64)};
+ stageFile.bytes=Buffer.from(JSON.stringify(stage));
+ assert.throws(()=>e.g.d2Status_({bearer:e.upload,jobId:b.jobId,ackProofHash:b.ackProofHash,planSha256:b.planSha256}),/D2_STATUS_INCONSISTENT/);
+});
+// Issue #168 finding #1: metadata truncated from four objects to three must never verify as
+// ready even with a correctly recomputed ready.metaSha256, because staging's object list and
+// aggregate total must still exactly match metadata.
+test('D2 status rejects metadata truncated from four objects to three even with a recomputed ready.metaSha256',async()=>{
+ const e=await fakeGateway(),b=body(e);e.g.d2Put_(b);
+ const job=e.file(e.root,b.jobId),metaFile=e.file(job,'meta.json'),readyFile=e.file(job,'ready.json');
+ const meta=JSON.parse(metaFile.bytes.toString());
+ meta.objects=meta.objects.slice(0,3);
+ meta.totalBytes=meta.objects.reduce((n,o)=>n+o.size,0);
+ const metaText=JSON.stringify(meta);
+ metaFile.bytes=Buffer.from(metaText);
+ const ready=JSON.parse(readyFile.bytes.toString());
+ readyFile.bytes=Buffer.from(JSON.stringify({...ready,metaSha256:h(Buffer.from(metaText))}));
+ assert.throws(()=>e.g.d2Status_({bearer:e.upload,jobId:b.jobId,ackProofHash:b.ackProofHash,planSha256:b.planSha256}),/D2_STATUS_INCONSISTENT/);
+});
+// Issue #168 finding #2: a malformed ready marker (or any other real exception) must never be
+// downgraded into an authoritative 'partial' by a catch-all.
+test('D2 status never downgrades a malformed ready marker into a silent partial',async()=>{
+ const e=await fakeGateway(),b=body(e);e.g.d2Put_(b);
+ const job=e.file(e.root,b.jobId),readyFile=e.file(job,'ready.json');
+ const ready=JSON.parse(readyFile.bytes.toString());
+ readyFile.bytes=Buffer.from(JSON.stringify({...ready,version:'wrong-version'}));
+ assert.throws(()=>e.g.d2Status_({bearer:e.upload,jobId:b.jobId,ackProofHash:b.ackProofHash,planSha256:b.planSha256}),/D2_READY_BINDING_INVALID/);
+});
+// Issue #168 finding #2: a duplicate-named file must propagate its real error, never be
+// swallowed into 'partial'.
+test('D2 status propagates a duplicate-name error instead of treating it as partial',async()=>{
+ const e=await fakeGateway(),b=body(e);e.g.d2Put_(b);
+ const job=e.file(e.root,b.jobId),readyFile=e.file(job,'ready.json');
+ e.rows.delete(readyFile.id);
+ e.add(job,'staging.json');
+ assert.throws(()=>e.g.d2Status_({bearer:e.upload,jobId:b.jobId,ackProofHash:b.ackProofHash,planSha256:b.planSha256}),/D2_DUPLICATE_NAME/);
+});
+// Issue #168 finding #2: with no ready marker, a job folder with no staging at all must be
+// rejected as unconfirmed, never guessed at as 'partial' or any other status.
+test('D2 status treats an empty job folder with no staging as unconfirmed, not partial',async()=>{
+ const e=await fakeGateway(),emptyJobId='job_'+'9'.repeat(64);
+ e.g.DriveApp.getFolderById(e.root.id).createFolder(emptyJobId);
+ assert.throws(()=>e.g.d2Status_({bearer:e.upload,jobId:emptyJobId,ackProofHash:'a'.repeat(64),planSha256:'b'.repeat(64)}),/D2_STATUS_UNCONFIRMED/);
+});
+// Issue #168 finding #2: when metadata exists but the ready marker is missing (write
+// interrupted between meta.json and ready.json), partial must validate that metadata's same
+// binding and its actual Drive object list, not merely its presence.
+test('D2 status reports partial when metadata exists but the ready marker is missing, validating its binding and actual objects',async()=>{
+ const e=await fakeGateway(),b=body(e);e.g.d2Put_(b);
+ const job=e.file(e.root,b.jobId),readyFile=e.file(job,'ready.json');
+ e.rows.delete(readyFile.id);
+ assert.deepEqual(JSON.parse(JSON.stringify(e.g.d2Status_({bearer:e.upload,jobId:b.jobId,ackProofHash:b.ackProofHash,planSha256:b.planSha256}))),{jobId:b.jobId,status:'partial'});
+ const metaFile=e.file(job,'meta.json'),meta=JSON.parse(metaFile.bytes.toString());
+ metaFile.bytes=Buffer.from(JSON.stringify({...meta,ackProofHash:'0'.repeat(64)}));
+ assert.throws(()=>e.g.d2Status_({bearer:e.upload,jobId:b.jobId,ackProofHash:b.ackProofHash,planSha256:b.planSha256}),/D2_STATUS_UNCONFIRMED/);
 });
 
 test('D2 resume never authorizes a new deletion and recovers an existing one without reissuing capability',async()=>{

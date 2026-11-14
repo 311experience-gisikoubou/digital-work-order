@@ -60,6 +60,37 @@
   async function queryStatus(body){let r;try{r=await bridgeCall('getSyntheticJobStatus',{bearer:body.bearer,jobId:body.jobId,ackProofHash:body.ackProofHash,planSha256:body.planSha256});}catch(e){throw Error('D2_STATUS_RESPONSE_INVALID');}if(!validStatusResult(r,body.jobId))throw Error('D2_STATUS_RESPONSE_INVALID');return r.status;}
   async function reconcileAfterFailure(body){let status;try{status=await queryStatus(body);}catch(e){return false;}return status==='ready'||status==='deleted';}
   async function attemptUpload(body){let result;try{result=await bridgeCall('putSyntheticJob',body);}catch(e){return await reconcileAfterFailure(body);}if(validReadyResult(result,body.jobId))return true;return await reconcileAfterFailure(body);}
-  async function send(){const s=await getState();if(!validState(s)||!s.paired)throw Error('PAIRING_STATE_MISSING');if(s.pendingJob&&s.pendingJob.status==='accepted'){report('Synthetic ciphertext job already accepted.');return;}if(s.pendingJob&&s.pendingJob.status==='pending'){const body=s.pendingJob.body;let status;try{status=await queryStatus(body);}catch(e){report('Synthetic ciphertext job status unconfirmed. Existing pending job retained.');return;}if(status==='ready'||status==='deleted'){await markAccepted(body.jobId);report('Synthetic ciphertext job already accepted by bridge.');return;}if(status==='not-started'||status==='partial'){const confirmed=await attemptUpload(body);if(confirmed){await markAccepted(body.jobId);report('Synthetic ciphertext job accepted by bridge. No credential or payload was displayed.');}else report('Synthetic ciphertext job status unconfirmed. Existing pending job retained.');return;}report('Synthetic ciphertext job status unconfirmed. Existing pending job retained.');return;}const body=await buildJobBody(s);const claimed=await claimPendingJob(body);if(claimed.pendingJob.status==='accepted'){report('Synthetic ciphertext job already accepted.');return;}const effectiveBody=claimed.pendingJob.body;const confirmed=await attemptUpload(effectiveBody);if(confirmed){await markAccepted(effectiveBody.jobId);report('Synthetic ciphertext job accepted by bridge. No credential or payload was displayed.');}else report('Synthetic ciphertext job status unconfirmed. Pending job retained for retry.');}
+  // Status-first handling for an already-pending job body, shared by both the normal
+  // already-pending path and an adopted-via-claimPendingJob path: always query status before
+  // ever uploading again. ready/deleted => markAccepted, no put. not-started/partial => exactly
+  // one same-body retry via attemptUpload (which itself issues at most one put, reconciled by
+  // its own status query). Any other outcome (deleting, or the status query itself failing) =>
+  // retain the pending job unresolved, no put.
+  async function resolvePendingJob(body){
+    let status;
+    try{status=await queryStatus(body);}catch(e){report('Synthetic ciphertext job status unconfirmed. Existing pending job retained.');return;}
+    if(status==='ready'||status==='deleted'){await markAccepted(body.jobId);report('Synthetic ciphertext job already accepted by bridge.');return;}
+    if(status==='not-started'||status==='partial'){
+      const confirmed=await attemptUpload(body);
+      if(confirmed){await markAccepted(body.jobId);report('Synthetic ciphertext job accepted by bridge. No credential or payload was displayed.');}
+      else report('Synthetic ciphertext job status unconfirmed. Existing pending job retained.');
+      return;
+    }
+    report('Synthetic ciphertext job status unconfirmed. Existing pending job retained.');
+  }
+  async function send(){
+    const s=await getState();
+    if(!validState(s)||!s.paired)throw Error('PAIRING_STATE_MISSING');
+    if(s.pendingJob&&s.pendingJob.status==='accepted'){report('Synthetic ciphertext job already accepted.');return;}
+    if(s.pendingJob&&s.pendingJob.status==='pending'){await resolvePendingJob(s.pendingJob.body);return;}
+    const body=await buildJobBody(s);
+    const claimed=await claimPendingJob(body);
+    if(claimed.pendingJob.status==='accepted'){report('Synthetic ciphertext job already accepted.');return;}
+    if(claimed.adopted){await resolvePendingJob(claimed.pendingJob.body);return;}
+    const effectiveBody=claimed.pendingJob.body;
+    const confirmed=await attemptUpload(effectiveBody);
+    if(confirmed){await markAccepted(effectiveBody.jobId);report('Synthetic ciphertext job accepted by bridge. No credential or payload was displayed.');}
+    else report('Synthetic ciphertext job status unconfirmed. Pending job retained for retry.');
+  }
   document.getElementById('pair').onclick=()=>withBusy(pair).catch(e=>report('FAIL_CLOSED: '+e.message));document.getElementById('send').onclick=()=>withBusy(send).catch(e=>report('FAIL_CLOSED: '+e.message));
 })();
