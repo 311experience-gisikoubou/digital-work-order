@@ -46,13 +46,13 @@ function makeFakeIndexedDB(opts={}){
     tx.abort=()=>settleAbort(Error('D2_TEST_TX_ABORTED'));
     return tx;
   }};
-  return{open(){const req={result:db,onsuccess:null,onerror:null};queueMicrotask(()=>{if(req.onsuccess)req.onsuccess();});return req;},seed(value){data.set(value.id,value);},peek(id){return data.get(id);}};
+  return{open(){const req={result:db,onsuccess:null,onerror:null};queueMicrotask(()=>{if(req.onsuccess)req.onsuccess();});return req;},seed(value){data.set(value.id,value);},peek(id){return data.get(id);},erase(id){data.delete(id);}};
 }
 // A minimal double whose readwrite transaction always fails its write (onabort fires with a
 // distinguishable error) after returning the given seeded record from get() -- used to prove
 // that an aborted/erroring transaction rejects promptly instead of hanging or resolving.
 function makeAbortingIndexedDB(seedValue){
-  const db={close(){},transaction(){const tx={oncomplete:null,onerror:null,onabort:null,error:null};const store={get(){const req={result:seedValue,onsuccess:null,onerror:null};queueMicrotask(()=>{if(req.onsuccess)req.onsuccess();});return req;},put(){const req={result:undefined,onsuccess:null,onerror:null};queueMicrotask(()=>{tx.error=Error('SIMULATED_TX_ABORT');if(tx.onabort)tx.onabort();});return req;}};tx.objectStore=()=>store;return tx;}};
+  const db={close(){},transaction(){const tx={oncomplete:null,onerror:null,onabort:null,error:null};const store={get(key){const req={result:key==='sender'?seedValue:undefined,onsuccess:null,onerror:null};queueMicrotask(()=>{if(req.onsuccess)req.onsuccess();});return req;},put(){const req={result:undefined,onsuccess:null,onerror:null};queueMicrotask(()=>{tx.error=Error('SIMULATED_TX_ABORT');if(tx.onabort)tx.onabort();});return req;}};tx.objectStore=()=>store;return tx;}};
   return{open(){const req={result:db,onsuccess:null,onerror:null};queueMicrotask(()=>{if(req.onsuccess)req.onsuccess();});return req;}};
 }
 function readChannel(nodes){return new URL(nodes['relay-bridge'].src).searchParams.get('channel');}
@@ -795,6 +795,7 @@ test('D2 sender resolvePendingJob never retries a body that only partially match
   const staleBody={...durableBody,planSha256:'f'.repeat(64)};
   const log=[];
   const resolvePromise=hooks.resolvePendingJob(staleBody);
+  await waitForSrcChange(ctx,'');
   const channel=readChannel(ctx.nodes),msgSource={postMessage(message){log.push(message);}};
   ctx.getOnMessage()({origin:SANDBOX_ORIGIN,source:msgSource,data:{version:'dwo-d2-bridge-v1',channel,type:'ready'}});
   ctx.getOnMessage()({origin:SANDBOX_ORIGIN,source:msgSource,data:{version:'dwo-d2-bridge-v1',channel,type:'result',ok:true,value:{jobId:durableBody.jobId,status:'not-started'}}});
@@ -802,6 +803,29 @@ test('D2 sender resolvePendingJob never retries a body that only partially match
   assert.deepEqual(log.map(m=>m.action),['getSyntheticJobStatus'],'a field mismatch against the exact durable body must stop before any retry put');
   assert.equal(fakeDB.peek('sender').pendingJob.status,'pending');
   assert.equal(fakeDB.peek('sender').pendingJob.body.planSha256,durableBody.planSha256,'the durable body must never be replaced by the caller-supplied stale body');
+});
+
+test('D2 sender refuses retry if immutable archive disappears during a dispatched status request',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const base=await makeSenderState(),oldBody=makeJobBody(base.uploadBearer,'1'),nextBody=makeJobBody(base.uploadBearer,'2');
+  const fakeDB=makeFakeIndexedDB(),seeded={...base,secondGenerationOf:oldBody.jobId,pendingJob:{status:'pending',body:nextBody}};
+  fakeDB.seed(seeded);fakeDB.seed({id:'sender-first-accepted',pendingJob:{status:'accepted',body:oldBody}});
+  const ctx=buildSenderSandbox({indexedDB:fakeDB});vm.runInNewContext(testHookSource(source),ctx.sandbox);
+  const run=ctx.sandbox.D2TrialTestHooks.send();await waitForSrcChange(ctx,'');
+  const {channel,source:msgSource,log}=captureReady(ctx);assert.equal(log[0].action,'getSyntheticJobStatus');
+  const dispatched=ctx.nodes['relay-bridge'].src;fakeDB.erase('sender-first-accepted');
+  sendResult(ctx,channel,msgSource,true,{jobId:nextBody.jobId,status:'partial'});await run;
+  assert.equal(ctx.nodes['relay-bridge'].src,dispatched,'must not dispatch a put after losing archive');
+  assert.equal(fakeDB.peek('sender'),seeded);assert.equal(fakeDB.peek('sender-first-accepted'),undefined);
+});
+test('D2 sender markAccepted refuses legacy orphan archive without mutation',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const base=await makeSenderState(),oldBody=makeJobBody(base.uploadBearer,'1'),nextBody=makeJobBody(base.uploadBearer,'2');
+  const fakeDB=makeFakeIndexedDB(),seeded={...base,pendingJob:{status:'pending',body:nextBody}},archive={id:'sender-first-accepted',pendingJob:{status:'accepted',body:oldBody}};
+  fakeDB.seed(seeded);fakeDB.seed(archive);
+  const ctx=buildSenderSandbox({indexedDB:fakeDB});vm.runInNewContext(testHookSource(source),ctx.sandbox);
+  await assert.rejects(ctx.sandbox.D2TrialTestHooks.markAccepted(nextBody.jobId),{message:'D2_SECOND_GENERATION_STATE_INVALID'});
+  assert.equal(fakeDB.peek('sender'),seeded);assert.equal(fakeDB.peek('sender-first-accepted'),archive);
 });
 
 // Issue #170 A5: exercises the actual production buildJobBody hook with the real

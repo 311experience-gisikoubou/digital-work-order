@@ -24,9 +24,20 @@
   function openDb(){return new Promise((ok,no)=>{const r=indexedDB.open(DB,1);r.onupgradeneeded=()=>r.result.createObjectStore(STORE,{keyPath:'id'});r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error);});}
   async function getState(){const db=await openDb();try{return await new Promise((ok,no)=>{const r=db.transaction(STORE).objectStore(STORE).get(ID);r.onsuccess=()=>ok(r.result||null);r.onerror=()=>no(r.error);});}finally{db.close();}}
   async function putState(v){if(!validState(v))throw Error('PAIRING_STATE_INVALID');const db=await openDb();try{await new Promise((ok,no)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(v);tx.oncomplete=ok;tx.onerror=()=>no(tx.error);tx.onabort=()=>no(tx.error||Error('PAIRING_STATE_TX_ABORTED'));});}finally{db.close();}}
-  // Reads the immutable archive record directly (same store, separate key); callers validate
-  // it themselves against the exact bearer/marker they already hold via validArchive.
-  async function getArchiveRecord(){const db=await openDb();try{return await new Promise((ok,no)=>{const r=db.transaction(STORE).objectStore(STORE).get(ARCHIVE_ID);r.onsuccess=()=>ok(r.result||null);r.onerror=()=>no(r.error);});}finally{db.close();}}
+  // Read sender and immutable archive from one coherent readonly transaction.
+  async function readSenderSnapshot(){
+    const db=await openDb();
+    try{return await new Promise((ok,no)=>{
+      const tx=db.transaction(STORE,'readonly'),store=tx.objectStore(STORE);
+      let current,archive;
+      tx.oncomplete=()=>ok({current,archive});
+      tx.onerror=()=>no(tx.error||Error('PAIRING_STATE_TX_ERROR'));
+      tx.onabort=()=>no(tx.error||Error('PAIRING_STATE_TX_ABORTED'));
+      const a=store.get(ID),b=store.get(ARCHIVE_ID);
+      a.onsuccess=()=>{current=a.result;};b.onsuccess=()=>{archive=b.result;};
+      a.onerror=()=>no(a.error);b.onerror=()=>no(b.error);
+    });}finally{db.close();}
+  }
   // Smallest shared predicate deciding exactly when `archive` (read from the very same
   // transaction/snapshot as `current`, never a separate later read) is consistent with
   // `current`'s own secondGenerationOf marker. A markerless current may only ever coexist with
@@ -39,23 +50,19 @@
   // adopt, create, or write against a possibly-marked current state must read both records from
   // that same transaction/snapshot and pass them here, rather than trusting an earlier read.
   function markerArchiveConsistent(current,archive){
-    const present=archive!=null;
+    const present=archive!==undefined;
     if(current.secondGenerationOf===undefined)return !present;
     if(!present)return false;
     if(!validArchive(archive,current.uploadBearer)||archive.pendingJob.body.jobId!==current.secondGenerationOf)return false;
     return !!current.pendingJob&&(current.pendingJob.status==='pending'||current.pendingJob.status==='accepted')&&current.pendingJob.body.jobId!==current.secondGenerationOf;
   }
-  // Whenever the current durable state is read outside of any transaction (the send/sendSecond
-  // pre-decision snapshot), this must be satisfied before any normal (non-rotation) action is
-  // taken against it -- including the markerless case, where a pre-existing archive alone is
-  // already corruption. Any violation fails closed with no further action (no claim, no
-  // rotate, no put, no bridge call) rather than reconstructing or resetting anything. This is
-  // only ever a pre-decision check; every transaction that can itself adopt/create/write must
-  // still re-read and re-check both records from its own single transaction via
-  // markerArchiveConsistent, since a stale pre-check can never be relied on alone.
-  async function checkSecondGenerationConsistency(s){
-    const archive=await getArchiveRecord();
-    if(!markerArchiveConsistent(s,archive))throw Error('D2_SECOND_GENERATION_STATE_INVALID');
+  // The pre-network decision uses one coherent snapshot; write transactions recheck
+  // both records independently before committing. No browser/network lock is added.
+  async function checkedSenderState(){
+    const {current,archive}=await readSenderSnapshot();
+    if(!validState(current)||!current.paired)throw Error('PAIRING_STATE_MISSING');
+    if(!markerArchiveConsistent(current,archive))throw Error('D2_SECOND_GENERATION_STATE_INVALID');
+    return current;
   }
   // Single readwrite get-then-put transaction so a decision made from the current durable
   // state (adopt it, reject it, or replace it) commits atomically against any other tab/page
@@ -107,11 +114,11 @@
   // actually been committed; a missing/mismatched/invalid current state is rejected rather
   // than silently resolved, so callers cannot mistake "nothing happened" for success. A status
   // query/upload may have already been dispatched before this call runs (e.g. a delayed bridge
-  // reply), so if the current state is second-generation-marked this same write transaction
+  // reply), so this same write transaction
   // also re-reads the immutable archive and checks it via markerArchiveConsistent before ever
   // committing 'accepted' -- never writing into a state that has since become inconsistently
   // marked, even though the underlying network action already happened and cannot be undone.
-  function markAccepted(jobId){return new Promise((resolve,reject)=>{openDb().then(db=>{const tx=db.transaction(STORE,'readwrite'),store=tx.objectStore(STORE),req=store.get(ID);let settled=false;const fail=err=>{if(settled)return;settled=true;try{db.close();}catch(_){}reject(err);};const finish=value=>{if(settled)return;settled=true;db.close();resolve(value);};tx.onerror=()=>fail(tx.error);tx.onabort=()=>fail(tx.error||Error('PAIRING_STATE_TX_ABORTED'));req.onsuccess=()=>{const current=req.result;if(!current||!validState(current)||!current.paired||!current.pendingJob||current.pendingJob.body.jobId!==jobId){fail(Error('PAIRING_STATE_INVALID'));return;}const proceed=()=>{if(current.pendingJob.status==='accepted'){tx.oncomplete=()=>finish(current);return;}const next={...current,pendingJob:{status:'accepted',body:current.pendingJob.body}};if(!validState(next)){fail(Error('PAIRING_STATE_INVALID'));return;}store.put(next);tx.oncomplete=()=>finish(next);};if(current.secondGenerationOf===undefined){proceed();return;}const req0=store.get(ARCHIVE_ID);req0.onerror=()=>fail(req0.error);req0.onsuccess=()=>{if(!markerArchiveConsistent(current,req0.result)){fail(Error('D2_SECOND_GENERATION_STATE_INVALID'));return;}proceed();};};req.onerror=()=>fail(req.error);},reject);});}
+  function markAccepted(jobId){return new Promise((resolve,reject)=>{openDb().then(db=>{const tx=db.transaction(STORE,'readwrite'),store=tx.objectStore(STORE),req=store.get(ID);let settled=false;const fail=err=>{if(settled)return;settled=true;try{db.close();}catch(_){}reject(err);};const finish=value=>{if(settled)return;settled=true;db.close();resolve(value);};tx.onerror=()=>fail(tx.error);tx.onabort=()=>fail(tx.error||Error('PAIRING_STATE_TX_ABORTED'));req.onsuccess=()=>{const current=req.result;if(!current||!validState(current)||!current.paired||!current.pendingJob||current.pendingJob.body.jobId!==jobId){fail(Error('PAIRING_STATE_INVALID'));return;}const proceed=()=>{if(current.pendingJob.status==='accepted'){tx.oncomplete=()=>finish(current);return;}const next={...current,pendingJob:{status:'accepted',body:current.pendingJob.body}};if(!validState(next)){fail(Error('PAIRING_STATE_INVALID'));return;}store.put(next);tx.oncomplete=()=>finish(next);};const req0=store.get(ARCHIVE_ID);req0.onerror=()=>fail(req0.error);req0.onsuccess=()=>{if(!markerArchiveConsistent(current,req0.result)){fail(Error('D2_SECOND_GENERATION_STATE_INVALID'));return;}proceed();};};req.onerror=()=>fail(req.error);},reject);});}
   // Rotates exactly once from a captured first-generation accepted job to a freshly pre-built
   // (outside this transaction) second-generation pending job, archiving the prior accepted
   // pendingJob byte-for-byte via a single-use `add` (never overwritten) in the very same
@@ -205,7 +212,7 @@
   // retain the pending job unresolved, no put.
   async function resolvePendingJob(body){
     let status;
-    try{status=await queryStatus(body);}catch(e){report('Synthetic ciphertext job status unconfirmed. Existing pending job retained.');return;}
+    try{await checkedSenderState();status=await queryStatus(body);}catch(e){report('Synthetic ciphertext job status unconfirmed. Existing pending job retained.');return;}
     if(status==='ready'||status==='deleted'){await markAccepted(body.jobId);report('Synthetic ciphertext job already accepted by bridge.');return;}
     if(status==='not-started'||status==='partial'){
       // A delayed ambiguous status answer for a body that is no longer the exact durable
@@ -213,7 +220,7 @@
       // superseded) must never resurrect it with a fresh put; re-read the durable state
       // immediately before retrying and stop without any network call if it no longer matches.
       let current;
-      try{current=await getState();}catch(e){report('Synthetic ciphertext job status unconfirmed. Existing pending job retained.');return;}
+      try{current=await checkedSenderState();}catch(e){report('Synthetic ciphertext job status unconfirmed. Existing pending job retained.');return;}
       const durable=current&&current.pendingJob&&current.pendingJob.body;
       const stillCurrent=validState(current)&&current.paired&&current.pendingJob&&current.pendingJob.status==='pending'&&durable&&durable.jobId===body.jobId&&durable.bearer===body.bearer&&durable.descriptorSha256===body.descriptorSha256&&durable.ackProofHash===body.ackProofHash&&durable.planSha256===body.planSha256;
       if(!stillCurrent){report('Synthetic ciphertext job status unconfirmed. Existing pending job retained.');return;}
@@ -227,15 +234,7 @@
     report('Synthetic ciphertext job status unconfirmed. Existing pending job retained.');
   }
   async function send(){
-    const s=await getState();
-    if(!validState(s)||!s.paired)throw Error('PAIRING_STATE_MISSING');
-    // A second-generation marker must never fall through to the create-a-new-job path below
-    // (e.g. because the real rotated pendingJob or its archive is missing/malformed) -- that
-    // would be a reconstructed/third-generation job. Likewise a markerless legacy state is only
-    // ever consistent when no archive exists at all -- a pre-existing archive without a marker
-    // (fault injection/corruption) must never fall through to claimPendingJob either. Fail
-    // closed first, unconditionally, with no network call.
-    await checkSecondGenerationConsistency(s);
+    const s=await checkedSenderState();
     if(s.pendingJob&&s.pendingJob.status==='accepted'){report('Synthetic ciphertext job already accepted.');return;}
     if(s.pendingJob&&s.pendingJob.status==='pending'){await resolvePendingJob(s.pendingJob.body);return;}
     const body=await buildJobBody(s);
@@ -258,14 +257,7 @@
   // second-generation pendingJob through the unchanged resolvePendingJob/markAccepted
   // contract; no third generation is ever possible from here.
   async function sendSecond(){
-    const s=await getState();
-    if(!validState(s)||!s.paired)throw Error('PAIRING_STATE_MISSING');
-    // Verify marker/archive consistency unconditionally first: a marker present must still have
-    // its immutable archive valid/accepted and matching exactly, with the current pendingJob
-    // genuinely the rotated job (never the archived original); a markerless state must have no
-    // archive at all. Either violation fails closed before any explicit second action here,
-    // including a no-op retry.
-    await checkSecondGenerationConsistency(s);
+    const s=await checkedSenderState();
     if(s.secondGenerationOf!==undefined){
       if(s.pendingJob.status==='accepted'){report('Second synthetic ciphertext job already accepted.');return;}
       await resolvePendingJob(s.pendingJob.body);
