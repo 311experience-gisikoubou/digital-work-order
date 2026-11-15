@@ -5,6 +5,8 @@
   const b64url=b=>{let s='';for(const x of b)s+=String.fromCharCode(x);return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/g,'');};
   const random=n=>b64url(crypto.getRandomValues(new Uint8Array(n))),sha256=async v=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',v))).map(x=>x.toString(16).padStart(2,'0')).join('');
   const jwk=x=>x&&x.kty==='EC'&&x.crv==='P-256'&&/^[A-Za-z0-9_-]{40,50}$/.test(x.x||'')&&/^[A-Za-z0-9_-]{40,50}$/.test(x.y||'');
+  // Field-by-field EC public coordinate identity (never object identity or property order).
+  const jwkEqual=(a,b)=>!!a&&!!b&&a.kty===b.kty&&a.crv===b.crv&&a.x===b.x&&a.y===b.y;
   const privateKey=k=>typeof CryptoKey==='function'&&k instanceof CryptoKey&&k.type==='private'&&k.extractable===false&&k.algorithm&&k.algorithm.name==='ECDSA'&&k.algorithm.namedCurve==='P-256'&&Array.isArray(k.usages)&&k.usages.length===1&&k.usages[0]==='sign';
   function pending(p,s){const b=p&&p.body,plan=b&&b.plan;if(!p)return true;return (p.status==='pending'||p.status==='accepted')&&b&&b.bearer===s.uploadBearer&&/^job_[0-9a-f]{64}$/.test(b.jobId||'')&&b.jobId==='job_'+b.descriptorSha256&&/^[0-9a-f]{64}$/.test(b.descriptorSha256||'')&&/^[0-9a-f]{64}$/.test(b.ackProofHash||'')&&/^[0-9a-f]{64}$/.test(b.planSha256||'')&&plan&&plan.version==='dwo-relay-plan-v1'&&Number.isSafeInteger(plan.totalBytes)&&plan.totalBytes>0&&Array.isArray(plan.entries)&&Array.isArray(b.objects)&&plan.entries.length===b.objects.length&&b.objects.length>=3&&b.objects.every((o,i)=>o&&o.ordinal===i&&Number.isSafeInteger(o.size)&&o.size>0&&/^[0-9a-f]{64}$/.test(o.ciphertextSha256||'')&&B64.test(o.bytes||''));}
   function validState(s){if(!s||s.id!==ID||s.version!==2||!DEV.test(s.clinicDeviceId||'')||!SK.test(s.signingKeyId||'')||!privateKey(s.signingPrivateKey)||!jwk(s.signingPublicJwk)||!/^[A-Za-z0-9_-]{43}$/.test(s.uploadBearer||''))return false;if(s.paired!==undefined&&typeof s.paired!=='boolean')return false;if(s.paired&&(!RK.test(s.recipientKeyId||'')||!jwk(s.recipientPublicJwk)))return false;if(!s.paired&&(s.recipientKeyId!==undefined||s.recipientPublicJwk!==undefined))return false;
@@ -22,6 +24,21 @@
   function openDb(){return new Promise((ok,no)=>{const r=indexedDB.open(DB,1);r.onupgradeneeded=()=>r.result.createObjectStore(STORE,{keyPath:'id'});r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error);});}
   async function getState(){const db=await openDb();try{return await new Promise((ok,no)=>{const r=db.transaction(STORE).objectStore(STORE).get(ID);r.onsuccess=()=>ok(r.result||null);r.onerror=()=>no(r.error);});}finally{db.close();}}
   async function putState(v){if(!validState(v))throw Error('PAIRING_STATE_INVALID');const db=await openDb();try{await new Promise((ok,no)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(v);tx.oncomplete=ok;tx.onerror=()=>no(tx.error);tx.onabort=()=>no(tx.error||Error('PAIRING_STATE_TX_ABORTED'));});}finally{db.close();}}
+  // Reads the immutable archive record directly (same store, separate key); callers validate
+  // it themselves against the exact bearer/marker they already hold via validArchive.
+  async function getArchiveRecord(){const db=await openDb();try{return await new Promise((ok,no)=>{const r=db.transaction(STORE).objectStore(STORE).get(ARCHIVE_ID);r.onsuccess=()=>ok(r.result||null);r.onerror=()=>no(r.error);});}finally{db.close();}}
+  // Whenever the current durable state carries a second-generation marker, this must be
+  // satisfied before any normal (non-rotation) action is taken against it: the marker must
+  // point at an immutable archive that is itself a valid accepted job matching the exact
+  // marker id and this identity's bearer, and the current pendingJob must be a genuinely
+  // different (already-rotated) job in pending or accepted state -- never the archived job
+  // itself, never missing, never malformed. Any violation fails closed with no further action
+  // (no claim, no put, no bridge call) rather than reconstructing or resetting anything.
+  async function checkSecondGenerationConsistency(s){
+    const archive=await getArchiveRecord();
+    if(!validArchive(archive,s.uploadBearer)||archive.pendingJob.body.jobId!==s.secondGenerationOf)throw Error('D2_SECOND_GENERATION_STATE_INVALID');
+    if(!s.pendingJob||!(s.pendingJob.status==='pending'||s.pendingJob.status==='accepted')||s.pendingJob.body.jobId===s.secondGenerationOf)throw Error('D2_SECOND_GENERATION_STATE_INVALID');
+  }
   // Single readwrite get-then-put transaction so a decision made from the current durable
   // state (adopt it, reject it, or replace it) commits atomically against any other tab/page
   // racing the same store. mutate(current) returns the next state to persist, or null to make
@@ -61,7 +78,7 @@
   // was the one just stored, `adopted` when a racing tab's pendingJob (already pending or
   // already accepted) was found and returned instead. Callers must route an adopted job
   // through the existing status-first path rather than uploading it directly.
-  function claimPendingJob(body){return new Promise((resolve,reject)=>{openDb().then(db=>{const tx=db.transaction(STORE,'readwrite'),store=tx.objectStore(STORE),req=store.get(ID);let settled=false;const fail=err=>{if(settled)return;settled=true;try{db.close();}catch(_){}reject(err);};const finish=value=>{if(settled)return;settled=true;db.close();resolve(value);};tx.onerror=()=>fail(tx.error);tx.onabort=()=>fail(tx.error||Error('PAIRING_STATE_TX_ABORTED'));req.onsuccess=()=>{const current=req.result;if(!current||!validState(current)||!current.paired||body.bearer!==current.uploadBearer){fail(Error('PAIRING_STATE_MISSING'));return;}if(current.pendingJob&&(current.pendingJob.status==='pending'||current.pendingJob.status==='accepted')){tx.oncomplete=()=>finish(Object.assign({},current,{created:false,adopted:true}));return;}const next={...current,pendingJob:{status:'pending',body}};if(!validState(next)){fail(Error('PAIRING_STATE_INVALID'));return;}store.put(next);tx.oncomplete=()=>finish(Object.assign({},next,{created:true,adopted:false}));};req.onerror=()=>fail(req.error);},reject);});}
+  function claimPendingJob(body){return new Promise((resolve,reject)=>{openDb().then(db=>{const tx=db.transaction(STORE,'readwrite'),store=tx.objectStore(STORE),req=store.get(ID);let settled=false;const fail=err=>{if(settled)return;settled=true;try{db.close();}catch(_){}reject(err);};const finish=value=>{if(settled)return;settled=true;db.close();resolve(value);};tx.onerror=()=>fail(tx.error);tx.onabort=()=>fail(tx.error||Error('PAIRING_STATE_TX_ABORTED'));req.onsuccess=()=>{const current=req.result;if(!current||!validState(current)||!current.paired||body.bearer!==current.uploadBearer){fail(Error('PAIRING_STATE_MISSING'));return;}if(current.pendingJob&&(current.pendingJob.status==='pending'||current.pendingJob.status==='accepted')){tx.oncomplete=()=>finish(Object.assign({},current,{created:false,adopted:true}));return;}if(current.secondGenerationOf!==undefined){fail(Error('D2_SECOND_GENERATION_STATE_INVALID'));return;}const next={...current,pendingJob:{status:'pending',body}};if(!validState(next)){fail(Error('PAIRING_STATE_INVALID'));return;}store.put(next);tx.oncomplete=()=>finish(Object.assign({},next,{created:true,adopted:false}));};req.onerror=()=>fail(req.error);},reject);});}
   // Only ever reports accepted once a durable state exactly matching this identity/job has
   // actually been committed; a missing/mismatched/invalid current state is rejected rather
   // than silently resolved, so callers cannot mistake "nothing happened" for success.
@@ -71,48 +88,72 @@
   // pendingJob byte-for-byte via a single-use `add` (never overwritten) in the very same
   // readwrite transaction that commits the replacement, so no partial state (archived-but-not-
   // replaced, or replaced-but-not-archived) can ever be observed. The transaction re-reads the
-  // current durable record and compares it against `captured` (old accepted job id/status plus
-  // paired identity, bearer, and public JWK coordinates -- never a CryptoKey object) rather
-  // than trusting the caller's earlier snapshot, so a racing tab can never undo or duplicate
-  // this rotation. An already-rotated (second-generation marker present) current state is
-  // treated as this call having lost the race: adopted (never a third generation), mirroring
-  // claimPendingJob's status-first contract. Any unexpected/malformed current or archive state
+  // current durable record and compares it against `captured` (old accepted job id, plus the
+  // full paired identity: clinicDeviceId, signingKeyId, bearer, and both the sender's and the
+  // recipient's EC public coordinates compared field-by-field -- never a CryptoKey object,
+  // never raw JSON/property-order/object-identity comparison) rather than trusting the
+  // caller's earlier snapshot, so a racing tab (or a concurrent re-pair) can never undo,
+  // duplicate, or misdirect this rotation. The freshly built replacement body is also rejected
+  // outright if it would collide with the exact job/descriptor being archived -- a "second"
+  // job must always be a genuinely distinct job. An already-rotated (second-generation marker
+  // present) current state is only ever treated as this call having lost the race -- adopted,
+  // never a third generation -- when that marker exactly matches this call's captured old job
+  // id AND the current pendingJob is itself a genuinely different, structurally pending or
+  // accepted job; any other shape (mismatched marker, missing/invalid pendingJob, or a
+  // pendingJob that is still the archived job itself) fails closed instead of blindly adopting
+  // a malformed or mismatched state. Any other unexpected/malformed current or archive state
   // (including an archive that already exists) fails closed with no write at all -- no reset.
-  // Any synchronous validation, add, or put failure explicitly aborts the transaction; only a
-  // true transaction-complete event ever resolves this promise as a write.
-  function rotateSecondJob(captured,newBody){return new Promise((resolve,reject)=>{openDb().then(db=>{
-    const tx=db.transaction(STORE,'readwrite'),store=tx.objectStore(STORE);
+  // No `await` is ever used inside the transaction; any synchronous validation, add, or put
+  // failure explicitly aborts the transaction before rejecting, and a transaction construction
+  // or other synchronous throw outside any request handler is still caught (via the trailing
+  // `.catch`) rather than leaving the promise hanging. Only a true transaction-complete event
+  // ever resolves this promise as a write; an error/abort terminal event never does.
+  function rotateSecondJob(captured,newBody){return new Promise((resolve,reject)=>{
     let settled=false;
-    const fail=err=>{if(settled)return;settled=true;try{tx.abort();}catch(_){}try{db.close();}catch(_){}reject(err);};
-    const finish=value=>{if(settled)return;settled=true;db.close();resolve(value);};
-    tx.onerror=()=>fail(tx.error);
-    tx.onabort=()=>fail(tx.error||Error('PAIRING_STATE_TX_ABORTED'));
-    const req1=store.get(ID);
-    req1.onerror=()=>fail(req1.error);
-    req1.onsuccess=()=>{
-      const current=req1.result;
-      if(!current||!validState(current)||!current.paired){fail(Error('PAIRING_STATE_INVALID'));return;}
-      if(current.secondGenerationOf!==undefined){tx.oncomplete=()=>finish(Object.assign({},current,{created:false,adopted:true}));return;}
-      if(!current.pendingJob||current.pendingJob.status!=='accepted'||current.pendingJob.body.jobId!==captured.oldJobId){fail(Error('D2_SECOND_JOB_STATE_INVALID'));return;}
-      if(current.clinicDeviceId!==captured.clinicDeviceId||current.signingKeyId!==captured.signingKeyId||current.uploadBearer!==captured.uploadBearer||JSON.stringify(current.signingPublicJwk)!==JSON.stringify(captured.signingPublicJwk)){fail(Error('D2_SECOND_JOB_STATE_INVALID'));return;}
-      const req2=store.get(ARCHIVE_ID);
-      req2.onerror=()=>fail(req2.error);
-      req2.onsuccess=()=>{
-        if(req2.result!==undefined){fail(Error('D2_SECOND_JOB_ARCHIVE_EXISTS'));return;}
-        const archiveRecord={id:ARCHIVE_ID,pendingJob:current.pendingJob};
-        if(!validArchive(archiveRecord,current.uploadBearer)){fail(Error('PAIRING_STATE_INVALID'));return;}
-        const next={...current,pendingJob:{status:'pending',body:newBody},secondGenerationOf:captured.oldJobId};
-        if(!validState(next)){fail(Error('PAIRING_STATE_INVALID'));return;}
-        let req3;try{req3=store.add(archiveRecord);}catch(err){fail(err);return;}
-        req3.onerror=()=>fail(req3.error||Error('D2_SECOND_JOB_ARCHIVE_WRITE_FAILED'));
-        req3.onsuccess=()=>{
-          let req4;try{req4=store.put(next);}catch(err){fail(err);return;}
-          req4.onerror=()=>fail(req4.error||Error('D2_SECOND_JOB_STATE_WRITE_FAILED'));
-          req4.onsuccess=()=>{tx.oncomplete=()=>finish(Object.assign({},next,{created:true,adopted:false}));};
+    openDb().then(db=>{
+      const tx=db.transaction(STORE,'readwrite'),store=tx.objectStore(STORE);
+      // `settled` is flipped to true before calling tx.abort(): the fake/real IndexedDB abort
+      // can re-enter this exact handler synchronously via tx.onabort while still inside this
+      // very call, and that re-entrant call must see the already-rejecting state and no-op so
+      // the *original* error (not a generic abort error) is the one actually rejected with.
+      const failTx=err=>{if(settled)return;settled=true;try{tx.abort();}catch(_){}try{db.close();}catch(_){}reject(err);};
+      const finishTx=value=>{if(settled)return;settled=true;db.close();resolve(value);};
+      tx.onerror=()=>failTx(tx.error);
+      tx.onabort=()=>failTx(tx.error||Error('PAIRING_STATE_TX_ABORTED'));
+      const req1=store.get(ID);
+      req1.onerror=()=>failTx(req1.error);
+      req1.onsuccess=()=>{
+        const current=req1.result;
+        if(!current||!validState(current)||!current.paired){failTx(Error('PAIRING_STATE_INVALID'));return;}
+        const identityMatches=current.clinicDeviceId===captured.clinicDeviceId&&current.signingKeyId===captured.signingKeyId&&current.uploadBearer===captured.uploadBearer&&jwkEqual(current.signingPublicJwk,captured.signingPublicJwk)&&current.recipientKeyId===captured.recipientKeyId&&jwkEqual(current.recipientPublicJwk,captured.recipientPublicJwk);
+        if(!identityMatches){failTx(Error('D2_SECOND_JOB_STATE_INVALID'));return;}
+        if(current.secondGenerationOf!==undefined){
+          const validLoss=current.secondGenerationOf===captured.oldJobId&&!!current.pendingJob&&(current.pendingJob.status==='pending'||current.pendingJob.status==='accepted')&&current.pendingJob.body.jobId!==captured.oldJobId;
+          if(!validLoss){failTx(Error('D2_SECOND_JOB_STATE_INVALID'));return;}
+          tx.oncomplete=()=>finishTx(Object.assign({},current,{created:false,adopted:true}));
+          return;
+        }
+        if(!current.pendingJob||current.pendingJob.status!=='accepted'||current.pendingJob.body.jobId!==captured.oldJobId){failTx(Error('D2_SECOND_JOB_STATE_INVALID'));return;}
+        if(newBody.jobId===captured.oldJobId||newBody.descriptorSha256===current.pendingJob.body.descriptorSha256){failTx(Error('D2_SECOND_JOB_STATE_INVALID'));return;}
+        const req2=store.get(ARCHIVE_ID);
+        req2.onerror=()=>failTx(req2.error);
+        req2.onsuccess=()=>{
+          if(req2.result!==undefined){failTx(Error('D2_SECOND_JOB_ARCHIVE_EXISTS'));return;}
+          const archiveRecord={id:ARCHIVE_ID,pendingJob:current.pendingJob};
+          if(!validArchive(archiveRecord,current.uploadBearer)){failTx(Error('PAIRING_STATE_INVALID'));return;}
+          const next={...current,pendingJob:{status:'pending',body:newBody},secondGenerationOf:captured.oldJobId};
+          if(!validState(next)){failTx(Error('PAIRING_STATE_INVALID'));return;}
+          let req3;try{req3=store.add(archiveRecord);}catch(err){failTx(err);return;}
+          req3.onerror=()=>failTx(req3.error||Error('D2_SECOND_JOB_ARCHIVE_WRITE_FAILED'));
+          req3.onsuccess=()=>{
+            let req4;try{req4=store.put(next);}catch(err){failTx(err);return;}
+            req4.onerror=()=>failTx(req4.error||Error('D2_SECOND_JOB_STATE_WRITE_FAILED'));
+            req4.onsuccess=()=>{tx.oncomplete=()=>finishTx(Object.assign({},next,{created:true,adopted:false}));};
+          };
         };
       };
-    };
-  },reject);});}
+    }).catch(err=>{if(settled)return;settled=true;reject(err);});
+  });}
   function validReadyResult(r,jobId){return !!r&&typeof r==='object'&&Object.keys(r).length===2&&r.jobId===jobId&&r.status==='ready';}
   function validStatusResult(r,jobId){return !!r&&typeof r==='object'&&Object.keys(r).length===2&&r.jobId===jobId&&typeof r.status==='string'&&/^(ready|partial|deleting|deleted|not-started)$/.test(r.status);}
   async function queryStatus(body){let r;try{r=await bridgeCall('getSyntheticJobStatus',{bearer:body.bearer,jobId:body.jobId,ackProofHash:body.ackProofHash,planSha256:body.planSha256});}catch(e){throw Error('D2_STATUS_RESPONSE_INVALID');}if(!validStatusResult(r,body.jobId))throw Error('D2_STATUS_RESPONSE_INVALID');return r.status;}
@@ -135,10 +176,13 @@
       // immediately before retrying and stop without any network call if it no longer matches.
       let current;
       try{current=await getState();}catch(e){report('Synthetic ciphertext job status unconfirmed. Existing pending job retained.');return;}
-      const stillCurrent=validState(current)&&current.paired&&current.pendingJob&&current.pendingJob.status==='pending'&&current.pendingJob.body&&current.pendingJob.body.jobId===body.jobId&&current.pendingJob.body.bearer===body.bearer;
+      const durable=current&&current.pendingJob&&current.pendingJob.body;
+      const stillCurrent=validState(current)&&current.paired&&current.pendingJob&&current.pendingJob.status==='pending'&&durable&&durable.jobId===body.jobId&&durable.bearer===body.bearer&&durable.descriptorSha256===body.descriptorSha256&&durable.ackProofHash===body.ackProofHash&&durable.planSha256===body.planSha256;
       if(!stillCurrent){report('Synthetic ciphertext job status unconfirmed. Existing pending job retained.');return;}
-      const confirmed=await attemptUpload(body);
-      if(confirmed){await markAccepted(body.jobId);report('Synthetic ciphertext job accepted by bridge. No credential or payload was displayed.');}
+      // Retry with the exact durable body just re-read above, never the caller's (possibly
+      // stale) snapshot -- even though the checks above already matched it field-for-field.
+      const confirmed=await attemptUpload(durable);
+      if(confirmed){await markAccepted(durable.jobId);report('Synthetic ciphertext job accepted by bridge. No credential or payload was displayed.');}
       else report('Synthetic ciphertext job status unconfirmed. Existing pending job retained.');
       return;
     }
@@ -147,6 +191,10 @@
   async function send(){
     const s=await getState();
     if(!validState(s)||!s.paired)throw Error('PAIRING_STATE_MISSING');
+    // A second-generation marker must never fall through to the create-a-new-job path below
+    // (e.g. because the real rotated pendingJob or its archive is missing/malformed) -- that
+    // would be a reconstructed/third-generation job. Fail closed first, with no network call.
+    if(s.secondGenerationOf!==undefined)await checkSecondGenerationConsistency(s);
     if(s.pendingJob&&s.pendingJob.status==='accepted'){report('Synthetic ciphertext job already accepted.');return;}
     if(s.pendingJob&&s.pendingJob.status==='pending'){await resolvePendingJob(s.pendingJob.body);return;}
     const body=await buildJobBody(s);
@@ -172,14 +220,18 @@
     const s=await getState();
     if(!validState(s)||!s.paired)throw Error('PAIRING_STATE_MISSING');
     if(s.secondGenerationOf!==undefined){
-      if(s.pendingJob&&s.pendingJob.status==='accepted'){report('Second synthetic ciphertext job already accepted.');return;}
-      if(s.pendingJob&&s.pendingJob.status==='pending'){await resolvePendingJob(s.pendingJob.body);return;}
-      throw Error('D2_SECOND_JOB_STATE_INVALID');
+      // Verify the immutable archive still exists, is valid/accepted, matches this exact
+      // marker, and the current pendingJob is genuinely the rotated job (never the archived
+      // original) before taking any explicit second action here, including a no-op retry.
+      await checkSecondGenerationConsistency(s);
+      if(s.pendingJob.status==='accepted'){report('Second synthetic ciphertext job already accepted.');return;}
+      await resolvePendingJob(s.pendingJob.body);
+      return;
     }
     if(!s.pendingJob)throw Error('D2_SECOND_JOB_REQUIRES_FIRST_ACCEPTED');
     if(s.pendingJob.status==='pending'){await resolvePendingJob(s.pendingJob.body);return;}
     if(s.pendingJob.status!=='accepted')throw Error('D2_SECOND_JOB_REQUIRES_FIRST_ACCEPTED');
-    const captured={oldJobId:s.pendingJob.body.jobId,clinicDeviceId:s.clinicDeviceId,signingKeyId:s.signingKeyId,uploadBearer:s.uploadBearer,signingPublicJwk:s.signingPublicJwk};
+    const captured={oldJobId:s.pendingJob.body.jobId,clinicDeviceId:s.clinicDeviceId,signingKeyId:s.signingKeyId,uploadBearer:s.uploadBearer,signingPublicJwk:s.signingPublicJwk,recipientKeyId:s.recipientKeyId,recipientPublicJwk:s.recipientPublicJwk};
     const newBody=await buildSecondJobBody(s);
     const rotated=await rotateSecondJob(captured,newBody);
     if(rotated.pendingJob.status==='accepted'){report('Second synthetic ciphertext job already accepted.');return;}

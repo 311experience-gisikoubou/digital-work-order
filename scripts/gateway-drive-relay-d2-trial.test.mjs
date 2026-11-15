@@ -11,6 +11,11 @@ function testHookSource(source){
   return source.replace(marker,'globalThis.D2TrialTestHooks=Object.freeze({validState,validArchive,isSandboxOrigin,bridgeCall,buildJobBody,buildSecondJobBody,claimPendingJob,markAccepted,queryStatus,attemptUpload,resolvePendingJob,rotateSecondJob,send,sendSecond,pair,withBusy,getState,putState,ARCHIVE_ID,SECOND_REF,FIRST_REF});'+marker);
 }
 const h = bytes => createHash('sha256').update(bytes).digest('hex'); const REF = 'dwo:123e4567-e89b-42d3-a456-426614174000';
+// Normalizes a value (e.g. an archive/pendingJob/body record) to a plain JSON structure before
+// comparison -- avoids any dependency on which vm realm's Object/Array intrinsics a given
+// nested object literal happened to be constructed with, while still requiring complete,
+// exact field equality (every key/value, recursively, must still match byte-for-byte).
+const jsonClone = v => JSON.parse(JSON.stringify(v));
 const SANDBOX_ORIGIN='https://n-bcp4qzdfuoczg3utczw3uytot2wyafcdo5lfkuq-0lu-script.googleusercontent.com';
 function fakeTimers(){let nextId=1;const timers=new Map();return{setTimeout(fn,delay){const id=nextId++;timers.set(id,{fn,delay,cleared:false});return id;},clearTimeout(id){const t=timers.get(id);if(t)t.cleared=true;},fire(id){const t=timers.get(id);if(t&&!t.cleared)t.fn();},entries(){return[...timers.entries()];}};}
 // Minimal synthetic IndexedDB double: a single object store, serialized readwrite/readonly transactions
@@ -77,7 +82,7 @@ async function makeSenderState(overrides={}){
   const key=await webcrypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},false,['sign']);
   return{id:'sender',version:2,clinicDeviceId:'dev_test',signingKeyId:'sk_test',signingPrivateKey:key.privateKey,signingPublicJwk:{kty:'EC',crv:'P-256',x:'x'.repeat(43),y:'y'.repeat(43)},uploadBearer:'A'.repeat(43),paired:true,recipientKeyId:'rk_receiver',recipientPublicJwk:{kty:'EC',crv:'P-256',x:'x'.repeat(43),y:'y'.repeat(43)},...overrides};
 }
-test('browser validator executes fail-closed state checks and CSP has only exact Google origins',async()=>{const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8'),html=await fs.readFile(new URL('../app/drive-relay-d2-trial.html',import.meta.url),'utf8');class FakeCryptoKey{constructor(extractable=false,usages=['sign']){this.type='private';this.extractable=extractable;this.algorithm={name:'ECDSA',namedCurve:'P-256'};this.usages=usages;}}const nodes={status:{},'relay-bridge':{},pair:{},send:{},send2:{}};const sandbox={CryptoKey:FakeCryptoKey,crypto:{getRandomValues:v=>v,subtle:{}},document:{getElementById:id=>nodes[id]},window:{addEventListener(){},removeEventListener(){}},location:{href:'https://example.invalid/'},URL,TextEncoder,indexedDB:{},isSecureContext:true,Error,Array,Number,Object,Promise,setTimeout,clearTimeout,globalThis:null};sandbox.globalThis=sandbox;vm.runInNewContext(testHookSource(source),sandbox);const key=new FakeCryptoKey(),base={id:'sender',version:2,clinicDeviceId:'dev_test',signingKeyId:'sk_test',signingPrivateKey:key,signingPublicJwk:{kty:'EC',crv:'P-256',x:'x'.repeat(43),y:'y'.repeat(43)},uploadBearer:'A'.repeat(43),paired:false},pending={status:'pending',body:{bearer:base.uploadBearer,jobId:'job_'+'a'.repeat(64),descriptorSha256:'a'.repeat(64),ackProofHash:'b'.repeat(64),planSha256:'c'.repeat(64),plan:{version:'dwo-relay-plan-v1',totalBytes:1,entries:[{}]},objects:[{ordinal:0,size:1,ciphertextSha256:'d'.repeat(64),bytes:'AQ'}]}};assert.equal(sandbox.D2TrialTestHooks.validState(base),true);assert.equal(sandbox.D2TrialTestHooks.validState({...base,pendingJob:{...pending,body:{...pending.body,plan:{...pending.body.plan,entries:[]}}}}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,signingPrivateKey:new FakeCryptoKey(true)}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,signingPrivateKey:new FakeCryptoKey(false,['verify'])}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,uploadBearer:'A'.repeat(42)}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,paired:true}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,secondGenerationOf:'not-a-job-id'}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,secondGenerationOf:'job_'+'a'.repeat(64)}),true);assert.equal(sandbox.D2TrialTestHooks.validArchive({id:sandbox.D2TrialTestHooks.ARCHIVE_ID,pendingJob:pending},base.uploadBearer),false);assert.equal(sandbox.D2TrialTestHooks.validArchive({id:sandbox.D2TrialTestHooks.ARCHIVE_ID,pendingJob:{...pending,status:'accepted'}},base.uploadBearer),true);assert.match(source,/MediaRelayTransport\.canonicalJson\(built\.request\.plan\)/);assert.match(html,/frame-src https:\/\/script\.google\.com https:\/\/script\.googleusercontent\.com/);assert.doesNotMatch(html,/\*\.googleusercontent/);});
+test('browser validator executes fail-closed state checks and CSP has only exact Google origins',async()=>{const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8'),html=await fs.readFile(new URL('../app/drive-relay-d2-trial.html',import.meta.url),'utf8');class FakeCryptoKey{constructor(extractable=false,usages=['sign']){this.type='private';this.extractable=extractable;this.algorithm={name:'ECDSA',namedCurve:'P-256'};this.usages=usages;}}const nodes={status:{},'relay-bridge':{},pair:{},send:{},send2:{}};const sandbox={CryptoKey:FakeCryptoKey,crypto:{getRandomValues:v=>v,subtle:{}},document:{getElementById:id=>nodes[id]},window:{addEventListener(){},removeEventListener(){}},location:{href:'https://example.invalid/'},URL,TextEncoder,indexedDB:{},isSecureContext:true,Error,Array,Number,Object,Promise,setTimeout,clearTimeout,globalThis:null};sandbox.globalThis=sandbox;vm.runInNewContext(testHookSource(source),sandbox);const key=new FakeCryptoKey(),base={id:'sender',version:2,clinicDeviceId:'dev_test',signingKeyId:'sk_test',signingPrivateKey:key,signingPublicJwk:{kty:'EC',crv:'P-256',x:'x'.repeat(43),y:'y'.repeat(43)},uploadBearer:'A'.repeat(43),paired:false},pending={status:'pending',body:{bearer:base.uploadBearer,jobId:'job_'+'a'.repeat(64),descriptorSha256:'a'.repeat(64),ackProofHash:'b'.repeat(64),planSha256:'c'.repeat(64),plan:{version:'dwo-relay-plan-v1',totalBytes:1,entries:[{}]},objects:[{ordinal:0,size:1,ciphertextSha256:'d'.repeat(64),bytes:'AQ'}]}},validPending3={status:'accepted',body:{bearer:base.uploadBearer,jobId:'job_'+'e'.repeat(64),descriptorSha256:'e'.repeat(64),ackProofHash:'b'.repeat(64),planSha256:'c'.repeat(64),plan:{version:'dwo-relay-plan-v1',totalBytes:3,entries:[{},{},{}]},objects:[0,1,2].map(i=>({ordinal:i,size:1,ciphertextSha256:'d'.repeat(64),bytes:'AQ'}))}};assert.equal(sandbox.D2TrialTestHooks.validState(base),true);assert.equal(sandbox.D2TrialTestHooks.validState({...base,pendingJob:{...pending,body:{...pending.body,plan:{...pending.body.plan,entries:[]}}}}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,signingPrivateKey:new FakeCryptoKey(true)}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,signingPrivateKey:new FakeCryptoKey(false,['verify'])}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,uploadBearer:'A'.repeat(42)}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,paired:true}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,secondGenerationOf:'not-a-job-id'}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,secondGenerationOf:'job_'+'a'.repeat(64)}),true);assert.equal(sandbox.D2TrialTestHooks.validArchive({id:sandbox.D2TrialTestHooks.ARCHIVE_ID,pendingJob:pending},base.uploadBearer),false);assert.equal(sandbox.D2TrialTestHooks.validArchive({id:sandbox.D2TrialTestHooks.ARCHIVE_ID,pendingJob:{...pending,status:'accepted'}},base.uploadBearer),false,'a one-object pending/accepted job is still structurally invalid (production requires >=3 objects) and must never be accepted as a valid archive');assert.equal(sandbox.D2TrialTestHooks.validArchive({id:sandbox.D2TrialTestHooks.ARCHIVE_ID,pendingJob:validPending3},base.uploadBearer),true,'a genuinely valid three-object accepted job, matching its plan entry count, must be accepted as a valid archive');assert.match(source,/MediaRelayTransport\.canonicalJson\(built\.request\.plan\)/);assert.match(html,/frame-src https:\/\/script\.google\.com https:\/\/script\.googleusercontent\.com/);assert.doesNotMatch(html,/\*\.googleusercontent/);});
 test('browser bridge accepts only generated Apps Script sandbox origin and pins nested source/origin',async()=>{
   const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
   let onMessage=null,posted=null,settled=false;
@@ -367,7 +372,7 @@ test('D2 sender two-tab regression: adopter queries status before any retry and 
 
 // Issue #170: bounded second synthetic job, preserving the first accepted record unchanged.
 function makeJobBody(bearer,seed){return{bearer,jobId:'job_'+seed.repeat(64),descriptorSha256:seed.repeat(64),ackProofHash:'b'.repeat(64),planSha256:'c'.repeat(64),plan:{version:'dwo-relay-plan-v1',totalBytes:3,entries:[{},{},{}]},objects:[0,1,2].map(i=>({ordinal:i,size:1,ciphertextSha256:'d'.repeat(64),bytes:'AQ'}))};}
-function capturedFrom(base,oldJobId){return{oldJobId,clinicDeviceId:base.clinicDeviceId,signingKeyId:base.signingKeyId,uploadBearer:base.uploadBearer,signingPublicJwk:base.signingPublicJwk};}
+function capturedFrom(base,oldJobId){return{oldJobId,clinicDeviceId:base.clinicDeviceId,signingKeyId:base.signingKeyId,uploadBearer:base.uploadBearer,signingPublicJwk:base.signingPublicJwk,recipientKeyId:base.recipientKeyId,recipientPublicJwk:base.recipientPublicJwk};}
 function captureReady(ctx){const log=[],channel=readChannel(ctx.nodes),source={postMessage(message){log.push(message);}};ctx.getOnMessage()({origin:SANDBOX_ORIGIN,source,data:{version:'dwo-d2-bridge-v1',channel,type:'ready'}});return{channel,source,log};}
 function sendResult(ctx,channel,source,ok,value){ctx.getOnMessage()({origin:SANDBOX_ORIGIN,source,data:{version:'dwo-d2-bridge-v1',channel,type:'result',ok,value}});}
 
@@ -420,6 +425,21 @@ test('D2 sender rotateSecondJob archives the exact first accepted job unchanged,
   // also fail closed before any write.
   await assert.rejects(hooks.rotateSecondJob({...captured,oldJobId:'job_'+'z'.repeat(64)},makeJobBody(base.uploadBearer,'3')),{message:'D2_SECOND_JOB_STATE_INVALID'});
   assert.equal(fakeDB.peek('sender').pendingJob.body.jobId,oldBody.jobId);
+  // A captured recipient identity that no longer matches the current paired recipient (e.g. a
+  // concurrent re-pair happened) must fail closed before any write, exactly like a stale
+  // sender identity.
+  await assert.rejects(hooks.rotateSecondJob({...captured,recipientKeyId:'rk_'+'o'.repeat(20)},makeJobBody(base.uploadBearer,'7')),{message:'D2_SECOND_JOB_STATE_INVALID'});
+  assert.equal(fakeDB.peek(hooks.ARCHIVE_ID),undefined);
+  assert.equal(fakeDB.peek('sender').pendingJob.body.jobId,oldBody.jobId);
+  await assert.rejects(hooks.rotateSecondJob({...captured,recipientPublicJwk:{...base.recipientPublicJwk,x:'z'.repeat(43)}},makeJobBody(base.uploadBearer,'8')),{message:'D2_SECOND_JOB_STATE_INVALID'});
+  assert.equal(fakeDB.peek(hooks.ARCHIVE_ID),undefined);
+  assert.equal(fakeDB.peek('sender').pendingJob.body.jobId,oldBody.jobId);
+  // A freshly built replacement whose jobId/descriptorSha256 is identical to the job being
+  // archived must never be accepted as a "second" job -- it would just silently re-accept the
+  // exact same job rather than rotate to a genuinely distinct one.
+  await assert.rejects(hooks.rotateSecondJob(captured,{...makeJobBody(base.uploadBearer,'9'),jobId:oldBody.jobId,descriptorSha256:oldBody.descriptorSha256}),{message:'D2_SECOND_JOB_STATE_INVALID'});
+  assert.equal(fakeDB.peek(hooks.ARCHIVE_ID),undefined);
+  assert.equal(fakeDB.peek('sender').pendingJob.body.jobId,oldBody.jobId);
   // The real rotation: a fresh, distinct second body committed together with an unchanged
   // archive of the first accepted job, in one transaction.
   const newBody=makeJobBody(base.uploadBearer,'4');
@@ -429,10 +449,10 @@ test('D2 sender rotateSecondJob archives the exact first accepted job unchanged,
   assert.equal(result.pendingJob.body.jobId,newBody.jobId);
   assert.notEqual(newBody.jobId,oldBody.jobId);
   assert.notEqual(newBody.descriptorSha256,oldBody.descriptorSha256);
-  assert.deepEqual(fakeDB.peek(hooks.ARCHIVE_ID),{id:hooks.ARCHIVE_ID,pendingJob:{status:'accepted',body:oldBody}},'the archive must hold the exact prior accepted pendingJob, unchanged');
+  assert.deepEqual(jsonClone(fakeDB.peek(hooks.ARCHIVE_ID)),jsonClone({id:hooks.ARCHIVE_ID,pendingJob:{status:'accepted',body:oldBody}}),'the archive must hold the exact prior accepted pendingJob, unchanged');
   const storedAfterRotation=fakeDB.peek('sender');
   assert.equal(storedAfterRotation.secondGenerationOf,oldBody.jobId);
-  assert.deepEqual(storedAfterRotation.pendingJob,{status:'pending',body:newBody});
+  assert.deepEqual(jsonClone(storedAfterRotation.pendingJob),jsonClone({status:'pending',body:newBody}));
   // A late tab arriving after rotation (still pending) must adopt, never create a third job.
   const loserWhilePending=await hooks.rotateSecondJob(captured,makeJobBody(base.uploadBearer,'5'));
   assert.equal(loserWhilePending.created,false);assert.equal(loserWhilePending.adopted,true);
@@ -444,7 +464,7 @@ test('D2 sender rotateSecondJob archives the exact first accepted job unchanged,
   assert.equal(loserWhileAccepted.created,false);assert.equal(loserWhileAccepted.adopted,true);
   assert.equal(loserWhileAccepted.pendingJob.status,'accepted');
   assert.equal(loserWhileAccepted.pendingJob.body.jobId,newBody.jobId);
-  assert.deepEqual(fakeDB.peek(hooks.ARCHIVE_ID),{id:hooks.ARCHIVE_ID,pendingJob:{status:'accepted',body:oldBody}},'the archive must remain exactly the first accepted job across further attempts');
+  assert.deepEqual(jsonClone(fakeDB.peek(hooks.ARCHIVE_ID)),jsonClone({id:hooks.ARCHIVE_ID,pendingJob:{status:'accepted',body:oldBody}}),'the archive must remain exactly the first accepted job across further attempts');
 });
 
 test('D2 sender rotateSecondJob fails closed on an existing or malformed archive without ever overwriting it or mutating the current accepted job',async()=>{
@@ -536,7 +556,7 @@ test('D2 sender sendSecond end-to-end: rotates exactly once, accepts via the bri
   assert.equal(stored.pendingJob.body.jobId,newJobId);
   assert.equal(stored.secondGenerationOf,oldBody.jobId);
   const archived=fakeDB.peek(hooks.ARCHIVE_ID);
-  assert.deepEqual(archived,{id:hooks.ARCHIVE_ID,pendingJob:{status:'accepted',body:oldBody}});
+  assert.deepEqual(jsonClone(archived),jsonClone({id:hooks.ARCHIVE_ID,pendingJob:{status:'accepted',body:oldBody}}));
   // Reload: a fresh durable read must observe the exact same rotated+accepted state.
   const reloaded=await hooks.getState();
   assert.equal(reloaded.pendingJob.status,'accepted');
@@ -546,7 +566,7 @@ test('D2 sender sendSecond end-to-end: rotates exactly once, accepts via the bri
   const srcBeforeRetry=ctx.nodes['relay-bridge'].src;
   await hooks.sendSecond();
   assert.equal(ctx.nodes['relay-bridge'].src,srcBeforeRetry);
-  assert.deepEqual(fakeDB.peek(hooks.ARCHIVE_ID),archived);
+  assert.deepEqual(jsonClone(fakeDB.peek(hooks.ARCHIVE_ID)),jsonClone(archived));
   assert.equal(fakeDB.peek('sender').pendingJob.body.jobId,newJobId);
   // The original, unchanged send button must also simply no-op once the second job is accepted.
   const srcBeforeNormalSend=ctx.nodes['relay-bridge'].src;
@@ -564,6 +584,114 @@ test('D2 sender sendSecond end-to-end: rotates exactly once, accepts via the bri
   await stalePromise;
   assert.equal(ctx.nodes['relay-bridge'].src,staleRoundSrc,'no further bridge round (a retry put) may follow a stale ambiguous status for an archived job');
   assert.equal(fakeDB.peek('sender').pendingJob.body.jobId,newJobId,'a stale delayed check for the archived job must never resurrect it as current');
+});
+
+// Issue #170 corruption guard: a second-generation marker must never fall through to creating
+// a brand new first-style job (via send()) just because the real rotated pendingJob or its
+// immutable archive is missing, mismatched, or still the archived job itself. Every scenario
+// here must fail closed before any bridge round-trip and must leave the seeded durable record
+// completely untouched.
+test('D2 sender send() fails closed on a second-generation marker with a missing/mismatched archive or an inconsistent pendingJob, with no network call and no mutation',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const base=await makeSenderState();
+  const oldBody=makeJobBody(base.uploadBearer,'1'),newBody=makeJobBody(base.uploadBearer,'2'),otherOldBody=makeJobBody(base.uploadBearer,'3');
+  async function expectFailClosed(senderRecord,archiveRecord){
+    const fakeDB=makeFakeIndexedDB();
+    fakeDB.seed(senderRecord);
+    if(archiveRecord!==undefined)fakeDB.seed(archiveRecord);
+    const ctx=buildSenderSandbox({indexedDB:fakeDB});
+    vm.runInNewContext(testHookSource(source),ctx.sandbox);
+    const hooks=ctx.sandbox.D2TrialTestHooks;
+    const srcBefore=ctx.nodes['relay-bridge'].src;
+    await assert.rejects(hooks.send(),{message:'D2_SECOND_GENERATION_STATE_INVALID'});
+    assert.equal(ctx.nodes['relay-bridge'].src,srcBefore,'no bridge round may ever start for a fail-closed corruption');
+    assert.equal(fakeDB.peek('sender'),senderRecord,'the durable state must be preserved exactly, never reconstructed');
+  }
+  // (a) marker present, pendingJob is a genuinely different pending job, but the archive is
+  // entirely missing.
+  await expectFailClosed({...base,secondGenerationOf:oldBody.jobId,pendingJob:{status:'pending',body:newBody}},undefined);
+  // (b) marker present, archive present and valid and matching the marker, but there is no
+  // current pendingJob at all.
+  await expectFailClosed({...base,secondGenerationOf:oldBody.jobId,pendingJob:undefined},{id:'sender-first-accepted',pendingJob:{status:'accepted',body:oldBody}});
+  // (c) marker present, but the current pendingJob is literally the same job the marker claims
+  // to have rotated away from (old-ID marker, same current -- never legitimately possible).
+  await expectFailClosed({...base,secondGenerationOf:oldBody.jobId,pendingJob:{status:'pending',body:oldBody}},{id:'sender-first-accepted',pendingJob:{status:'accepted',body:oldBody}});
+  // (d) marker present, pendingJob is a genuinely different job, but the archive does not
+  // match the marker (wrong archived job).
+  await expectFailClosed({...base,secondGenerationOf:oldBody.jobId,pendingJob:{status:'pending',body:newBody}},{id:'sender-first-accepted',pendingJob:{status:'accepted',body:otherOldBody}});
+});
+
+// Issue #170: the exact same corruption guard must also stop an explicit second-button retry
+// (not just the normal send() path), including the no-op accepted case.
+test('D2 sender sendSecond() also fails closed on the same marker/archive corruption, before any explicit retry or no-op',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const base=await makeSenderState();
+  const oldBody=makeJobBody(base.uploadBearer,'4'),newBody=makeJobBody(base.uploadBearer,'5');
+  const fakeDB=makeFakeIndexedDB();
+  const seeded={...base,secondGenerationOf:oldBody.jobId,pendingJob:{status:'accepted',body:newBody}};
+  fakeDB.seed(seeded); // archive deliberately missing
+  const ctx=buildSenderSandbox({indexedDB:fakeDB});
+  vm.runInNewContext(testHookSource(source),ctx.sandbox);
+  const hooks=ctx.sandbox.D2TrialTestHooks;
+  const srcBefore=ctx.nodes['relay-bridge'].src;
+  await assert.rejects(hooks.sendSecond(),{message:'D2_SECOND_GENERATION_STATE_INVALID'});
+  assert.equal(ctx.nodes['relay-bridge'].src,srcBefore,'no bridge round, not even a no-op accepted report, may happen before the archive is verified');
+  assert.equal(fakeDB.peek('sender'),seeded);
+});
+
+// Issue #170 A3: resolvePendingJob must never retry with a body that merely matches jobId and
+// bearer but differs from the exact durable record in any other field, and any retry it does
+// perform must use that exact durable body, never the caller-supplied snapshot.
+test('D2 sender resolvePendingJob never retries a body that only partially matches the durable pending job, and always retries with the exact durable body',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const base=await makeSenderState(),durableBody=makeJobBody(base.uploadBearer,'6');
+  const fakeDB=makeFakeIndexedDB();fakeDB.seed({...base,pendingJob:{status:'pending',body:durableBody}});
+  const ctx=buildSenderSandbox({indexedDB:fakeDB});
+  vm.runInNewContext(testHookSource(source),ctx.sandbox);
+  const hooks=ctx.sandbox.D2TrialTestHooks;
+  // Same jobId/bearer as the durable record, but a different planSha256 -- must never be
+  // retried as though it were the exact current pending job.
+  const staleBody={...durableBody,planSha256:'f'.repeat(64)};
+  const log=[];
+  const resolvePromise=hooks.resolvePendingJob(staleBody);
+  const channel=readChannel(ctx.nodes),msgSource={postMessage(message){log.push(message);}};
+  ctx.getOnMessage()({origin:SANDBOX_ORIGIN,source:msgSource,data:{version:'dwo-d2-bridge-v1',channel,type:'ready'}});
+  ctx.getOnMessage()({origin:SANDBOX_ORIGIN,source:msgSource,data:{version:'dwo-d2-bridge-v1',channel,type:'result',ok:true,value:{jobId:durableBody.jobId,status:'not-started'}}});
+  await resolvePromise;
+  assert.deepEqual(log.map(m=>m.action),['getSyntheticJobStatus'],'a field mismatch against the exact durable body must stop before any retry put');
+  assert.equal(fakeDB.peek('sender').pendingJob.status,'pending');
+  assert.equal(fakeDB.peek('sender').pendingJob.body.planSha256,durableBody.planSha256,'the durable body must never be replaced by the caller-supplied stale body');
+});
+
+// Issue #170 A5: exercises the actual production buildJobBody hook with the real
+// MediaTransferPackage/MediaTransferCrypto/MediaRelayTransport/MediaReceiverBootstrap modules
+// and real generated keys (no fakes, no live network) -- verifying the first and second fixed
+// refs produce genuinely distinct real encrypted descriptors/job ids, and that the resulting
+// ackProofHash is bound to this exact real jobId/descriptor/ref via the production formula,
+// independently recomputed here.
+test('D2 sender buildJobBody with real crypto/package/relay modules produces distinct first/second descriptors and a correctly bound real ack proof hash',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const sender=await C.generateSenderIdentity({crypto:webcrypto});
+  const recipient=await C.generateRecipientIdentity('d2-trial-real-fixture-passphrase',{crypto:webcrypto});
+  const nodes={status:{},'relay-bridge':{},pair:{},send:{},send2:{}};
+  const sandbox={CryptoKey:globalThis.CryptoKey,crypto:webcrypto,btoa:s=>Buffer.from(s,'binary').toString('base64'),Blob:globalThis.Blob,Uint8Array,Date,document:{getElementById:id=>nodes[id]},window:{addEventListener(){},removeEventListener(){}},location:{href:'https://example.invalid/'},URL,TextEncoder,indexedDB:{},isSecureContext:true,Error,Array,Number,Object,Promise,setTimeout,clearTimeout,MediaTransferPackage:T,MediaTransferCrypto:C,MediaRelayTransport:R,MediaReceiverBootstrap:B,globalThis:null};
+  sandbox.globalThis=sandbox;
+  vm.runInNewContext(testHookSource(source),sandbox);
+  const hooks=sandbox.D2TrialTestHooks;
+  const state={signingPrivateKey:sender.privateKey,signingPublicJwk:sender.publicJwk,clinicDeviceId:sender.clinicDeviceId,signingKeyId:sender.signingKeyId,recipientKeyId:recipient.recipientKeyId,recipientPublicJwk:recipient.publicJwk,uploadBearer:'A'.repeat(43)};
+  const first=await hooks.buildJobBody(state,hooks.FIRST_REF);
+  const second=await hooks.buildSecondJobBody(state);
+  assert.notEqual(first.jobId,second.jobId);
+  assert.notEqual(first.descriptorSha256,second.descriptorSha256);
+  assert.equal(first.jobId,'job_'+first.descriptorSha256);
+  assert.equal(second.jobId,'job_'+second.descriptorSha256);
+  assert.ok(first.objects.length>=3,'the real transfer plan must contain at least bootstrap/manifest/work-order parts');
+  assert.ok(second.objects.length>=3);
+  for(const {body,ref} of [{body:first,ref:hooks.FIRST_REF},{body:second,ref:hooks.SECOND_REF}]){
+    const expectedProof=h('dwo-receiver-ack-v1|'+body.jobId+'|'+body.descriptorSha256+'|'+ref);
+    const expectedAckProofHash=h(expectedProof);
+    assert.equal(body.ackProofHash,expectedAckProofHash,'ackProofHash must be bound to this exact real jobId/descriptor/ref via the production formula, independently recomputed');
+  }
 });
 
 async function fixture() { const recipient=await C.generateRecipientIdentity('d2-passphrase',{crypto:webcrypto}); const sender=await C.generateSenderIdentity({crypto:webcrypto}); const offer=await C.createPairingOffer(recipient,{crypto:webcrypto,now:()=>1}); const response=await C.createPairingResponse(offer,sender,{crypto:webcrypto,now:()=>2}); const registry=await C.verifyPairingResponse(offer,response,{crypto:webcrypto,now:()=>3}); const marker='SYNTHETIC_CLINICAL_MARKER_NEVER_IN_RELAY_META'; const pkg=await T.buildPackage(REF,{workOrderRef:REF,trialMarker:marker},[{meta:{attachmentId:'att-123e4567-e89b-42d3-a456-426614174001',kind:'file',mime:'application/octet-stream',size:4},blob:new Blob([Uint8Array.from([1,2,3,4])])}],{crypto:webcrypto,now:()=>4,chunkSize:4}); const envelope=await C.encryptPackage(pkg,sender,recipient,{crypto:webcrypto,now:()=>5}); const built=await R.buildCreateRequest(envelope,sender,{crypto:webcrypto,now:()=>6,recipientPublicInfo:recipient,bootstrapApi:B}); return {recipient,registry,built,marker}; }
