@@ -15,3 +15,72 @@ Setup/run boundary: use a dedicated synthetic Drive root; create a separate Apps
 For one explicit lab-PC trial run (not a daemon), invoke `node gateway/drive-relay-d2-adapter.mjs --config=<synthetic-config.json>`. The config accepts only `schemaVersion`, `syncedJobDir`, `inboxRoot`, `recipientBackupPath`, and `appsScriptEndpoint`; paths are relative to the config file. The synthetic receiver bearer and recipient-backup passphrase must be supplied only through `DWO_D2_RECEIVER_BEARER` and `DWO_RECIPIENT_BACKUP_PASSPHRASE`. Node fetch explicitly follows the Apps Script `ContentService` redirect. The command prints only an opaque status/error code, never either secret or work-order content.
 
 Status boundary: **D1 actual iPad PASS. A dedicated synthetic-only Apps Script/Drive D2 deployment is configured for the external trial. The first live pairing attempt exposed the wrapper/sandbox routing problem and the second diagnosis proved one remaining cause: `google.script.run` does not expose the private `d2Bridge_` function, so the ready message arrives but the `getConfig` call cannot execute. This patch adds only the client-callable `d2Bridge` shim and keeps the validated dispatcher private. The external D2 rerun, PC-offline retention proof, receiver persistence, ACK, and exact permanent-delete proof are still pending. Production adoption and Gate E are NOT complete.**
+
+## Issue #172: bounded D2 "Windows logon receiver" -- retained-only path (source only)
+
+Status: **source-only preparation, not run against the real/production second synthetic job**.
+No task registration, no reboot, no ACK/delete, and no merge happened as part of this change.
+The existing, already-retained second synthetic job on the actual Drive was not accessed,
+read, or modified while writing this path, and none of this was exercised against real files,
+real DPAPI secrets, a network, or Task Scheduler.
+
+This adds a second, separate, retained-only way to receive the *one* bounded second synthetic
+job described above -- without the Apps Script control endpoint, without ACK/deletion, and
+without ever reading the receiver bearer. It exists for a later, separately authorized
+"receive on Windows logon" trial, not for production use:
+
+- `gateway/drive-relay-d2-adapter.mjs` gained `receiveD2RetainedJob` (and the
+  `waitForD2RetainedReady` / `runD2RetainedTrialOnce` / `--retain-config=` CLI pieces it is
+  built from), reusing the exact same verified decrypt (`decryptD2Job`, extracted from the
+  unchanged ACK path's `processD2SyncedJob`), `persistVerifiedPackage`, and `verifyD2LocalJob`
+  building blocks the existing ACK path already uses. `processD2SyncedJob`, `receiveD2Job`, the
+  `--config=` CLI, and their ACK/deletion-resume behavior are unchanged.
+- The retained path never constructs an Apps Script control object, never calls `fetch`, and
+  never reads `DWO_D2_RECEIVER_BEARER`. Before any local persistence it requires, in addition to
+  the existing ready/meta/ciphertext verification: the exact configured `expectedJobId`
+  (`job_<64 hex>`), that job directory being a direct, non-linked child of the one explicitly
+  configured dedicated sync root, and the decrypted content matching the one allowed second
+  built-in fixture exactly -- `workOrderRef` `dwo:223e4567-e89b-42d3-a456-426614174001`, the
+  closed work-order object `{workOrderRef,trial:'D2-SYNTHETIC',createdFor:'test-only'}`, and
+  exactly one `application/octet-stream` attachment whose decrypted bytes are exactly
+  `[68,50,0,1]`. Anything else -- including a different real/valid ref, extra work-order
+  fields, or different attachment bytes -- is rejected before any store, even if it decrypted
+  and verified cryptographically without any other error.
+- A repeat of the exact same job reuses the existing receipt/manifest verification (never a
+  shortcut that only checks the receipt): it still decrypts and verifies the full package
+  against the exact existing local manifest, and a corrupted or conflicting existing local
+  record is rejected (fail closed) rather than ever being overwritten.
+- `--retain-config=<path>` accepts only a closed `{schemaVersion:1, expectedJobId, syncRoot,
+  inboxRoot, recipientBackupPath}` config (absolute, normalized paths; `syncRoot`/`inboxRoot`
+  must not overlap). It never scans for jobs -- only the exact configured job directory is ever
+  read. A symlink/junction at the job directory, at the local inbox job directory, or at its
+  `media/` directory is rejected via `lstat` + realpath containment; the dedicated Drive sync
+  root itself is only ever presence/type-checked (never rejected for being a reparse point),
+  since the mounted Drive folder itself may legitimately carry reparse attributes. Only the
+  recipient-backup passphrase is read from the environment
+  (`DWO_RECIPIENT_BACKUP_PASSPHRASE`); no path, secret, or payload is ever written to
+  stdout/stderr -- only a small closed set of `D2_RETAIN_*` codes.
+- The one bounded-wait authority is `waitForD2RetainedReady`: it polls, against a monotonic
+  deadline (default/maximum 180s, boundedly overridable via `--retain-timeout-ms=` for a short
+  test run), only for files that are genuinely *missing* (`ENOENT`). Anything present but wrong
+  -- a link, a malformed/mismatched `ready.json`/`meta.json`, a layout that is not this
+  fixture's exact four-object shape, an over-sized object, or a size/hash mismatch -- terminates
+  immediately instead of being retried. The deadline bounds this wait loop; it is not a promise
+  that no underlying filesystem call can ever itself block.
+
+`gateway/windows/run-d2-retained-trial.ps1` is a new, separate, source-only launcher for a
+future *manually invoked* trial run: it only ever calls `--retain-config=`, reads a
+CurrentUser-scope DPAPI-protected recipient-backup passphrase from an explicitly provided,
+operator-provisioned synthetic secrets file (never the receiver bearer), performs exactly one
+synchronous Node child invocation (no polling loop of its own -- the bounded wait above is the
+only wait authority), clears the passphrase from its own process environment in `finally` on
+every outcome, and never logs a path, secret, or exception. It never registers a Scheduled
+Task, never requests elevation, and never reboots. **Wiring this script to an actual Windows
+"run at logon" trigger requires a separate, explicitly human-authorized Task Scheduler
+registration step, which this change intentionally does not perform.**
+
+The dedicated sync root, inbox root, recipient-backup file, and synthetic secrets file are all
+operator-provisioned outside this repository; no real path, key, job id, or secret is stored in
+any tracked file. This path assumes a trusted local operator-provisioned configuration and a
+single, non-hostile, non-concurrently-mutated filesystem during a run -- it is not a guarantee
+against a concurrently hostile actor racing the same files on disk.
