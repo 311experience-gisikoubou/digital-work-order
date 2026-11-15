@@ -291,22 +291,26 @@ export async function runD2RetainedTrialOnce(configPath,options={}){
 // Pure argv parser for the CLI (exported so argument handling is testable without a
 // subprocess). Exactly one of --config= / --retain-config= must be present; --retain-timeout-ms=
 // is only ever accepted alongside --retain-config=.
+const D2_CLI_CONFIG_PREFIX='--config=';
+const D2_CLI_RETAIN_CONFIG_PREFIX='--retain-config=';
+const D2_CLI_RETAIN_TIMEOUT_PREFIX='--retain-timeout-ms=';
+
 export function parseD2CliArgs(args){
   const list=Array.isArray(args)?args:[];
-  const configArgs=list.filter(value=>value.startsWith('--config='));
-  const retainArgs=list.filter(value=>value.startsWith('--retain-config='));
-  const timeoutArgs=list.filter(value=>value.startsWith('--retain-timeout-ms='));
+  const configArgs=list.filter(value=>value.startsWith(D2_CLI_CONFIG_PREFIX));
+  const retainArgs=list.filter(value=>value.startsWith(D2_CLI_RETAIN_CONFIG_PREFIX));
+  const timeoutArgs=list.filter(value=>value.startsWith(D2_CLI_RETAIN_TIMEOUT_PREFIX));
   if(configArgs.length+retainArgs.length!==1)throw fail('D2_TRIAL_ARGS_INVALID');
   if(configArgs.length===1){
-    if(list.length!==1||!configArgs[0].slice(9))throw fail('D2_TRIAL_CONFIG_REQUIRED');
-    return{mode:'config',configPath:configArgs[0].slice(9)};
+    if(list.length!==1||!configArgs[0].slice(D2_CLI_CONFIG_PREFIX.length))throw fail('D2_TRIAL_CONFIG_REQUIRED');
+    return{mode:'config',configPath:configArgs[0].slice(D2_CLI_CONFIG_PREFIX.length)};
   }
   if(timeoutArgs.length>1||list.length!==1+timeoutArgs.length)throw fail('D2_RETAIN_ARGS_INVALID');
-  const configPath=retainArgs[0].slice(17);
+  const configPath=retainArgs[0].slice(D2_CLI_RETAIN_CONFIG_PREFIX.length);
   if(!configPath)throw fail('D2_RETAIN_CONFIG_REQUIRED');
   let timeoutMs;
   if(timeoutArgs.length===1){
-    const n=Number(timeoutArgs[0].slice(21));
+    const n=Number(timeoutArgs[0].slice(D2_CLI_RETAIN_TIMEOUT_PREFIX.length));
     if(!Number.isInteger(n)||n<=0||n>RETAIN_DEFAULT_TIMEOUT_MS)throw fail('D2_RETAIN_TIMEOUT_INVALID');
     timeoutMs=n;
   }
