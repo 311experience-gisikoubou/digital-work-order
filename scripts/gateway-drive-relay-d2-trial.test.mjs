@@ -1512,12 +1512,26 @@ test('D2 retained Windows PowerShell script: source only invokes the retain CLI,
   assert.match(source, /ConvertTo-SecureString\s+\$secrets\.backupPassphraseProtected/);
   assert.doesNotMatch(source, /ProtectedData\]::Unprotect/);
   assert.doesNotMatch(source, /FromBase64String\(\s*\$secrets\.backupPassphraseProtected/);
-  assert.doesNotMatch(source, /\bLocalMachine\b/);
+  // Forbid actual executable LocalMachine-scope DPAPI usage specifically (not the word
+  // "LocalMachine" appearing at all -- the explanatory doc comment legitimately says "there is
+  // no LocalMachine fallback", and that comment must not itself trip this check).
+  assert.doesNotMatch(source, /-Scope\s+LocalMachine/i);
+  assert.doesNotMatch(source, /DataProtectionScope\]::LocalMachine/);
+  assert.doesNotMatch(source, /ProtectedData\]::(Protect|Unprotect)\([^)]*LocalMachine/);
   assert.doesNotMatch(source, /Register-ScheduledTask/i);
   assert.doesNotMatch(source, /schtasks/i);
   assert.doesNotMatch(source, /-Credential\b/);
   assert.doesNotMatch(source, /Restart-Computer|shutdown\.exe/i);
-  assert.doesNotMatch(source, /DWO_D2_RECEIVER_BEARER\s*=/);
+  // Forbid forwarding/setting a receiver bearer from any decrypted/new/hardcoded value; the
+  // only permitted assignment to this env var anywhere is the scoped `finally` restoration of
+  // whatever value the parent shell already had set before the single child invocation
+  // (`$env:DWO_D2_RECEIVER_BEARER = $savedBearer`), never a credential/token forwarded to or
+  // read from the child, the decrypted secrets, or any literal.
+  const bearerAssignments = [...source.matchAll(/\$env:DWO_D2_RECEIVER_BEARER\s*=\s*(\S+)/g)];
+  assert.ok(bearerAssignments.length > 0, 'expected the scoped restore assignment to be present');
+  for (const [, rhs] of bearerAssignments) {
+    assert.equal(rhs, '$savedBearer');
+  }
   assert.match(source, /Remove-Item\s+Env:\\DWO_D2_RECEIVER_BEARER/);
   assert.match(source, /Remove-Item\s+Env:\\DWO_RECEIVER_TOKEN/);
   // receiverTokenProtected must be schema-checked only -- never unprotected/converted/used.

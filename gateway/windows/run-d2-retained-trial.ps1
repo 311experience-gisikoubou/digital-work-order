@@ -5,9 +5,13 @@ Scope / boundary (read before any real use):
   - This script ONLY invokes the Node retain CLI: node gateway/drive-relay-d2-adapter.mjs
     --retain-config=<ConfigPath>  [--retain-timeout-ms=<RetainTimeoutMs>]
     It never passes the separate ACK-path config flag, never constructs/forwards an Apps
-    Script control endpoint, never reads, sets, or forwards any receiver-bearer environment
-    variable or token. There is no ACK, no deletion, and no network call anywhere in this
-    script.
+    Script control endpoint, and never decrypts, uses, logs, or forwards a receiver-bearer
+    value to the child process or anywhere else. It does temporarily save (read) and then
+    restore (set back) this host process's own already-present DWO_D2_RECEIVER_BEARER /
+    DWO_RECEIVER_TOKEN environment values -- scoped strictly around the single child
+    invocation below, purely so the child never inherits them -- but that saved/restored
+    value is never inspected, decrypted, or passed to anything. There is no ACK, no deletion,
+    and no network call anywhere in this script.
   - The only secret this script ever touches is a CurrentUser-scope DPAPI-protected recipient
     backup passphrase, read from an explicitly provided, operator-provisioned synthetic
     secrets file (-SecretsPath) that reuses the exact same established secrets-file format
@@ -231,12 +235,13 @@ function Invoke-D2RetainedTrial {
     } catch { return 13 }
     if ([string]::IsNullOrEmpty($passphrase) -or $passphrase.Length -lt 12) { return 13 }
 
-    # This script itself never reads, sets, clears, or otherwise references any receiver-bearer
-    # environment variable anywhere -- and the retained-only Node CLI it invokes never reads
-    # one either, so none can ever reach the ACK path through this script, by construction
-    # rather than by scrubbing the child's inherited environment. The scoped invocation below
-    # additionally guarantees any receiver bearer/token *already* present in the parent shell's
-    # own environment is never inherited by the child either.
+    # This script never decrypts, reads the decrypted value of, uses, logs, or forwards any
+    # receiver-bearer value anywhere -- and the retained-only Node CLI it invokes never reads
+    # one either, so no receiver bearer can ever reach the ACK path through this script, by
+    # construction. The scoped invocation below does temporarily save (read) and restore (set
+    # back) this host process's own already-present DWO_D2_RECEIVER_BEARER / DWO_RECEIVER_TOKEN
+    # environment values -- solely so the single child invocation never inherits them -- but
+    # never inspects, decrypts, or passes that saved value anywhere else.
     $env:DWO_RECIPIENT_BACKUP_PASSPHRASE = $passphrase
 
     $nodeArgs = @($AdapterPath, ('--retain-config=' + $ConfigPath))
