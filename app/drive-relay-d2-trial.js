@@ -27,17 +27,35 @@
   // Reads the immutable archive record directly (same store, separate key); callers validate
   // it themselves against the exact bearer/marker they already hold via validArchive.
   async function getArchiveRecord(){const db=await openDb();try{return await new Promise((ok,no)=>{const r=db.transaction(STORE).objectStore(STORE).get(ARCHIVE_ID);r.onsuccess=()=>ok(r.result||null);r.onerror=()=>no(r.error);});}finally{db.close();}}
-  // Whenever the current durable state carries a second-generation marker, this must be
-  // satisfied before any normal (non-rotation) action is taken against it: the marker must
-  // point at an immutable archive that is itself a valid accepted job matching the exact
-  // marker id and this identity's bearer, and the current pendingJob must be a genuinely
-  // different (already-rotated) job in pending or accepted state -- never the archived job
-  // itself, never missing, never malformed. Any violation fails closed with no further action
-  // (no claim, no put, no bridge call) rather than reconstructing or resetting anything.
+  // Smallest shared predicate deciding exactly when `archive` (read from the very same
+  // transaction/snapshot as `current`, never a separate later read) is consistent with
+  // `current`'s own secondGenerationOf marker. A markerless current may only ever coexist with
+  // a wholly absent archive -- any archive at all (valid or malformed) alongside a markerless
+  // current is corruption and must block creation, adoption, or any further action rather than
+  // being reset, repaired, or reinterpreted. A marker present must be backed by a genuinely
+  // valid accepted archive matching this identity's exact bearer and the exact marker id,
+  // together with a current pendingJob that is itself a genuinely distinct (never the archived
+  // job itself), structurally pending-or-accepted job. Every caller that decides whether to
+  // adopt, create, or write against a possibly-marked current state must read both records from
+  // that same transaction/snapshot and pass them here, rather than trusting an earlier read.
+  function markerArchiveConsistent(current,archive){
+    const present=archive!=null;
+    if(current.secondGenerationOf===undefined)return !present;
+    if(!present)return false;
+    if(!validArchive(archive,current.uploadBearer)||archive.pendingJob.body.jobId!==current.secondGenerationOf)return false;
+    return !!current.pendingJob&&(current.pendingJob.status==='pending'||current.pendingJob.status==='accepted')&&current.pendingJob.body.jobId!==current.secondGenerationOf;
+  }
+  // Whenever the current durable state is read outside of any transaction (the send/sendSecond
+  // pre-decision snapshot), this must be satisfied before any normal (non-rotation) action is
+  // taken against it -- including the markerless case, where a pre-existing archive alone is
+  // already corruption. Any violation fails closed with no further action (no claim, no
+  // rotate, no put, no bridge call) rather than reconstructing or resetting anything. This is
+  // only ever a pre-decision check; every transaction that can itself adopt/create/write must
+  // still re-read and re-check both records from its own single transaction via
+  // markerArchiveConsistent, since a stale pre-check can never be relied on alone.
   async function checkSecondGenerationConsistency(s){
     const archive=await getArchiveRecord();
-    if(!validArchive(archive,s.uploadBearer)||archive.pendingJob.body.jobId!==s.secondGenerationOf)throw Error('D2_SECOND_GENERATION_STATE_INVALID');
-    if(!s.pendingJob||!(s.pendingJob.status==='pending'||s.pendingJob.status==='accepted')||s.pendingJob.body.jobId===s.secondGenerationOf)throw Error('D2_SECOND_GENERATION_STATE_INVALID');
+    if(!markerArchiveConsistent(s,archive))throw Error('D2_SECOND_GENERATION_STATE_INVALID');
   }
   // Single readwrite get-then-put transaction so a decision made from the current durable
   // state (adopt it, reject it, or replace it) commits atomically against any other tab/page
@@ -78,11 +96,22 @@
   // was the one just stored, `adopted` when a racing tab's pendingJob (already pending or
   // already accepted) was found and returned instead. Callers must route an adopted job
   // through the existing status-first path rather than uploading it directly.
-  function claimPendingJob(body){return new Promise((resolve,reject)=>{openDb().then(db=>{const tx=db.transaction(STORE,'readwrite'),store=tx.objectStore(STORE),req=store.get(ID);let settled=false;const fail=err=>{if(settled)return;settled=true;try{db.close();}catch(_){}reject(err);};const finish=value=>{if(settled)return;settled=true;db.close();resolve(value);};tx.onerror=()=>fail(tx.error);tx.onabort=()=>fail(tx.error||Error('PAIRING_STATE_TX_ABORTED'));req.onsuccess=()=>{const current=req.result;if(!current||!validState(current)||!current.paired||body.bearer!==current.uploadBearer){fail(Error('PAIRING_STATE_MISSING'));return;}if(current.pendingJob&&(current.pendingJob.status==='pending'||current.pendingJob.status==='accepted')){tx.oncomplete=()=>finish(Object.assign({},current,{created:false,adopted:true}));return;}if(current.secondGenerationOf!==undefined){fail(Error('D2_SECOND_GENERATION_STATE_INVALID'));return;}const next={...current,pendingJob:{status:'pending',body}};if(!validState(next)){fail(Error('PAIRING_STATE_INVALID'));return;}store.put(next);tx.oncomplete=()=>finish(Object.assign({},next,{created:true,adopted:false}));};req.onerror=()=>fail(req.error);},reject);});}
+  // Before adopting an existing pendingJob or creating a brand new one, this same readwrite
+  // transaction also reads the immutable archive record and checks it via
+  // markerArchiveConsistent against this same transaction's `current` -- never a separate,
+  // possibly-stale pre-send read -- so neither a racing adoption of an inconsistently-marked
+  // second-generation job nor the creation of a new job over a markerless-but-archived
+  // corruption can ever happen, even if an earlier pre-send check already passed.
+  function claimPendingJob(body){return new Promise((resolve,reject)=>{openDb().then(db=>{const tx=db.transaction(STORE,'readwrite'),store=tx.objectStore(STORE),req=store.get(ID);let settled=false;const fail=err=>{if(settled)return;settled=true;try{db.close();}catch(_){}reject(err);};const finish=value=>{if(settled)return;settled=true;db.close();resolve(value);};tx.onerror=()=>fail(tx.error);tx.onabort=()=>fail(tx.error||Error('PAIRING_STATE_TX_ABORTED'));req.onsuccess=()=>{const current=req.result;if(!current||!validState(current)||!current.paired||body.bearer!==current.uploadBearer){fail(Error('PAIRING_STATE_MISSING'));return;}const req0=store.get(ARCHIVE_ID);req0.onerror=()=>fail(req0.error);req0.onsuccess=()=>{if(!markerArchiveConsistent(current,req0.result)){fail(Error('D2_SECOND_GENERATION_STATE_INVALID'));return;}if(current.pendingJob&&(current.pendingJob.status==='pending'||current.pendingJob.status==='accepted')){tx.oncomplete=()=>finish(Object.assign({},current,{created:false,adopted:true}));return;}const next={...current,pendingJob:{status:'pending',body}};if(!validState(next)){fail(Error('PAIRING_STATE_INVALID'));return;}store.put(next);tx.oncomplete=()=>finish(Object.assign({},next,{created:true,adopted:false}));};};req.onerror=()=>fail(req.error);},reject);});}
   // Only ever reports accepted once a durable state exactly matching this identity/job has
   // actually been committed; a missing/mismatched/invalid current state is rejected rather
-  // than silently resolved, so callers cannot mistake "nothing happened" for success.
-  function markAccepted(jobId){return new Promise((resolve,reject)=>{openDb().then(db=>{const tx=db.transaction(STORE,'readwrite'),store=tx.objectStore(STORE),req=store.get(ID);let settled=false;const fail=err=>{if(settled)return;settled=true;try{db.close();}catch(_){}reject(err);};const finish=value=>{if(settled)return;settled=true;db.close();resolve(value);};tx.onerror=()=>fail(tx.error);tx.onabort=()=>fail(tx.error||Error('PAIRING_STATE_TX_ABORTED'));req.onsuccess=()=>{const current=req.result;if(!current||!validState(current)||!current.paired||!current.pendingJob||current.pendingJob.body.jobId!==jobId){fail(Error('PAIRING_STATE_INVALID'));return;}if(current.pendingJob.status==='accepted'){tx.oncomplete=()=>finish(current);return;}const next={...current,pendingJob:{status:'accepted',body:current.pendingJob.body}};if(!validState(next)){fail(Error('PAIRING_STATE_INVALID'));return;}store.put(next);tx.oncomplete=()=>finish(next);};req.onerror=()=>fail(req.error);},reject);});}
+  // than silently resolved, so callers cannot mistake "nothing happened" for success. A status
+  // query/upload may have already been dispatched before this call runs (e.g. a delayed bridge
+  // reply), so if the current state is second-generation-marked this same write transaction
+  // also re-reads the immutable archive and checks it via markerArchiveConsistent before ever
+  // committing 'accepted' -- never writing into a state that has since become inconsistently
+  // marked, even though the underlying network action already happened and cannot be undone.
+  function markAccepted(jobId){return new Promise((resolve,reject)=>{openDb().then(db=>{const tx=db.transaction(STORE,'readwrite'),store=tx.objectStore(STORE),req=store.get(ID);let settled=false;const fail=err=>{if(settled)return;settled=true;try{db.close();}catch(_){}reject(err);};const finish=value=>{if(settled)return;settled=true;db.close();resolve(value);};tx.onerror=()=>fail(tx.error);tx.onabort=()=>fail(tx.error||Error('PAIRING_STATE_TX_ABORTED'));req.onsuccess=()=>{const current=req.result;if(!current||!validState(current)||!current.paired||!current.pendingJob||current.pendingJob.body.jobId!==jobId){fail(Error('PAIRING_STATE_INVALID'));return;}const proceed=()=>{if(current.pendingJob.status==='accepted'){tx.oncomplete=()=>finish(current);return;}const next={...current,pendingJob:{status:'accepted',body:current.pendingJob.body}};if(!validState(next)){fail(Error('PAIRING_STATE_INVALID'));return;}store.put(next);tx.oncomplete=()=>finish(next);};if(current.secondGenerationOf===undefined){proceed();return;}const req0=store.get(ARCHIVE_ID);req0.onerror=()=>fail(req0.error);req0.onsuccess=()=>{if(!markerArchiveConsistent(current,req0.result)){fail(Error('D2_SECOND_GENERATION_STATE_INVALID'));return;}proceed();};};req.onerror=()=>fail(req.error);},reject);});}
   // Rotates exactly once from a captured first-generation accepted job to a freshly pre-built
   // (outside this transaction) second-generation pending job, archiving the prior accepted
   // pendingJob byte-for-byte via a single-use `add` (never overwritten) in the very same
@@ -98,11 +127,14 @@
   // job must always be a genuinely distinct job. An already-rotated (second-generation marker
   // present) current state is only ever treated as this call having lost the race -- adopted,
   // never a third generation -- when that marker exactly matches this call's captured old job
-  // id AND the current pendingJob is itself a genuinely different, structurally pending or
-  // accepted job; any other shape (mismatched marker, missing/invalid pendingJob, or a
-  // pendingJob that is still the archived job itself) fails closed instead of blindly adopting
-  // a malformed or mismatched state. Any other unexpected/malformed current or archive state
-  // (including an archive that already exists) fails closed with no write at all -- no reset.
+  // id AND this same transaction's own read of the immutable archive (never an earlier,
+  // possibly-stale read) is itself genuinely valid/accepted and matches that exact marker and
+  // bearer via markerArchiveConsistent, together with the current pendingJob being a genuinely
+  // different, structurally pending or accepted job; any other shape (mismatched marker,
+  // missing/mismatched archive, missing/invalid pendingJob, or a pendingJob that is still the
+  // archived job itself) fails closed instead of blindly adopting a malformed or mismatched
+  // state. Any other unexpected/malformed current or archive state (including an archive that
+  // already exists) fails closed with no write at all -- no reset.
   // No `await` is ever used inside the transaction; any synchronous validation, add, or put
   // failure explicitly aborts the transaction before rejecting, and a transaction construction
   // or other synchronous throw outside any request handler is still caught (via the trailing
@@ -128,9 +160,15 @@
         const identityMatches=current.clinicDeviceId===captured.clinicDeviceId&&current.signingKeyId===captured.signingKeyId&&current.uploadBearer===captured.uploadBearer&&jwkEqual(current.signingPublicJwk,captured.signingPublicJwk)&&current.recipientKeyId===captured.recipientKeyId&&jwkEqual(current.recipientPublicJwk,captured.recipientPublicJwk);
         if(!identityMatches){failTx(Error('D2_SECOND_JOB_STATE_INVALID'));return;}
         if(current.secondGenerationOf!==undefined){
-          const validLoss=current.secondGenerationOf===captured.oldJobId&&!!current.pendingJob&&(current.pendingJob.status==='pending'||current.pendingJob.status==='accepted')&&current.pendingJob.body.jobId!==captured.oldJobId;
-          if(!validLoss){failTx(Error('D2_SECOND_JOB_STATE_INVALID'));return;}
-          tx.oncomplete=()=>finishTx(Object.assign({},current,{created:false,adopted:true}));
+          if(current.secondGenerationOf!==captured.oldJobId){failTx(Error('D2_SECOND_JOB_STATE_INVALID'));return;}
+          // Read the immutable archive from this exact transaction -- never an earlier,
+          // possibly-stale pre-send read -- before ever treating this as a lost-race adoption.
+          const reqArchive=store.get(ARCHIVE_ID);
+          reqArchive.onerror=()=>failTx(reqArchive.error);
+          reqArchive.onsuccess=()=>{
+            if(!markerArchiveConsistent(current,reqArchive.result)){failTx(Error('D2_SECOND_JOB_STATE_INVALID'));return;}
+            tx.oncomplete=()=>finishTx(Object.assign({},current,{created:false,adopted:true}));
+          };
           return;
         }
         if(!current.pendingJob||current.pendingJob.status!=='accepted'||current.pendingJob.body.jobId!==captured.oldJobId){failTx(Error('D2_SECOND_JOB_STATE_INVALID'));return;}
@@ -138,7 +176,7 @@
         const req2=store.get(ARCHIVE_ID);
         req2.onerror=()=>failTx(req2.error);
         req2.onsuccess=()=>{
-          if(req2.result!==undefined){failTx(Error('D2_SECOND_JOB_ARCHIVE_EXISTS'));return;}
+          if(!markerArchiveConsistent(current,req2.result)){failTx(Error('D2_SECOND_JOB_ARCHIVE_EXISTS'));return;}
           const archiveRecord={id:ARCHIVE_ID,pendingJob:current.pendingJob};
           if(!validArchive(archiveRecord,current.uploadBearer)){failTx(Error('PAIRING_STATE_INVALID'));return;}
           const next={...current,pendingJob:{status:'pending',body:newBody},secondGenerationOf:captured.oldJobId};
@@ -193,8 +231,11 @@
     if(!validState(s)||!s.paired)throw Error('PAIRING_STATE_MISSING');
     // A second-generation marker must never fall through to the create-a-new-job path below
     // (e.g. because the real rotated pendingJob or its archive is missing/malformed) -- that
-    // would be a reconstructed/third-generation job. Fail closed first, with no network call.
-    if(s.secondGenerationOf!==undefined)await checkSecondGenerationConsistency(s);
+    // would be a reconstructed/third-generation job. Likewise a markerless legacy state is only
+    // ever consistent when no archive exists at all -- a pre-existing archive without a marker
+    // (fault injection/corruption) must never fall through to claimPendingJob either. Fail
+    // closed first, unconditionally, with no network call.
+    await checkSecondGenerationConsistency(s);
     if(s.pendingJob&&s.pendingJob.status==='accepted'){report('Synthetic ciphertext job already accepted.');return;}
     if(s.pendingJob&&s.pendingJob.status==='pending'){await resolvePendingJob(s.pendingJob.body);return;}
     const body=await buildJobBody(s);
@@ -219,11 +260,13 @@
   async function sendSecond(){
     const s=await getState();
     if(!validState(s)||!s.paired)throw Error('PAIRING_STATE_MISSING');
+    // Verify marker/archive consistency unconditionally first: a marker present must still have
+    // its immutable archive valid/accepted and matching exactly, with the current pendingJob
+    // genuinely the rotated job (never the archived original); a markerless state must have no
+    // archive at all. Either violation fails closed before any explicit second action here,
+    // including a no-op retry.
+    await checkSecondGenerationConsistency(s);
     if(s.secondGenerationOf!==undefined){
-      // Verify the immutable archive still exists, is valid/accepted, matches this exact
-      // marker, and the current pendingJob is genuinely the rotated job (never the archived
-      // original) before taking any explicit second action here, including a no-op retry.
-      await checkSecondGenerationConsistency(s);
       if(s.pendingJob.status==='accepted'){report('Second synthetic ciphertext job already accepted.');return;}
       await resolvePendingJob(s.pendingJob.body);
       return;

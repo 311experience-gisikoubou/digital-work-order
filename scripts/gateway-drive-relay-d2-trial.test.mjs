@@ -639,6 +639,147 @@ test('D2 sender sendSecond() also fails closed on the same marker/archive corrup
   assert.equal(fakeDB.peek('sender'),seeded);
 });
 
+// Issue #170 FINAL AUDIT F1: rotateSecondJob's adopted ("lost the race") branch must read the
+// immutable archive from its own transaction and verify it before ever resolving as adopted --
+// a racing tab's marker + genuinely distinct pending second-generation job is not enough on its
+// own if that racing tab's archive write never actually landed (or landed for a different old
+// job). Resolving adopted here is exactly what previously let the caller go on to query status
+// (and eventually accept) against a bridge with no corresponding verified archive.
+test('D2 sender rotateSecondJob refuses to adopt a marker-consistent racing second-generation state when its immutable archive is missing or mismatched',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const base=await makeSenderState(),oldBody=makeJobBody(base.uploadBearer,'1'),racingBody=makeJobBody(base.uploadBearer,'2'),otherOldBody=makeJobBody(base.uploadBearer,'3');
+  const captured=capturedFrom(base,oldBody.jobId);
+  // (a) marker matches captured.oldJobId, current pendingJob is a genuinely distinct pending
+  // job -- but the archive is entirely missing.
+  {
+    const fakeDB=makeFakeIndexedDB();
+    const racingState={...base,secondGenerationOf:oldBody.jobId,pendingJob:{status:'pending',body:racingBody}};
+    fakeDB.seed(racingState); // archive deliberately absent
+    const ctx=buildSenderSandbox({indexedDB:fakeDB});
+    vm.runInNewContext(testHookSource(source),ctx.sandbox);
+    const hooks=ctx.sandbox.D2TrialTestHooks;
+    await assert.rejects(hooks.rotateSecondJob(captured,makeJobBody(base.uploadBearer,'4')),{message:'D2_SECOND_JOB_STATE_INVALID'});
+    assert.deepEqual(fakeDB.peek('sender'),racingState,'the racing marker-consistent state must be left completely untouched when its archive is missing');
+    assert.equal(fakeDB.peek(hooks.ARCHIVE_ID),undefined);
+  }
+  // (b) same marker/pending shape, but the archive that does exist archives a different old
+  // job entirely (wrong archived job) -- must still refuse to adopt.
+  {
+    const fakeDB=makeFakeIndexedDB();
+    const racingState={...base,secondGenerationOf:oldBody.jobId,pendingJob:{status:'pending',body:racingBody}};
+    fakeDB.seed(racingState);
+    fakeDB.seed({id:'sender-first-accepted',pendingJob:{status:'accepted',body:otherOldBody}});
+    const ctx=buildSenderSandbox({indexedDB:fakeDB});
+    vm.runInNewContext(testHookSource(source),ctx.sandbox);
+    const hooks=ctx.sandbox.D2TrialTestHooks;
+    await assert.rejects(hooks.rotateSecondJob(captured,makeJobBody(base.uploadBearer,'5')),{message:'D2_SECOND_JOB_STATE_INVALID'});
+    assert.deepEqual(fakeDB.peek('sender'),racingState);
+  }
+  // (c) a genuine valid concurrent adoption (archive present, valid, and matching exactly) must
+  // still succeed exactly as before -- the new guard must not weaken the already-covered case.
+  {
+    const fakeDB=makeFakeIndexedDB();
+    const racingState={...base,secondGenerationOf:oldBody.jobId,pendingJob:{status:'pending',body:racingBody}};
+    const archiveRecord={id:'sender-first-accepted',pendingJob:{status:'accepted',body:oldBody}};
+    fakeDB.seed(racingState);
+    fakeDB.seed(archiveRecord);
+    const ctx=buildSenderSandbox({indexedDB:fakeDB});
+    vm.runInNewContext(testHookSource(source),ctx.sandbox);
+    const hooks=ctx.sandbox.D2TrialTestHooks;
+    const result=await hooks.rotateSecondJob(captured,makeJobBody(base.uploadBearer,'6'));
+    assert.equal(result.created,false);assert.equal(result.adopted,true);
+    assert.equal(result.pendingJob.body.jobId,racingBody.jobId);
+    assert.deepEqual(fakeDB.peek(hooks.ARCHIVE_ID),archiveRecord,'a genuine valid concurrent adoption must remain unaffected');
+  }
+});
+
+// Issue #170 FINAL AUDIT F2: a legacy markerless current paired with no pendingJob but an
+// archive already present (fault injection/corruption) must never fall through to creating a
+// brand-new first-style job -- neither through send()'s pre-decision check nor, independently,
+// through claimPendingJob's own readwrite transaction (so a stale pre-check can never be relied
+// on alone). Normal legacy first send with genuinely no archive must remain exactly functional.
+test('D2 sender send() and claimPendingJob both refuse a markerless legacy state when an archive is already present, with no network call and no mutation',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const base=await makeSenderState(),oldBody=makeJobBody(base.uploadBearer,'1');
+  const archiveRecord={id:'sender-first-accepted',pendingJob:{status:'accepted',body:oldBody}};
+  // (a) through send(): must fail closed before any bridge round and without ever building/
+  // claiming a new job body.
+  {
+    const fakeDB=makeFakeIndexedDB();
+    fakeDB.seed(base); // no marker, no pendingJob
+    fakeDB.seed(archiveRecord); // fault-injected archive with no corresponding marker
+    const ctx=buildSenderSandbox({indexedDB:fakeDB});
+    vm.runInNewContext(testHookSource(source),ctx.sandbox);
+    const hooks=ctx.sandbox.D2TrialTestHooks;
+    const srcBefore=ctx.nodes['relay-bridge'].src;
+    await assert.rejects(hooks.send(),{message:'D2_SECOND_GENERATION_STATE_INVALID'});
+    assert.equal(ctx.nodes['relay-bridge'].src,srcBefore,'no bridge round may ever start for an inconsistent legacy/archive state');
+    assert.equal(fakeDB.peek('sender'),base,'the durable state must be preserved exactly, never used to create a new job');
+    assert.deepEqual(fakeDB.peek(hooks.ARCHIVE_ID),archiveRecord,'the pre-existing archive must never be reset or reinterpreted');
+  }
+  // (b) directly against claimPendingJob's own transaction, proving the guard is not merely a
+  // pre-send check that a stale read could bypass.
+  {
+    const fakeDB=makeFakeIndexedDB();
+    fakeDB.seed(base);
+    fakeDB.seed(archiveRecord);
+    const ctx=buildSenderSandbox({indexedDB:fakeDB});
+    vm.runInNewContext(testHookSource(source),ctx.sandbox);
+    const hooks=ctx.sandbox.D2TrialTestHooks;
+    const newBody=makeJobBody(base.uploadBearer,'2');
+    await assert.rejects(hooks.claimPendingJob(newBody),{message:'D2_SECOND_GENERATION_STATE_INVALID'});
+    assert.equal(fakeDB.peek('sender'),base,'no pendingJob must ever be created when an archive already exists for this markerless state');
+    assert.deepEqual(fakeDB.peek(hooks.ARCHIVE_ID),archiveRecord);
+  }
+  // (c) normal legacy first send with genuinely no archive at all must remain exactly
+  // functional -- the new guard must never block the already-covered ordinary case.
+  {
+    const fakeDB=makeFakeIndexedDB();
+    fakeDB.seed(base);
+    const ctx=buildSenderSandbox({indexedDB:fakeDB});
+    vm.runInNewContext(testHookSource(source),ctx.sandbox);
+    const hooks=ctx.sandbox.D2TrialTestHooks;
+    const newBody=makeJobBody(base.uploadBearer,'3');
+    const claimed=await hooks.claimPendingJob(newBody);
+    assert.equal(claimed.created,true);assert.equal(claimed.adopted,false);
+    assert.equal(fakeDB.peek('sender').pendingJob.body.jobId,newBody.jobId);
+  }
+});
+
+// Issue #170 FINAL AUDIT: claimPendingJob's adoption branch (an already-pending/accepted
+// current job) must also validate a second-generation marker against its own transaction's
+// archive read before adopting -- not just the creation branch -- so a corrupted marked state
+// (archive missing or mismatched) is never silently adopted by the original send() path either.
+test('D2 sender claimPendingJob refuses to adopt an existing second-generation pendingJob when its immutable archive is missing',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const base=await makeSenderState(),oldBody=makeJobBody(base.uploadBearer,'1'),newGenBody=makeJobBody(base.uploadBearer,'2');
+  const fakeDB=makeFakeIndexedDB();
+  const seeded={...base,secondGenerationOf:oldBody.jobId,pendingJob:{status:'pending',body:newGenBody}};
+  fakeDB.seed(seeded); // archive missing
+  const ctx=buildSenderSandbox({indexedDB:fakeDB});
+  vm.runInNewContext(testHookSource(source),ctx.sandbox);
+  const hooks=ctx.sandbox.D2TrialTestHooks;
+  await assert.rejects(hooks.claimPendingJob(makeJobBody(base.uploadBearer,'3')),{message:'D2_SECOND_GENERATION_STATE_INVALID'});
+  assert.equal(fakeDB.peek('sender'),seeded,'the marked state must be left completely untouched when its archive is missing');
+});
+
+// Issue #170 FINAL AUDIT: markAccepted must also refuse to commit 'accepted' into a
+// second-generation state whose immutable archive has since become inconsistent, checked from
+// the exact same write transaction, even though the corresponding bridge status query/upload
+// (if any) may have already been dispatched and cannot itself be undone.
+test('D2 sender markAccepted refuses to commit into an inconsistent second-generation marker state (missing archive) within the same write transaction',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const base=await makeSenderState(),oldBody=makeJobBody(base.uploadBearer,'1'),newGenBody=makeJobBody(base.uploadBearer,'2');
+  const fakeDB=makeFakeIndexedDB();
+  const seeded={...base,secondGenerationOf:oldBody.jobId,pendingJob:{status:'pending',body:newGenBody}};
+  fakeDB.seed(seeded); // archive missing
+  const ctx=buildSenderSandbox({indexedDB:fakeDB});
+  vm.runInNewContext(testHookSource(source),ctx.sandbox);
+  const hooks=ctx.sandbox.D2TrialTestHooks;
+  await assert.rejects(hooks.markAccepted(newGenBody.jobId),{message:'D2_SECOND_GENERATION_STATE_INVALID'});
+  assert.equal(fakeDB.peek('sender').pendingJob.status,'pending','must never mark accepted into an inconsistently marked state');
+});
+
 // Issue #170 A3: resolvePendingJob must never retry with a body that merely matches jobId and
 // bearer but differs from the exact durable record in any other field, and any retry it does
 // perform must use that exact durable body, never the caller-supplied snapshot.
