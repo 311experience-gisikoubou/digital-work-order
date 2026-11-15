@@ -132,3 +132,66 @@ source-only, within the same four files:
 All prior tests for this Issue (and the full existing suite) were preserved and re-run against
 this candidate; no real job, DPAPI, Google Drive, task registration, network, or ACK/delete was
 touched while making or testing this repair, and nothing was committed or pushed.
+
+### FINAL COMPATIBILITY REPAIR (same four files, no scope expansion)
+
+A prior candidate's `run-d2-retained-trial.ps1` demanded a *second*, incompatible secrets-file
+shape -- `{schemaVersion:1, recipientKeyId, backupPassphraseProtected}` with a raw base64
+`[System.Security.Cryptography.ProtectedData]::Protect`/`Unprotect` blob for
+`backupPassphraseProtected` -- instead of reusing the one already-established secrets-file
+format the existing, unmodified `protect-receiver-secrets.ps1` already produces and the existing,
+unmodified `run-receiver.ps1` already restores: `{version:1, receiverTokenProtected,
+backupPassphraseProtected, recipientKeyId}`, both protected fields written via
+`ConvertFrom-SecureString` under CurrentUser-scope DPAPI. A synthetic counterexample generated in
+that exact established format, with a fictional passphrase, demonstrated the incompatibility
+directly: it was rejected with exit code 11 even though it was a perfectly well-formed,
+already-deployed secrets file. This was a compatibility defect in the new launcher, not a reason
+to regenerate or alter any live/production receiver secret.
+
+The launcher is fixed, source-only, within the same four files:
+
+- `run-d2-retained-trial.ps1`'s secrets-shape check now accepts exactly the one established
+  four-key `{version:1, receiverTokenProtected, backupPassphraseProtected, recipientKeyId}`
+  shape -- no new or second format, and no migration path. The raw-base64
+  `ProtectedData.Unprotect` handling is removed entirely. `backupPassphraseProtected` is restored
+  using the same already-established `ConvertTo-SecureString` pattern `run-receiver.ps1` already
+  uses, via a new `Convert-D2RetainedSecureStringToPlainText` helper built from the identical
+  `SecureStringToBSTR` / `PtrToStringBSTR` / `ZeroFreeBSTR` marshaling `run-receiver.ps1`'s own
+  `Convert-SecureStringToPlainText` already uses; the restored `SecureString` is disposed, and
+  the resulting plaintext passphrase is still cleared in `finally` on every outcome, exactly as
+  before. `receiverTokenProtected` is required to be present, as a non-empty string, purely
+  because it is part of the one shared established schema -- it is never unprotected, read,
+  used, or logged anywhere in this script, since the retained-only path never needs or forwards a
+  receiver bearer. The `recipientKeyId` plain-text match against the recipient backup file is
+  still checked before any SecureString/DPAPI call, so a wrong or mismatched secrets file still
+  never reaches DPAPI. `run-receiver.ps1` and `protect-receiver-secrets.ps1` themselves are
+  unchanged.
+- A new `Invoke-D2RetainedNodeChildScoped` wrapper around the existing, unchanged
+  `Invoke-D2RetainedNodeChild` now also guarantees the single node child invocation can never
+  inherit this host process's own `DWO_D2_RECEIVER_BEARER` / `DWO_RECEIVER_TOKEN` values, if
+  either already happens to be set in the parent shell: both are temporarily removed -- never
+  logged, unprotected, or otherwise inspected, only their existing raw string values are held
+  locally so they can be restored -- immediately before the single child invocation and restored
+  immediately afterward, via `finally`, on every outcome (success, the child failing, or node
+  itself failing to launch).
+- A new isolated regression extracts both `Invoke-D2RetainedNodeChild` and
+  `Invoke-D2RetainedNodeChildScoped`, verbatim from the real script source, into an isolated
+  harness and proves, against sentinel (non-secret) environment values and a harmless fake
+  "node" executable, that the child never observes either value and that the parent process's
+  own environment is restored exactly afterward -- no DPAPI, config, or real secrets file
+  anywhere in that test.
+- A new focused, real-executable regression generates a freshly created synthetic CurrentUser
+  DPAPI `SecureString` (via the real `ConvertTo-SecureString`/`ConvertFrom-SecureString`
+  cmdlets) and a temporary, entirely fictional backup/config/secrets fixture -- never any
+  actual/production job, secret, Drive data, task registration, reboot, ACK/delete, or network
+  call -- then invokes the real script against a harmless fake child executable. It confirms: the
+  correct passphrase reaches the fake child without the script's own stdout/stderr ever exposing
+  it or either sentinel receiver-bearer/token value; a successful run yields the scalar exit code
+  0; a failing fake child surfaces as the one sanitized code 15; a `recipientKeyId` mismatch
+  (wrong key) fails with code 12 before the child ever runs; and a malformed secrets file (a
+  missing required key) fails with code 11 before the child ever runs.
+
+All prior tests for this Issue (and the full existing suite) were preserved and re-run once
+against this changed candidate; no real job, DPAPI secret, Google Drive, Task Scheduler
+registration, reboot, ACK/delete, network call, or production data was touched while making or
+testing this repair, and nothing was committed or pushed.

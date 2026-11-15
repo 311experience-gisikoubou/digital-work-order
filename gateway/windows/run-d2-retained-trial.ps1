@@ -10,11 +10,21 @@ Scope / boundary (read before any real use):
     script.
   - The only secret this script ever touches is a CurrentUser-scope DPAPI-protected recipient
     backup passphrase, read from an explicitly provided, operator-provisioned synthetic
-    secrets file (-SecretsPath). The passphrase is set into DWO_RECIPIENT_BACKUP_PASSPHRASE
-    only for the duration of the single node child process below, and is always cleared
-    (finally) regardless of outcome. Nothing here ever echoes/logs the passphrase, the raw
-    DPAPI blob, or any filesystem path/exception text -- only a small set of sanitized,
-    closed status codes are ever written to stdout.
+    secrets file (-SecretsPath) that reuses the exact same established secrets-file format
+    `protect-receiver-secrets.ps1` already produces (`ConvertFrom-SecureString`, CurrentUser
+    DPAPI) rather than introducing a second, incompatible format. That file also contains a
+    `receiverTokenProtected` field (required by the existing shared schema); this script checks
+    only that the field is present (schema shape only) and never unprotects, reads, uses, or
+    logs it anywhere, since the retained-only path never needs or forwards a receiver bearer.
+    The restored passphrase is set into DWO_RECIPIENT_BACKUP_PASSPHRASE only for the duration of
+    the single node child process below, and is always cleared (finally) regardless of outcome.
+    The child process is also never allowed to inherit this host process's own
+    DWO_D2_RECEIVER_BEARER / DWO_RECEIVER_TOKEN environment values, if either happens to already
+    be set in the parent shell: both are temporarily removed (without ever being logged,
+    unprotected, or otherwise inspected) immediately before the single child invocation and
+    restored immediately afterward, on every outcome. Nothing here ever echoes/logs the
+    passphrase, the receiver bearer/token, any DPAPI blob, or any filesystem path/exception text
+    -- only a small set of sanitized, closed status codes are ever written to stdout.
   - This script performs exactly one synchronous invocation of the Node adapter. The adapter
     itself owns the single bounded (missing-file-only) wait/retry authority (Issue #172 /
     finding A6); this script never polls or retries on its own, and never runs as a daemon.
@@ -29,20 +39,30 @@ Config schema (-ConfigPath, JSON; matches the Node adapter's --retain-config= ex
   { "schemaVersion": 1, "expectedJobId": "job_<64 hex>", "syncRoot": "<path>",
     "inboxRoot": "<path>", "recipientBackupPath": "<path>" }
 
-Secrets schema (-SecretsPath, JSON; operator-provisioned, never tracked in the repository):
-  { "schemaVersion": 1, "recipientKeyId": "rk_...", "backupPassphraseProtected": "<base64>" }
-  `backupPassphraseProtected` is the recipient-backup passphrase, UTF-8 encoded and protected
-  with [System.Security.Cryptography.ProtectedData]::Protect(..., $null, CurrentUser), then
-  base64-encoded. `recipientKeyId` must match the recipientKeyId already present (in plain
-  text -- it is not itself secret) inside the recipient backup file the config points at;
-  this is checked BEFORE any DPAPI call, so a wrong secrets file never even reaches DPAPI.
+Secrets schema (-SecretsPath, JSON; operator-provisioned, never tracked in the repository).
+This is intentionally the exact same established, already-deployed format
+`protect-receiver-secrets.ps1` writes and `run-receiver.ps1` already restores -- not a new or
+second format, and not a migration:
+  { "version": 1, "receiverTokenProtected": "<ConvertFrom-SecureString, CurrentUser DPAPI>",
+    "backupPassphraseProtected": "<ConvertFrom-SecureString, CurrentUser DPAPI>",
+    "recipientKeyId": "rk_..." }
+Only `backupPassphraseProtected` is ever restored, via the existing `ConvertTo-SecureString` /
+`SecureStringToBSTR` / `ZeroFreeBSTR` pattern `run-receiver.ps1` already uses (CurrentUser DPAPI
+is the only supported scope -- there is no LocalMachine fallback). `receiverTokenProtected` is
+required to be present (matching the one shared established schema) but this script never
+unprotects, reads, uses, or logs it -- schema shape only. `recipientKeyId` must match the
+recipientKeyId already present (in plain text -- it is not itself secret) inside the recipient
+backup file the config points at; this is checked BEFORE any DPAPI/SecureString call, so a
+wrong secrets file never even reaches DPAPI.
 
 Exit codes (sanitized; stdout/stderr never contain a path, stack trace, or secret):
   0  = adapter reported a stored/already-stored outcome.
   10 = config path/read/parse/shape/timeout-argument failure.
-  11 = secrets path/read/parse/shape failure.
+  11 = secrets path/read/parse/shape failure (wrong version, missing/extra key, or an empty
+       receiverTokenProtected/backupPassphraseProtected/recipientKeyId field).
   12 = secrets recipientKeyId does not match the recipient backup's recipientKeyId.
-  13 = DPAPI unprotect failure (wrong machine/user context, or a corrupt protected blob).
+  13 = SecureString restore failure for backupPassphraseProtected (wrong machine/user context,
+       a corrupt protected blob, or an implausibly short decoded passphrase).
   14 = the Node adapter script could not be found.
   15 = the Node child process exited non-zero (includes the adapter's own bounded-wait
        timeout, a rejected/corrupt job, or any other adapter-reported failure).
@@ -83,6 +103,48 @@ function Invoke-D2RetainedNodeChild {
   return [int]$LASTEXITCODE
 }
 
+# Converts the existing CurrentUser-DPAPI-protected SecureString (as produced by
+# `ConvertTo-SecureString` on a string previously written by `ConvertFrom-SecureString`) back to
+# plain text, using the same Marshal SecureStringToBSTR / PtrToStringBSTR / ZeroFreeBSTR pattern
+# `run-receiver.ps1`'s `Convert-SecureStringToPlainText` already uses -- never a new pattern.
+function Convert-D2RetainedSecureStringToPlainText {
+  param([Parameter(Mandatory = $true)][Security.SecureString]$SecureValue)
+  $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureValue)
+  try {
+    return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
+  } finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
+  }
+}
+
+# Wraps Invoke-D2RetainedNodeChild (unchanged above) so the single node child invocation can
+# never inherit this host process's own DWO_D2_RECEIVER_BEARER / DWO_RECEIVER_TOKEN environment
+# values, if either already happens to be set in the parent shell -- this script never reads,
+# forwards, or needs a receiver bearer, so the child must not see one either. Both are
+# temporarily removed (never logged, unprotected, or otherwise inspected -- only their raw,
+# already-present string values are held locally so they can be put back) immediately before
+# the single child invocation and restored immediately afterward, on every outcome, via `finally`.
+function Invoke-D2RetainedNodeChildScoped {
+  param(
+    [Parameter(Mandatory = $true)][string]$NodePath,
+    [string[]]$NodeArgs
+  )
+  $hadBearer = Test-Path Env:\DWO_D2_RECEIVER_BEARER
+  $savedBearer = $null
+  if ($hadBearer) { $savedBearer = $env:DWO_D2_RECEIVER_BEARER; Remove-Item Env:\DWO_D2_RECEIVER_BEARER }
+  $hadToken = Test-Path Env:\DWO_RECEIVER_TOKEN
+  $savedToken = $null
+  if ($hadToken) { $savedToken = $env:DWO_RECEIVER_TOKEN; Remove-Item Env:\DWO_RECEIVER_TOKEN }
+  try {
+    return Invoke-D2RetainedNodeChild -NodePath $NodePath -NodeArgs $NodeArgs
+  } finally {
+    if ($hadBearer) { $env:DWO_D2_RECEIVER_BEARER = $savedBearer }
+    if ($hadToken) { $env:DWO_RECEIVER_TOKEN = $savedToken }
+    $savedBearer = $null
+    $savedToken = $null
+  }
+}
+
 # All real work happens inside this function and returns a small closed exit-code integer;
 # it never calls `exit` itself, so the `finally` below always runs before the script's own
 # single top-level `exit` call, on every outcome (success, every failure, or a thrown error).
@@ -117,12 +179,18 @@ function Invoke-D2RetainedTrial {
   try { $secretsRaw = Get-Content -LiteralPath $SecretsPath -Raw -ErrorAction Stop } catch { return 11 }
   try { $secrets = $secretsRaw | ConvertFrom-Json -ErrorAction Stop } catch { return 11 }
   if ($null -eq $secrets) { return 11 }
-  $requiredSecretsKeys = @('schemaVersion', 'recipientKeyId', 'backupPassphraseProtected')
+  # Exactly the one established secrets-file shape `protect-receiver-secrets.ps1` already
+  # writes (and `run-receiver.ps1` already restores) -- never a second, incompatible format.
+  $requiredSecretsKeys = @('version', 'receiverTokenProtected', 'backupPassphraseProtected', 'recipientKeyId')
   $secretsProps = @($secrets.PSObject.Properties.Name)
   if ($secretsProps.Count -ne $requiredSecretsKeys.Count) { return 11 }
   foreach ($key in $requiredSecretsKeys) { if ($secretsProps -notcontains $key) { return 11 } }
-  if ($secrets.schemaVersion -ne 1) { return 11 }
+  if ($secrets.version -ne 1) { return 11 }
   if (-not ($secrets.recipientKeyId -is [string]) -or $secrets.recipientKeyId -notmatch '^rk_[A-Za-z0-9_-]+$') { return 11 }
+  # Schema-presence check ONLY: this script never unprotects, reads, uses, or logs
+  # receiverTokenProtected anywhere -- it exists solely because the one established shared
+  # secrets-file format already includes it, and this retained-only path never needs a bearer.
+  if (-not ($secrets.receiverTokenProtected -is [string]) -or [string]::IsNullOrEmpty($secrets.receiverTokenProtected)) { return 11 }
   if (-not ($secrets.backupPassphraseProtected -is [string]) -or [string]::IsNullOrEmpty($secrets.backupPassphraseProtected)) { return 11 }
 
   $backupPath = $config.recipientBackupPath
@@ -147,27 +215,28 @@ function Invoke-D2RetainedTrial {
 
   # Declared up front (Set-StrictMode is active) so the `finally` below can always safely
   # reference and clear them, even on a failure path that returns before they are assigned.
-  $protectedBytes = $null
-  $passphraseBytes = $null
+  $secureString = $null
   $passphrase = $null
 
   try {
     try {
-      $protectedBytes = [System.Convert]::FromBase64String($secrets.backupPassphraseProtected)
-    } catch { return 11 }
-
-    try {
-      $passphraseBytes = [System.Security.Cryptography.ProtectedData]::Unprotect(
-        $protectedBytes, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser)
+      # Established CurrentUser-DPAPI SecureString restore -- the exact same
+      # `ConvertTo-SecureString` pattern `run-receiver.ps1` already uses for this same secrets
+      # file format; there is no LocalMachine fallback and no raw-ProtectedData handling here.
+      $secureString = ConvertTo-SecureString $secrets.backupPassphraseProtected -ErrorAction Stop
     } catch { return 13 }
 
-    $passphrase = [System.Text.Encoding]::UTF8.GetString($passphraseBytes)
+    try {
+      $passphrase = Convert-D2RetainedSecureStringToPlainText $secureString
+    } catch { return 13 }
     if ([string]::IsNullOrEmpty($passphrase) -or $passphrase.Length -lt 12) { return 13 }
 
     # This script itself never reads, sets, clears, or otherwise references any receiver-bearer
     # environment variable anywhere -- and the retained-only Node CLI it invokes never reads
     # one either, so none can ever reach the ACK path through this script, by construction
-    # rather than by scrubbing the child's inherited environment.
+    # rather than by scrubbing the child's inherited environment. The scoped invocation below
+    # additionally guarantees any receiver bearer/token *already* present in the parent shell's
+    # own environment is never inherited by the child either.
     $env:DWO_RECIPIENT_BACKUP_PASSPHRASE = $passphrase
 
     $nodeArgs = @($AdapterPath, ('--retain-config=' + $ConfigPath))
@@ -179,10 +248,10 @@ function Invoke-D2RetainedTrial {
     # the only bounded wait; this call either returns (success or the adapter's own bounded
     # failure/timeout) or node itself cannot be launched at all -- both are reported only as
     # the one sanitized code 15 below, never as raw exception text. Invoke-D2RetainedNodeChild
-    # (above) guarantees $nodeExitCode is always a single scalar [int], never the child's own
-    # stdout/stderr folded into an array.
+    # (wrapped by the scoped-environment helper above) guarantees $nodeExitCode is always a
+    # single scalar [int], never the child's own stdout/stderr folded into an array.
     try {
-      $nodeExitCode = Invoke-D2RetainedNodeChild -NodePath $NodePath -NodeArgs $nodeArgs
+      $nodeExitCode = Invoke-D2RetainedNodeChildScoped -NodePath $NodePath -NodeArgs $nodeArgs
     } catch { return 15 }
     if ($nodeExitCode -ne 0) { return 15 }
     return 0
@@ -192,8 +261,8 @@ function Invoke-D2RetainedTrial {
     # and never inherited by any further child beyond the single node invocation above.
     if (Test-Path Env:\DWO_RECIPIENT_BACKUP_PASSPHRASE) { Remove-Item Env:\DWO_RECIPIENT_BACKUP_PASSPHRASE }
     $passphrase = $null
-    $passphraseBytes = $null
-    $protectedBytes = $null
+    if ($null -ne $secureString) { $secureString.Dispose() }
+    $secureString = $null
   }
 }
 

@@ -1502,20 +1502,31 @@ test('D2 retained CLI: runD2RetainedTrialOnce end-to-end stores the exact fixtur
   }
 });
 
-test('D2 retained Windows PowerShell script: source only invokes the retain CLI, uses CurrentUser DPAPI, and never registers a scheduled task or logs the passphrase', async () => {
+test('D2 retained Windows PowerShell script: source only invokes the retain CLI, reuses the established CurrentUser DPAPI secrets format, and never registers a scheduled task, forwards a receiver bearer, or logs the passphrase', async () => {
   const source = await fs.readFile(new URL('../gateway/windows/run-d2-retained-trial.ps1', import.meta.url), 'utf8');
   assert.match(source, /--retain-config=/);
   assert.doesNotMatch(source, /--config=/);
-  assert.match(source, /DataProtectionScope\]::CurrentUser/);
+  // Must reuse the exact established ConvertTo-SecureString / CurrentUser-DPAPI restore
+  // pattern (same as run-receiver.ps1), never the incompatible raw-base64 ProtectedData.Unprotect
+  // format a prior candidate introduced.
+  assert.match(source, /ConvertTo-SecureString\s+\$secrets\.backupPassphraseProtected/);
+  assert.doesNotMatch(source, /ProtectedData\]::Unprotect/);
+  assert.doesNotMatch(source, /FromBase64String\(\s*\$secrets\.backupPassphraseProtected/);
   assert.doesNotMatch(source, /\bLocalMachine\b/);
   assert.doesNotMatch(source, /Register-ScheduledTask/i);
   assert.doesNotMatch(source, /schtasks/i);
   assert.doesNotMatch(source, /-Credential\b/);
   assert.doesNotMatch(source, /Restart-Computer|shutdown\.exe/i);
-  assert.doesNotMatch(source, /DWO_D2_RECEIVER_BEARER/);
+  assert.doesNotMatch(source, /DWO_D2_RECEIVER_BEARER\s*=/);
+  assert.match(source, /Remove-Item\s+Env:\\DWO_D2_RECEIVER_BEARER/);
+  assert.match(source, /Remove-Item\s+Env:\\DWO_RECEIVER_TOKEN/);
+  // receiverTokenProtected must be schema-checked only -- never unprotected/converted/used.
+  assert.match(source, /receiverTokenProtected/);
+  assert.doesNotMatch(source, /ConvertTo-SecureString\s+\$secrets\.receiverTokenProtected/);
   assert.doesNotMatch(source, /Invoke-WebRequest|Invoke-RestMethod|Start-BitsTransfer/i);
   assert.match(source, /finally/i);
   assert.match(source, /Remove-Item\s+Env:\\DWO_RECIPIENT_BACKUP_PASSPHRASE/);
+  assert.match(source, /\$secureString\.Dispose\(\)/);
   assert.doesNotMatch(source, /Write-(Output|Host)\s*\(?\s*\$passphrase\b/i);
 });
 
@@ -1546,21 +1557,37 @@ test('D2 retained Windows PowerShell script: isolated synthetic fixture fails cl
     // (a) secrets file missing entirely -- must fail before any DPAPI call.
     const missing = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', scriptPath, '-ConfigPath', configPath, '-SecretsPath', secretsPath], { windowsHide: true, encoding: 'utf8' });
     assert.notEqual(missing.status, 0);
-    assert.doesNotMatch(String(missing.stdout) + String(missing.stderr), /ProtectedData|Unprotect/);
+    assert.doesNotMatch(String(missing.stdout) + String(missing.stderr), /ProtectedData|Unprotect|SecureString/);
 
-    // (b) secrets present but recipientKeyId mismatches the real backup's -- must still fail
-    // before any DPAPI call (the plain-field mismatch is checked first).
+    // (b) secrets present (established version=1 four-key shape) but recipientKeyId mismatches
+    // the real backup's -- must still fail before any DPAPI/SecureString call (the plain-field
+    // mismatch is checked first).
     const backup = JSON.parse(await fs.readFile(backupPath, 'utf8'));
-    await fs.writeFile(secretsPath, JSON.stringify({ schemaVersion: 1, recipientKeyId: backup.recipientKeyId.slice(0, -1) + (backup.recipientKeyId.slice(-1) === 'a' ? 'b' : 'a'), backupPassphraseProtected: 'AAAA' }));
+    await fs.writeFile(secretsPath, JSON.stringify({ version: 1, receiverTokenProtected: 'AAAA', recipientKeyId: backup.recipientKeyId.slice(0, -1) + (backup.recipientKeyId.slice(-1) === 'a' ? 'b' : 'a'), backupPassphraseProtected: 'AAAA' }));
     const mismatched = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', scriptPath, '-ConfigPath', configPath, '-SecretsPath', secretsPath], { windowsHide: true, encoding: 'utf8' });
     assert.notEqual(mismatched.status, 0);
-    assert.doesNotMatch(String(mismatched.stdout) + String(mismatched.stderr), /ProtectedData|Unprotect/);
+    assert.doesNotMatch(String(mismatched.stdout) + String(mismatched.stderr), /ProtectedData|Unprotect|SecureString/);
 
     // (c) an out-of-bounds timeout override must fail before any DPAPI call.
-    await fs.writeFile(secretsPath, JSON.stringify({ schemaVersion: 1, recipientKeyId: backup.recipientKeyId, backupPassphraseProtected: 'AAAA' }));
+    await fs.writeFile(secretsPath, JSON.stringify({ version: 1, receiverTokenProtected: 'AAAA', recipientKeyId: backup.recipientKeyId, backupPassphraseProtected: 'AAAA' }));
     const badTimeout = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', scriptPath, '-ConfigPath', configPath, '-SecretsPath', secretsPath, '-RetainTimeoutMs', '0'], { windowsHide: true, encoding: 'utf8' });
     assert.notEqual(badTimeout.status, 0);
-    assert.doesNotMatch(String(badTimeout.stdout) + String(badTimeout.stderr), /ProtectedData|Unprotect/);
+    assert.doesNotMatch(String(badTimeout.stdout) + String(badTimeout.stderr), /ProtectedData|Unprotect|SecureString/);
+
+    // (d) the exact established secrets format (version=1, receiverTokenProtected,
+    // backupPassphraseProtected, recipientKeyId) generated by the real
+    // protect-receiver-secrets.ps1 pattern but with a merely malformed (non-SecureString)
+    // backupPassphraseProtected value must still fail closed (SecureString restore failure),
+    // never crash or emit a path/secret -- this is the real-format compatibility counterexample:
+    // the established shape itself must be accepted by schema (reach exit 13, not 11) once it is
+    // otherwise well-formed. A deliberately wrong-shaped value here still correctly fails (13)
+    // because it is not a valid DPAPI-protected SecureString blob, not because the shape itself
+    // is rejected.
+    await fs.writeFile(secretsPath, JSON.stringify({ version: 1, receiverTokenProtected: 'not-a-real-protected-securestring', backupPassphraseProtected: 'not-a-real-protected-securestring', recipientKeyId: backup.recipientKeyId }));
+    const malformedBlob = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', scriptPath, '-ConfigPath', configPath, '-SecretsPath', secretsPath], { windowsHide: true, encoding: 'utf8' });
+    assert.notEqual(malformedBlob.status, 0);
+    assert.equal(malformedBlob.status, 13, 'a well-formed established-shape secrets file with an invalid SecureString blob must reach the SecureString-restore failure code (13), proving the established shape itself is accepted');
+    assert.doesNotMatch(String(malformedBlob.stdout) + String(malformedBlob.stderr), /ProtectedData|Unprotect|SecureString|not-a-real-protected-securestring/);
   } finally { await fs.rm(base, { recursive: true, force: true }); }
 });
 
@@ -1609,5 +1636,187 @@ test('D2 retained Windows PowerShell script: Invoke-D2RetainedNodeChild returns 
     assert.match(failRun.stdout, /HARNESS_TYPE=Int32/);
     assert.doesNotMatch(failRun.stdout, /FAKE_NODE_STDOUT_FAIL/);
     assert.doesNotMatch(String(failRun.stderr), /FAKE_NODE_STDERR_FAIL/);
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
+});
+
+// Issue #172 final compatibility repair: the launcher must never forward this host process's
+// own DWO_D2_RECEIVER_BEARER / DWO_RECEIVER_TOKEN (if either is already set in the parent
+// shell) to the single node child, and must restore them afterward on every outcome -- without
+// ever logging or unprotecting them. This extracts both Invoke-D2RetainedNodeChild (unchanged)
+// and the new Invoke-D2RetainedNodeChildScoped wrapper, verbatim from the real script source,
+// and runs them in an isolated harness against sentinel (non-secret) values -- no DPAPI, config,
+// or real secrets file anywhere in this test.
+test('D2 retained Windows PowerShell script: Invoke-D2RetainedNodeChildScoped removes DWO_D2_RECEIVER_BEARER/DWO_RECEIVER_TOKEN before the child and restores them afterward, without ever logging them', { skip: !hasPowerShell() }, async () => {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'd2-retain-ps-scoped-'));
+  try {
+    const source = await fs.readFile(path.resolve('gateway/windows/run-d2-retained-trial.ps1'), 'utf8');
+    const childMatch = /function Invoke-D2RetainedNodeChild[\s\S]*?\n\}\r?\n/.exec(source);
+    const scopedMatch = /function Invoke-D2RetainedNodeChildScoped[\s\S]*?\n\}\r?\n/.exec(source);
+    assert.ok(childMatch, 'Invoke-D2RetainedNodeChild must exist, verbatim, in the real script source');
+    assert.ok(scopedMatch, 'Invoke-D2RetainedNodeChildScoped must exist, verbatim, in the real script source');
+    assert.doesNotMatch(scopedMatch[0], /ProtectedData|ConvertTo-SecureString|DWO_RECIPIENT_BACKUP_PASSPHRASE/, 'the scoped wrapper must only ever touch the receiver bearer/token env vars, never a secret');
+
+    const harnessPath = path.join(base, 'harness.ps1');
+    const harnessSource = [
+      'param([string]$NodePath, [string[]]$NodeArgs = @())',
+      childMatch[0],
+      scopedMatch[0],
+      '$code = Invoke-D2RetainedNodeChildScoped -NodePath $NodePath -NodeArgs $NodeArgs',
+      'Write-Output ("HARNESS_EXIT=" + $code)',
+      'Write-Output ("HARNESS_AFTER_BEARER=" + $env:DWO_D2_RECEIVER_BEARER)',
+      'Write-Output ("HARNESS_AFTER_TOKEN=" + $env:DWO_RECEIVER_TOKEN)',
+      'exit $code'
+    ].join('\n');
+    await fs.writeFile(harnessPath, harnessSource);
+
+    const leakFile = path.join(base, 'leak.txt');
+    const fakeNode = path.join(base, 'fake-node.cmd');
+    await fs.writeFile(fakeNode, [
+      '@echo off',
+      'if defined DWO_D2_RECEIVER_BEARER (',
+      '  (echo LEAKED_BEARER)> "' + leakFile + '"',
+      ')',
+      'if defined DWO_RECEIVER_TOKEN (',
+      '  (echo LEAKED_TOKEN)>> "' + leakFile + '"',
+      ')',
+      'exit /b 0',
+      ''
+    ].join('\r\n'));
+
+    const run = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', harnessPath, '-NodePath', fakeNode], {
+      windowsHide: true,
+      encoding: 'utf8',
+      env: { ...process.env, DWO_D2_RECEIVER_BEARER: 'sentinel-bearer-value', DWO_RECEIVER_TOKEN: 'sentinel-token-value' }
+    });
+    assert.equal(run.status, 0, run.stderr);
+    await assert.rejects(fs.stat(leakFile), { code: 'ENOENT' }, 'the child must never see either sentinel receiver bearer/token value');
+    assert.match(run.stdout, /HARNESS_AFTER_BEARER=sentinel-bearer-value/, 'the parent process env must be restored exactly afterward');
+    assert.match(run.stdout, /HARNESS_AFTER_TOKEN=sentinel-token-value/, 'the parent process env must be restored exactly afterward');
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
+});
+
+// Issue #172 final compatibility repair: a focused, real executable regression. Uses only a
+// newly generated synthetic CurrentUser-DPAPI SecureString (via the real `ConvertTo-SecureString`
+// / `ConvertFrom-SecureString` cmdlets) and a temporary, entirely fictional backup/config/secrets
+// fixture -- never any actual/production job, secret, Drive data, or network call. Confirms the
+// real script delivers the correct passphrase to a harmless fake child without ever exposing it
+// in its own stdout/stderr, returns a scalar 0 on success, surfaces a failing child as 15, and
+// fails closed (11/12) on a wrong key or a malformed secrets file before the child ever runs.
+test('D2 retained Windows PowerShell script: real executable regression with a freshly generated synthetic CurrentUser DPAPI SecureString delivers the correct passphrase to a harmless fake child, hides it from the script\'s own output, and rejects a failing child, wrong key, and malformed secrets', { skip: !hasPowerShell() }, async () => {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'd2-retain-ps-exec-'));
+  try {
+    const scriptPath = path.resolve('gateway/windows/run-d2-retained-trial.ps1');
+    const passphrase = 'd2172SyntheticOnlyPassphrase'; // fictional, >=12 chars, alnum-only (safe for batch echo)
+
+    async function protectWithDpapi(plainText) {
+      const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+        '$s = ConvertTo-SecureString -String $env:D2_TEST_PLAINTEXT -AsPlainText -Force; ConvertFrom-SecureString $s'
+      ], { windowsHide: true, encoding: 'utf8', env: { ...process.env, D2_TEST_PLAINTEXT: plainText } });
+      assert.equal(result.status, 0, 'synthetic CurrentUser DPAPI protect helper must succeed: ' + result.stderr);
+      return result.stdout.trim();
+    }
+
+    const recipient = await C.generateRecipientIdentity(passphrase, { crypto: webcrypto });
+    const backupPath = path.join(base, 'backup.json');
+    await fs.writeFile(backupPath, JSON.stringify(recipient.backup));
+    const configPath = path.join(base, 'retain-config.json');
+    await fs.writeFile(configPath, JSON.stringify({ schemaVersion: 1, expectedJobId: 'job_' + 'a'.repeat(64), syncRoot: 'sync', inboxRoot: 'inbox', recipientBackupPath: 'backup.json' }));
+    const adapterPath = path.join(base, 'fake-adapter.mjs');
+    await fs.writeFile(adapterPath, '// synthetic placeholder only -- the fake -NodePath below never actually executes this file.\n');
+
+    const protectedToken = await protectWithDpapi('d2-172-synthetic-receiver-token-never-unprotected');
+    const protectedPassphrase = await protectWithDpapi(passphrase);
+    const secretsPath = path.join(base, 'secrets.json');
+    await fs.writeFile(secretsPath, JSON.stringify({ version: 1, receiverTokenProtected: protectedToken, backupPassphraseProtected: protectedPassphrase, recipientKeyId: recipient.backup.recipientKeyId }));
+
+    const fakeNodeOk = path.join(base, 'fake-node-ok.cmd');
+    await fs.writeFile(fakeNodeOk, [
+      '@echo off',
+      'if defined DWO_RECIPIENT_BACKUP_PASSPHRASE (',
+      '  (echo %DWO_RECIPIENT_BACKUP_PASSPHRASE%)> "%D2_TEST_PASSPHRASE_FILE%"',
+      ')',
+      'if defined DWO_D2_RECEIVER_BEARER (',
+      '  (echo LEAKED_BEARER)> "%D2_TEST_BEARER_LEAK_FILE%"',
+      ')',
+      'if defined DWO_RECEIVER_TOKEN (',
+      '  (echo LEAKED_TOKEN)> "%D2_TEST_TOKEN_LEAK_FILE%"',
+      ')',
+      'exit /b 0',
+      ''
+    ].join('\r\n'));
+    const fakeNodeFail = path.join(base, 'fake-node-fail.cmd');
+    await fs.writeFile(fakeNodeFail, [
+      '@echo off',
+      'if defined DWO_RECIPIENT_BACKUP_PASSPHRASE (',
+      '  (echo %DWO_RECIPIENT_BACKUP_PASSPHRASE%)> "%D2_TEST_PASSPHRASE_FILE%"',
+      ')',
+      'exit /b 9',
+      ''
+    ].join('\r\n'));
+
+    function runScript(nodePath, overrideSecretsPath) {
+      const unique = Math.random().toString(36).slice(2);
+      const passphraseFile = path.join(base, 'passphrase-out-' + unique + '.txt');
+      const bearerLeakFile = path.join(base, 'bearer-leak-' + unique + '.txt');
+      const tokenLeakFile = path.join(base, 'token-leak-' + unique + '.txt');
+      const env = {
+        ...process.env,
+        // Simulates an operator shell that already happens to have a receiver bearer/token set
+        // from unrelated work -- the script must still never forward either to this child.
+        DWO_D2_RECEIVER_BEARER: 'sentinel-parent-bearer-never-inherited',
+        DWO_RECEIVER_TOKEN: 'sentinel-parent-token-never-inherited',
+        D2_TEST_PASSPHRASE_FILE: passphraseFile,
+        D2_TEST_BEARER_LEAK_FILE: bearerLeakFile,
+        D2_TEST_TOKEN_LEAK_FILE: tokenLeakFile
+      };
+      const run = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', scriptPath,
+        '-ConfigPath', configPath, '-SecretsPath', overrideSecretsPath || secretsPath,
+        '-NodePath', nodePath, '-AdapterPath', adapterPath
+      ], { windowsHide: true, encoding: 'utf8', env });
+      return { run, passphraseFile, bearerLeakFile, tokenLeakFile };
+    }
+
+    // Success: the exact correct passphrase reaches the fake child; the receiver bearer/token
+    // are never inherited; the script's own stdout/stderr never exposes the passphrase or
+    // either sentinel secret value.
+    {
+      const { run, passphraseFile, bearerLeakFile, tokenLeakFile } = runScript(fakeNodeOk);
+      assert.equal(run.status, 0, 'a successful fake child must yield the scalar exit code 0: ' + run.stderr);
+      assert.match(String(run.stdout), /status=ok/);
+      const delivered = (await fs.readFile(passphraseFile, 'utf8')).trim();
+      assert.equal(delivered, passphrase, 'the fake child must receive the exact correct restored passphrase');
+      await assert.rejects(fs.stat(bearerLeakFile), { code: 'ENOENT' }, 'the receiver bearer must never be inherited by the child');
+      await assert.rejects(fs.stat(tokenLeakFile), { code: 'ENOENT' }, 'the receiver token must never be inherited by the child');
+      const combinedOutput = String(run.stdout) + String(run.stderr);
+      assert.doesNotMatch(combinedOutput, new RegExp(passphrase), "the script's own output must never expose the passphrase");
+      assert.doesNotMatch(combinedOutput, /sentinel-parent-(bearer|token)-never-inherited/);
+    }
+
+    // Child failure: the fake child's own non-zero exit must surface only as the one sanitized
+    // code 15, after still having correctly received the passphrase.
+    {
+      const { run, passphraseFile } = runScript(fakeNodeFail);
+      assert.equal(run.status, 15, "a failing fake child's exit must surface as the single sanitized code 15");
+      assert.equal((await fs.readFile(passphraseFile, 'utf8')).trim(), passphrase);
+    }
+
+    // Wrong key: a recipientKeyId mismatch must fail with code 12 before the child ever runs.
+    {
+      const wrongKeySecretsPath = path.join(base, 'secrets-wrong-key.json');
+      await fs.writeFile(wrongKeySecretsPath, JSON.stringify({ version: 1, receiverTokenProtected: protectedToken, backupPassphraseProtected: protectedPassphrase, recipientKeyId: 'rk_' + 'z'.repeat(20) }));
+      const { run, passphraseFile } = runScript(fakeNodeOk, wrongKeySecretsPath);
+      assert.equal(run.status, 12, 'a recipientKeyId mismatch must fail with the dedicated code 12');
+      await assert.rejects(fs.stat(passphraseFile), { code: 'ENOENT' }, 'the child must never be invoked on a key mismatch');
+    }
+
+    // Malformed secret: a missing required key (the established four-key shape is not satisfied)
+    // must fail with code 11 before the child ever runs.
+    {
+      const malformedSecretsPath = path.join(base, 'secrets-malformed.json');
+      await fs.writeFile(malformedSecretsPath, JSON.stringify({ version: 1, backupPassphraseProtected: protectedPassphrase, recipientKeyId: recipient.backup.recipientKeyId }));
+      const { run, passphraseFile } = runScript(fakeNodeOk, malformedSecretsPath);
+      assert.equal(run.status, 11, 'a missing receiverTokenProtected key must fail with the dedicated code 11');
+      await assert.rejects(fs.stat(passphraseFile), { code: 'ENOENT' }, 'the child must never be invoked on a malformed secrets file');
+    }
   } finally { await fs.rm(base, { recursive: true, force: true }); }
 });
