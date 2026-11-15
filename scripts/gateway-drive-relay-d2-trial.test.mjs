@@ -8,7 +8,7 @@ function testHookSource(source){
   assert.doesNotMatch(source,/D2TrialTestHooks/);
   const marker="document.getElementById('pair').onclick=";
   assert.equal(source.split(marker).length,2);
-  return source.replace(marker,'globalThis.D2TrialTestHooks=Object.freeze({validState,isSandboxOrigin,bridgeCall,buildJobBody,claimPendingJob,markAccepted,queryStatus,attemptUpload,send,pair,withBusy,getState,putState});'+marker);
+  return source.replace(marker,'globalThis.D2TrialTestHooks=Object.freeze({validState,validArchive,isSandboxOrigin,bridgeCall,buildJobBody,buildSecondJobBody,claimPendingJob,markAccepted,queryStatus,attemptUpload,resolvePendingJob,rotateSecondJob,send,sendSecond,pair,withBusy,getState,putState,ARCHIVE_ID,SECOND_REF,FIRST_REF});'+marker);
 }
 const h = bytes => createHash('sha256').update(bytes).digest('hex'); const REF = 'dwo:123e4567-e89b-42d3-a456-426614174000';
 const SANDBOX_ORIGIN='https://n-bcp4qzdfuoczg3utczw3uytot2wyafcdo5lfkuq-0lu-script.googleusercontent.com';
@@ -16,9 +16,31 @@ function fakeTimers(){let nextId=1;const timers=new Map();return{setTimeout(fn,d
 // Minimal synthetic IndexedDB double: a single object store, serialized readwrite/readonly transactions
 // (FIFO per call to transaction()), supporting the exact get/put-inside-onsuccess pattern this file's
 // production code uses (never a general-purpose IndexedDB implementation).
-function makeFakeIndexedDB(){
+// `opts.failPutId`, when given, makes any put() of a value with that id throw synchronously
+// inside the transaction (simulating a second-write failure after a first write already staged)
+// so real rollback can be exercised: writes are staged per-transaction and only merged into the
+// shared `data` map on a genuine commit (tx._pending reaches 0 with no abort); an explicit
+// tx.abort() (as the production rotateSecondJob calls on any failure) or any op throwing
+// discards the whole transaction's staged writes instead of merging them -- exactly the add
+// (reject on duplicate key) and all-or-nothing two-write semantics the real IndexedDB gives.
+function makeFakeIndexedDB(opts={}){
   const data=new Map();let queueTail=Promise.resolve();
-  const db={close(){},transaction(){const tx={oncomplete:null,onerror:null,_pending:0,_committed:false};const myTurn=queueTail;let advance;queueTail=new Promise(res=>{advance=res;});function scheduleCheck(){queueMicrotask(()=>{if(tx._pending===0&&!tx._committed){tx._committed=true;if(tx.oncomplete)tx.oncomplete();advance();}});}function op(run){const req={result:undefined,onsuccess:null,onerror:null};tx._pending++;myTurn.then(()=>queueMicrotask(()=>{try{req.result=run();}catch(err){tx._pending--;if(req.onerror)req.onerror();scheduleCheck();return;}tx._pending--;if(req.onsuccess)req.onsuccess();scheduleCheck();}));return req;}const store={get(key){return op(()=>data.get(key));},put(value){return op(()=>{data.set(value.id,value);return value;});}};tx.objectStore=()=>store;return tx;}};
+  const db={close(){},transaction(){
+    const tx={oncomplete:null,onerror:null,onabort:null,error:null,_pending:0,_committed:false,_aborted:false};
+    const overlay=new Map();
+    const myTurn=queueTail;let advance;queueTail=new Promise(res=>{advance=res;});
+    const settleAbort=err=>{if(tx._committed||tx._aborted)return;tx._aborted=true;tx.error=tx.error||err;if(tx.onabort)tx.onabort();advance();};
+    function scheduleCheck(){queueMicrotask(()=>{if(tx._aborted||tx._committed)return;if(tx._pending===0){tx._committed=true;for(const[key,entry]of overlay){if(entry.op==='delete')data.delete(key);else data.set(key,entry.value);}if(tx.oncomplete)tx.oncomplete();advance();}});}
+    function op(run){const req={result:undefined,onsuccess:null,onerror:null,error:null};tx._pending++;myTurn.then(()=>queueMicrotask(()=>{if(tx._aborted)return;try{req.result=run();}catch(err){tx._pending--;req.error=err;if(req.onerror)req.onerror();settleAbort(err);return;}tx._pending--;if(req.onsuccess)req.onsuccess();scheduleCheck();}));return req;}
+    const store={
+      get(key){return op(()=>overlay.has(key)?(overlay.get(key).op==='delete'?undefined:overlay.get(key).value):data.get(key));},
+      put(value){return op(()=>{if(opts.failPutId&&value.id===opts.failPutId)throw Object.assign(Error('D2_TEST_FORCED_PUT_FAILURE'),{name:'D2TestForcedPutFailure'});overlay.set(value.id,{op:'put',value});return value;});},
+      add(value){return op(()=>{const exists=overlay.has(value.id)?overlay.get(value.id).op!=='delete':data.has(value.id);if(exists)throw Object.assign(Error('D2_TEST_CONSTRAINT_ERROR'),{name:'ConstraintError'});overlay.set(value.id,{op:'put',value});return value;});}
+    };
+    tx.objectStore=()=>store;
+    tx.abort=()=>settleAbort(Error('D2_TEST_TX_ABORTED'));
+    return tx;
+  }};
   return{open(){const req={result:db,onsuccess:null,onerror:null};queueMicrotask(()=>{if(req.onsuccess)req.onsuccess();});return req;},seed(value){data.set(value.id,value);},peek(id){return data.get(id);}};
 }
 // A minimal double whose readwrite transaction always fails its write (onabort fires with a
@@ -44,7 +66,7 @@ async function waitForSrcChange(ctx,previousSrc){
 async function driveNextRound(ctx,previousSrc,ok,value){const src=await waitForSrcChange(ctx,previousSrc);driveRound(ctx,ok,value);return src;}
 function fakeMediaModules(){let n=0;return{MediaTransferPackage:{buildPackage:async()=>({})},MediaTransferCrypto:{encryptPackage:async()=>({}),generateSenderIdentity:async()=>{const key=await webcrypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},false,['sign']);return{clinicDeviceId:'dev_synthetic',signingKeyId:'sk_synthetic',privateKey:key.privateKey,publicJwk:{kty:'EC',crv:'P-256',x:'x'.repeat(43),y:'y'.repeat(43)}};}},MediaRelayTransport:{buildCreateRequest:async()=>{const descriptorSha256=h('synthetic-sender-candidate-'+(n++));return{request:{envelopeHeader:{descriptorSha256},plan:{version:'dwo-relay-plan-v1',totalBytes:16,entries:[{},{},{}]}},parts:[0,1,2].map(i=>({blob:{arrayBuffer:async()=>new Uint8Array([i+1,i+1,i+1,i+1]).buffer}}))};},canonicalJson:v=>JSON.stringify(v)},MediaReceiverBootstrap:{}};}
 function buildSenderSandbox({indexedDB,bridge='https://script.google.com/macros/s/ABC_123/exec',timers}={}){
-  const nodes={status:{},'relay-bridge':{src:''},pair:{},send:{}};let onMessage=null;
+  const nodes={status:{},'relay-bridge':{src:''},pair:{},send:{},send2:{}};let onMessage=null;
   const fakeWindow={addEventListener:(type,fn)=>{if(type==='message')onMessage=fn;},removeEventListener:(type,fn)=>{if(type==='message'&&onMessage===fn)onMessage=null;}};
   const media=fakeMediaModules();
   const sandbox={CryptoKey:globalThis.CryptoKey,crypto:webcrypto,btoa:s=>Buffer.from(s,'binary').toString('base64'),Blob:class{constructor(parts){this._parts=parts;}},Uint8Array,Date,document:{getElementById:id=>nodes[id]},window:fakeWindow,location:{href:'https://311experience-gisikoubou.github.io/digital-work-order/app/drive-relay-d2-trial.html?bridge='+encodeURIComponent(bridge)},URL,TextEncoder,indexedDB,isSecureContext:true,Error,Array,Number,Object,Promise,setTimeout:timers?timers.setTimeout:(()=>1),clearTimeout:timers?timers.clearTimeout:(()=>{}),MediaTransferPackage:media.MediaTransferPackage,MediaTransferCrypto:media.MediaTransferCrypto,MediaRelayTransport:media.MediaRelayTransport,MediaReceiverBootstrap:media.MediaReceiverBootstrap,globalThis:null};
@@ -55,11 +77,11 @@ async function makeSenderState(overrides={}){
   const key=await webcrypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},false,['sign']);
   return{id:'sender',version:2,clinicDeviceId:'dev_test',signingKeyId:'sk_test',signingPrivateKey:key.privateKey,signingPublicJwk:{kty:'EC',crv:'P-256',x:'x'.repeat(43),y:'y'.repeat(43)},uploadBearer:'A'.repeat(43),paired:true,recipientKeyId:'rk_receiver',recipientPublicJwk:{kty:'EC',crv:'P-256',x:'x'.repeat(43),y:'y'.repeat(43)},...overrides};
 }
-test('browser validator executes fail-closed state checks and CSP has only exact Google origins',async()=>{const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8'),html=await fs.readFile(new URL('../app/drive-relay-d2-trial.html',import.meta.url),'utf8');class FakeCryptoKey{constructor(extractable=false,usages=['sign']){this.type='private';this.extractable=extractable;this.algorithm={name:'ECDSA',namedCurve:'P-256'};this.usages=usages;}}const nodes={status:{},'relay-bridge':{},pair:{},send:{}};const sandbox={CryptoKey:FakeCryptoKey,crypto:{getRandomValues:v=>v,subtle:{}},document:{getElementById:id=>nodes[id]},window:{addEventListener(){},removeEventListener(){}},location:{href:'https://example.invalid/'},URL,TextEncoder,indexedDB:{},isSecureContext:true,Error,Array,Number,Object,Promise,setTimeout,clearTimeout,globalThis:null};sandbox.globalThis=sandbox;vm.runInNewContext(testHookSource(source),sandbox);const key=new FakeCryptoKey(),base={id:'sender',version:2,clinicDeviceId:'dev_test',signingKeyId:'sk_test',signingPrivateKey:key,signingPublicJwk:{kty:'EC',crv:'P-256',x:'x'.repeat(43),y:'y'.repeat(43)},uploadBearer:'A'.repeat(43),paired:false},pending={status:'pending',body:{bearer:base.uploadBearer,jobId:'job_'+'a'.repeat(64),descriptorSha256:'a'.repeat(64),ackProofHash:'b'.repeat(64),planSha256:'c'.repeat(64),plan:{version:'dwo-relay-plan-v1',totalBytes:1,entries:[{}]},objects:[{ordinal:0,size:1,ciphertextSha256:'d'.repeat(64),bytes:'AQ'}]}};assert.equal(sandbox.D2TrialTestHooks.validState(base),true);assert.equal(sandbox.D2TrialTestHooks.validState({...base,pendingJob:{...pending,body:{...pending.body,plan:{...pending.body.plan,entries:[]}}}}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,signingPrivateKey:new FakeCryptoKey(true)}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,signingPrivateKey:new FakeCryptoKey(false,['verify'])}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,uploadBearer:'A'.repeat(42)}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,paired:true}),false);assert.match(source,/MediaRelayTransport\.canonicalJson\(built\.request\.plan\)/);assert.match(html,/frame-src https:\/\/script\.google\.com https:\/\/script\.googleusercontent\.com/);assert.doesNotMatch(html,/\*\.googleusercontent/);});
+test('browser validator executes fail-closed state checks and CSP has only exact Google origins',async()=>{const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8'),html=await fs.readFile(new URL('../app/drive-relay-d2-trial.html',import.meta.url),'utf8');class FakeCryptoKey{constructor(extractable=false,usages=['sign']){this.type='private';this.extractable=extractable;this.algorithm={name:'ECDSA',namedCurve:'P-256'};this.usages=usages;}}const nodes={status:{},'relay-bridge':{},pair:{},send:{},send2:{}};const sandbox={CryptoKey:FakeCryptoKey,crypto:{getRandomValues:v=>v,subtle:{}},document:{getElementById:id=>nodes[id]},window:{addEventListener(){},removeEventListener(){}},location:{href:'https://example.invalid/'},URL,TextEncoder,indexedDB:{},isSecureContext:true,Error,Array,Number,Object,Promise,setTimeout,clearTimeout,globalThis:null};sandbox.globalThis=sandbox;vm.runInNewContext(testHookSource(source),sandbox);const key=new FakeCryptoKey(),base={id:'sender',version:2,clinicDeviceId:'dev_test',signingKeyId:'sk_test',signingPrivateKey:key,signingPublicJwk:{kty:'EC',crv:'P-256',x:'x'.repeat(43),y:'y'.repeat(43)},uploadBearer:'A'.repeat(43),paired:false},pending={status:'pending',body:{bearer:base.uploadBearer,jobId:'job_'+'a'.repeat(64),descriptorSha256:'a'.repeat(64),ackProofHash:'b'.repeat(64),planSha256:'c'.repeat(64),plan:{version:'dwo-relay-plan-v1',totalBytes:1,entries:[{}]},objects:[{ordinal:0,size:1,ciphertextSha256:'d'.repeat(64),bytes:'AQ'}]}};assert.equal(sandbox.D2TrialTestHooks.validState(base),true);assert.equal(sandbox.D2TrialTestHooks.validState({...base,pendingJob:{...pending,body:{...pending.body,plan:{...pending.body.plan,entries:[]}}}}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,signingPrivateKey:new FakeCryptoKey(true)}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,signingPrivateKey:new FakeCryptoKey(false,['verify'])}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,uploadBearer:'A'.repeat(42)}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,paired:true}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,secondGenerationOf:'not-a-job-id'}),false);assert.equal(sandbox.D2TrialTestHooks.validState({...base,secondGenerationOf:'job_'+'a'.repeat(64)}),true);assert.equal(sandbox.D2TrialTestHooks.validArchive({id:sandbox.D2TrialTestHooks.ARCHIVE_ID,pendingJob:pending},base.uploadBearer),false);assert.equal(sandbox.D2TrialTestHooks.validArchive({id:sandbox.D2TrialTestHooks.ARCHIVE_ID,pendingJob:{...pending,status:'accepted'}},base.uploadBearer),true);assert.match(source,/MediaRelayTransport\.canonicalJson\(built\.request\.plan\)/);assert.match(html,/frame-src https:\/\/script\.google\.com https:\/\/script\.googleusercontent\.com/);assert.doesNotMatch(html,/\*\.googleusercontent/);});
 test('browser bridge accepts only generated Apps Script sandbox origin and pins nested source/origin',async()=>{
   const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
   let onMessage=null,posted=null,settled=false;
-  const nodes={status:{},'relay-bridge':{src:''},pair:{},send:{}};
+  const nodes={status:{},'relay-bridge':{src:''},pair:{},send:{},send2:{}};
   const bridge='https://script.google.com/macros/s/ABC_123/exec';
   const fakeWindow={addEventListener:(type,fn)=>{if(type==='message')onMessage=fn;},removeEventListener:(type,fn)=>{if(type==='message'&&onMessage===fn)onMessage=null;}};
   const sandbox={CryptoKey:class{},crypto:{getRandomValues:v=>v,subtle:{}},btoa:s=>Buffer.from(s,'binary').toString('base64'),document:{getElementById:id=>nodes[id]},window:fakeWindow,location:{href:'https://311experience-gisikoubou.github.io/digital-work-order/app/drive-relay-d2-trial.html?bridge='+encodeURIComponent(bridge)},URL,TextEncoder,indexedDB:{},isSecureContext:true,Error,Array,Number,Object,Promise,setTimeout:()=>1,clearTimeout:()=>{},globalThis:null};
@@ -86,7 +108,7 @@ test('D2 sender separates a bounded 15s handshake timer from a 60s action timer 
   // Actual evidence: iframe begins 21:54:02, d2Bridge begins 21:54:04 (ready at +2s) and runs 13.694s
   // (result at +15.694s). A single 15s timer covering the whole exchange would fail this; the fix must not.
   const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
-  const nodes={status:{},'relay-bridge':{src:''},pair:{},send:{}};
+  const nodes={status:{},'relay-bridge':{src:''},pair:{},send:{},send2:{}};
   let onMessage=null;
   const fakeWindow={addEventListener:(type,fn)=>{if(type==='message')onMessage=fn;},removeEventListener:(type,fn)=>{if(type==='message'&&onMessage===fn)onMessage=null;}};
   const bridge='https://script.google.com/macros/s/ABC_123/exec';
@@ -109,7 +131,7 @@ test('D2 sender separates a bounded 15s handshake timer from a 60s action timer 
 });
 
 function makeBridgeOnlySandbox(timers){
-  const nodes={status:{},'relay-bridge':{src:''},pair:{},send:{}};let onMessage=null;
+  const nodes={status:{},'relay-bridge':{src:''},pair:{},send:{},send2:{}};let onMessage=null;
   const fakeWindow={addEventListener:(type,fn)=>{if(type==='message')onMessage=fn;},removeEventListener:(type,fn)=>{if(type==='message'&&onMessage===fn)onMessage=null;}};
   const bridge='https://script.google.com/macros/s/ABC_123/exec';
   const sandbox={CryptoKey:class{},crypto:{getRandomValues:v=>v,subtle:{}},btoa:s=>Buffer.from(s,'binary').toString('base64'),document:{getElementById:id=>nodes[id]},window:fakeWindow,location:{href:'https://311experience-gisikoubou.github.io/digital-work-order/app/drive-relay-d2-trial.html?bridge='+encodeURIComponent(bridge)},URL,TextEncoder,indexedDB:{},isSecureContext:true,Error,Array,Number,Object,Promise,setTimeout:timers.setTimeout,clearTimeout:timers.clearTimeout,globalThis:null};
@@ -341,6 +363,207 @@ test('D2 sender two-tab regression: adopter queries status before any retry and 
     const p=await scenario(status,true);
     assert.equal(p.status,'accepted',`${status} same-body retry must mark the job accepted on success`);
   }
+});
+
+// Issue #170: bounded second synthetic job, preserving the first accepted record unchanged.
+function makeJobBody(bearer,seed){return{bearer,jobId:'job_'+seed.repeat(64),descriptorSha256:seed.repeat(64),ackProofHash:'b'.repeat(64),planSha256:'c'.repeat(64),plan:{version:'dwo-relay-plan-v1',totalBytes:3,entries:[{},{},{}]},objects:[0,1,2].map(i=>({ordinal:i,size:1,ciphertextSha256:'d'.repeat(64),bytes:'AQ'}))};}
+function capturedFrom(base,oldJobId){return{oldJobId,clinicDeviceId:base.clinicDeviceId,signingKeyId:base.signingKeyId,uploadBearer:base.uploadBearer,signingPublicJwk:base.signingPublicJwk};}
+function captureReady(ctx){const log=[],channel=readChannel(ctx.nodes),source={postMessage(message){log.push(message);}};ctx.getOnMessage()({origin:SANDBOX_ORIGIN,source,data:{version:'dwo-d2-bridge-v1',channel,type:'ready'}});return{channel,source,log};}
+function sendResult(ctx,channel,source,ok,value){ctx.getOnMessage()({origin:SANDBOX_ORIGIN,source,data:{version:'dwo-d2-bridge-v1',channel,type:'result',ok,value}});}
+
+test('fake IndexedDB double: add rejects a duplicate key and a failed/aborted transaction rolls back every staged write, not just the failing one',async()=>{
+  const fakeDB=makeFakeIndexedDB();
+  fakeDB.seed({id:'x',v:1});
+  const db=await new Promise(ok=>{const r=fakeDB.open();r.onsuccess=()=>ok(r.result);});
+  const tx=db.transaction('state','readwrite'),store=tx.objectStore('state');
+  let errored=false,aborted=false;
+  tx.onabort=()=>{aborted=true;};
+  store.put({id:'y',v:2});
+  const req=store.add({id:'x',v:3});
+  req.onerror=()=>{errored=true;};
+  await new Promise(r=>setTimeout(r,0));
+  assert.equal(errored,true,'add must reject a key that already exists');
+  assert.equal(aborted,true,'the whole transaction must abort, not just the failing request');
+  assert.equal(fakeDB.peek('y'),undefined,'a put staged in the same aborted transaction must never commit either');
+  assert.deepEqual(fakeDB.peek('x'),{id:'x',v:1},'the original record must be byte-for-byte untouched');
+});
+
+test('D2 sender fixed first/second synthetic refs are distinct, both pass the real transfer-package validator, and build distinct real manifests',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const nodes={status:{},'relay-bridge':{},pair:{},send:{},send2:{}};
+  const sandbox={CryptoKey:class{},crypto:{getRandomValues:v=>v,subtle:{}},document:{getElementById:id=>nodes[id]},window:{addEventListener(){},removeEventListener(){}},location:{href:'https://example.invalid/'},URL,TextEncoder,indexedDB:{},isSecureContext:true,Error,Array,Number,Object,Promise,setTimeout,clearTimeout,globalThis:null};
+  sandbox.globalThis=sandbox;
+  vm.runInNewContext(testHookSource(source),sandbox);
+  const hooks=sandbox.D2TrialTestHooks;
+  assert.notEqual(hooks.FIRST_REF,hooks.SECOND_REF);
+  assert.equal(T.isValidWorkOrderRef(hooks.FIRST_REF),true);
+  assert.equal(T.isValidWorkOrderRef(hooks.SECOND_REF),true);
+  const first=await T.buildPackage(hooks.FIRST_REF,{trial:'D2-SYNTHETIC',createdFor:'test-only'},[],{crypto:webcrypto,now:()=>1});
+  const second=await T.buildPackage(hooks.SECOND_REF,{trial:'D2-SYNTHETIC',createdFor:'test-only'},[],{crypto:webcrypto,now:()=>1});
+  assert.notEqual(first.manifest.workOrderRef,second.manifest.workOrderRef);
+  assert.notEqual(JSON.stringify(first.manifest),JSON.stringify(second.manifest));
+});
+
+test('D2 sender rotateSecondJob archives the exact first accepted job unchanged, commits exactly one distinct second pending job, rejects stale/mismatched captures, and never creates a third generation',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const base=await makeSenderState(),oldBody=makeJobBody(base.uploadBearer,'1');
+  const fakeDB=makeFakeIndexedDB();fakeDB.seed({...base,pendingJob:{status:'accepted',body:oldBody}});
+  const ctx=buildSenderSandbox({indexedDB:fakeDB});
+  vm.runInNewContext(testHookSource(source),ctx.sandbox);
+  const hooks=ctx.sandbox.D2TrialTestHooks;
+  const captured=capturedFrom(base,oldBody.jobId);
+  // A stale captured bearer (identity drift) must fail closed before any write.
+  await assert.rejects(hooks.rotateSecondJob({...captured,uploadBearer:'B'.repeat(43)},makeJobBody(base.uploadBearer,'2')),{message:'D2_SECOND_JOB_STATE_INVALID'});
+  assert.equal(fakeDB.peek(hooks.ARCHIVE_ID),undefined);
+  assert.equal(fakeDB.peek('sender').pendingJob.body.jobId,oldBody.jobId);
+  // A stale captured old job id (snapshot no longer matches the durable accepted job) must
+  // also fail closed before any write.
+  await assert.rejects(hooks.rotateSecondJob({...captured,oldJobId:'job_'+'z'.repeat(64)},makeJobBody(base.uploadBearer,'3')),{message:'D2_SECOND_JOB_STATE_INVALID'});
+  assert.equal(fakeDB.peek('sender').pendingJob.body.jobId,oldBody.jobId);
+  // The real rotation: a fresh, distinct second body committed together with an unchanged
+  // archive of the first accepted job, in one transaction.
+  const newBody=makeJobBody(base.uploadBearer,'4');
+  const result=await hooks.rotateSecondJob(captured,newBody);
+  assert.equal(result.created,true);assert.equal(result.adopted,false);
+  assert.equal(result.pendingJob.status,'pending');
+  assert.equal(result.pendingJob.body.jobId,newBody.jobId);
+  assert.notEqual(newBody.jobId,oldBody.jobId);
+  assert.notEqual(newBody.descriptorSha256,oldBody.descriptorSha256);
+  assert.deepEqual(fakeDB.peek(hooks.ARCHIVE_ID),{id:hooks.ARCHIVE_ID,pendingJob:{status:'accepted',body:oldBody}},'the archive must hold the exact prior accepted pendingJob, unchanged');
+  const storedAfterRotation=fakeDB.peek('sender');
+  assert.equal(storedAfterRotation.secondGenerationOf,oldBody.jobId);
+  assert.deepEqual(storedAfterRotation.pendingJob,{status:'pending',body:newBody});
+  // A late tab arriving after rotation (still pending) must adopt, never create a third job.
+  const loserWhilePending=await hooks.rotateSecondJob(captured,makeJobBody(base.uploadBearer,'5'));
+  assert.equal(loserWhilePending.created,false);assert.equal(loserWhilePending.adopted,true);
+  assert.equal(loserWhilePending.pendingJob.body.jobId,newBody.jobId);
+  assert.equal(fakeDB.peek('sender').pendingJob.body.jobId,newBody.jobId,'no third job must ever be written while the second is still pending');
+  // Once the second job is accepted, a late tab must still only adopt (accepted no-op), never a third.
+  await hooks.markAccepted(newBody.jobId);
+  const loserWhileAccepted=await hooks.rotateSecondJob(captured,makeJobBody(base.uploadBearer,'6'));
+  assert.equal(loserWhileAccepted.created,false);assert.equal(loserWhileAccepted.adopted,true);
+  assert.equal(loserWhileAccepted.pendingJob.status,'accepted');
+  assert.equal(loserWhileAccepted.pendingJob.body.jobId,newBody.jobId);
+  assert.deepEqual(fakeDB.peek(hooks.ARCHIVE_ID),{id:hooks.ARCHIVE_ID,pendingJob:{status:'accepted',body:oldBody}},'the archive must remain exactly the first accepted job across further attempts');
+});
+
+test('D2 sender rotateSecondJob fails closed on an existing or malformed archive without ever overwriting it or mutating the current accepted job',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const base=await makeSenderState(),oldBody=makeJobBody(base.uploadBearer,'7');
+  // A legacy/malformed pre-existing archive (status 'pending', not 'accepted') seeded without
+  // the marker: existence alone must still block rotation, and the archive itself must never
+  // be reinterpreted, repaired, or reset.
+  const malformedArchive={id:'sender-first-accepted',pendingJob:{status:'pending',body:oldBody}};
+  const fakeDB=makeFakeIndexedDB();
+  fakeDB.seed({...base,pendingJob:{status:'accepted',body:oldBody}});
+  fakeDB.seed(malformedArchive);
+  const ctx=buildSenderSandbox({indexedDB:fakeDB});
+  vm.runInNewContext(testHookSource(source),ctx.sandbox);
+  const hooks=ctx.sandbox.D2TrialTestHooks;
+  assert.equal(hooks.ARCHIVE_ID,'sender-first-accepted');
+  const captured=capturedFrom(base,oldBody.jobId);
+  await assert.rejects(hooks.rotateSecondJob(captured,makeJobBody(base.uploadBearer,'8')),{message:'D2_SECOND_JOB_ARCHIVE_EXISTS'});
+  assert.deepEqual(fakeDB.peek(hooks.ARCHIVE_ID),malformedArchive,'a pre-existing archive, even malformed, must never be reset or overwritten');
+  const stillSender=fakeDB.peek('sender');
+  assert.equal(stillSender.pendingJob.status,'accepted');
+  assert.equal(stillSender.pendingJob.body.jobId,oldBody.jobId);
+  assert.equal(stillSender.secondGenerationOf,undefined,'no marker must ever be written when rotation fails closed');
+});
+
+test('D2 sender rotateSecondJob rolls back the whole transaction -- archive and replacement together or not at all -- when the paired write fails',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const base=await makeSenderState(),oldBody=makeJobBody(base.uploadBearer,'9');
+  const fakeDB=makeFakeIndexedDB({failPutId:'sender'});
+  fakeDB.seed({...base,pendingJob:{status:'accepted',body:oldBody}});
+  const ctx=buildSenderSandbox({indexedDB:fakeDB});
+  vm.runInNewContext(testHookSource(source),ctx.sandbox);
+  const hooks=ctx.sandbox.D2TrialTestHooks;
+  const captured=capturedFrom(base,oldBody.jobId);
+  await assert.rejects(hooks.rotateSecondJob(captured,makeJobBody(base.uploadBearer,'a')),{message:'D2_TEST_FORCED_PUT_FAILURE'});
+  assert.equal(fakeDB.peek(hooks.ARCHIVE_ID),undefined,'the archive add must roll back when the paired replacement write fails');
+  const stillSender=fakeDB.peek('sender');
+  assert.equal(stillSender.pendingJob.status,'accepted');
+  assert.equal(stillSender.pendingJob.body.jobId,oldBody.jobId);
+  assert.equal(stillSender.secondGenerationOf,undefined);
+});
+
+test('D2 sender sendSecond never rotates while the first job is pending or unknown -- only resumes the existing status-first path or refuses outright',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  {
+    const base=await makeSenderState(),oldBody=makeJobBody(base.uploadBearer,'b');
+    const fakeDB=makeFakeIndexedDB();fakeDB.seed({...base,pendingJob:{status:'pending',body:oldBody}});
+    const ctx=buildSenderSandbox({indexedDB:fakeDB});
+    vm.runInNewContext(testHookSource(source),ctx.sandbox);
+    const hooks=ctx.sandbox.D2TrialTestHooks;
+    const sendPromise=hooks.sendSecond();
+    await driveNextRound(ctx,'',true,{jobId:oldBody.jobId,status:'ready'});
+    await sendPromise;
+    const stored=fakeDB.peek('sender');
+    assert.equal(stored.pendingJob.status,'accepted');
+    assert.equal(stored.pendingJob.body.jobId,oldBody.jobId,'must resolve the existing first job, never rotate while it is pending');
+    assert.equal(stored.secondGenerationOf,undefined);
+    assert.equal(fakeDB.peek(hooks.ARCHIVE_ID),undefined);
+  }
+  {
+    const base=await makeSenderState();
+    const fakeDB=makeFakeIndexedDB();fakeDB.seed(base);
+    const ctx=buildSenderSandbox({indexedDB:fakeDB});
+    vm.runInNewContext(testHookSource(source),ctx.sandbox);
+    const hooks=ctx.sandbox.D2TrialTestHooks;
+    await assert.rejects(hooks.sendSecond(),{message:'D2_SECOND_JOB_REQUIRES_FIRST_ACCEPTED'});
+    assert.equal(fakeDB.peek('sender').pendingJob,undefined);
+    assert.equal(fakeDB.peek(hooks.ARCHIVE_ID),undefined);
+  }
+});
+
+test('D2 sender sendSecond end-to-end: rotates exactly once, accepts via the bridge, survives reload, never creates a third job, and a stale first-job callback cannot resurrect or overwrite it',async()=>{
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  const base=await makeSenderState(),oldBody=makeJobBody(base.uploadBearer,'c');
+  const fakeDB=makeFakeIndexedDB();fakeDB.seed({...base,pendingJob:{status:'accepted',body:oldBody}});
+  const ctx=buildSenderSandbox({indexedDB:fakeDB});
+  vm.runInNewContext(testHookSource(source),ctx.sandbox);
+  const hooks=ctx.sandbox.D2TrialTestHooks;
+  const sendPromise=hooks.sendSecond();
+  await waitForSrcChange(ctx,'');
+  const{channel,source:msgSource,log}=captureReady(ctx);
+  assert.equal(log[0].action,'putSyntheticJob','the rotation itself must never call the bridge; only the already-committed second body is uploaded');
+  const newJobId=log[0].body.jobId;
+  assert.notEqual(newJobId,oldBody.jobId);
+  sendResult(ctx,channel,msgSource,true,{jobId:newJobId,status:'ready'});
+  await sendPromise;
+  let stored=fakeDB.peek('sender');
+  assert.equal(stored.pendingJob.status,'accepted');
+  assert.equal(stored.pendingJob.body.jobId,newJobId);
+  assert.equal(stored.secondGenerationOf,oldBody.jobId);
+  const archived=fakeDB.peek(hooks.ARCHIVE_ID);
+  assert.deepEqual(archived,{id:hooks.ARCHIVE_ID,pendingJob:{status:'accepted',body:oldBody}});
+  // Reload: a fresh durable read must observe the exact same rotated+accepted state.
+  const reloaded=await hooks.getState();
+  assert.equal(reloaded.pendingJob.status,'accepted');
+  assert.equal(reloaded.pendingJob.body.jobId,newJobId);
+  assert.equal(reloaded.secondGenerationOf,oldBody.jobId);
+  // Retry via the second button again: already accepted, no third job, no bridge call at all.
+  const srcBeforeRetry=ctx.nodes['relay-bridge'].src;
+  await hooks.sendSecond();
+  assert.equal(ctx.nodes['relay-bridge'].src,srcBeforeRetry);
+  assert.deepEqual(fakeDB.peek(hooks.ARCHIVE_ID),archived);
+  assert.equal(fakeDB.peek('sender').pendingJob.body.jobId,newJobId);
+  // The original, unchanged send button must also simply no-op once the second job is accepted.
+  const srcBeforeNormalSend=ctx.nodes['relay-bridge'].src;
+  await hooks.send();
+  assert.equal(ctx.nodes['relay-bridge'].src,srcBeforeNormalSend,'the original send button must never resurrect the archived first job or create a third');
+  // A stale accepted-callback for the archived first job must reject, never overwrite the
+  // current second job (existing markAccepted job-id check, unchanged).
+  await assert.rejects(hooks.markAccepted(oldBody.jobId),{message:'PAIRING_STATE_INVALID'});
+  assert.equal(fakeDB.peek('sender').pendingJob.body.jobId,newJobId);
+  // A delayed ambiguous status answer for the archived first job's body must never trigger a
+  // retry put against the current (different) durable pending job.
+  const srcBeforeStale=ctx.nodes['relay-bridge'].src;
+  const stalePromise=hooks.resolvePendingJob(oldBody);
+  const staleRoundSrc=await driveNextRound(ctx,srcBeforeStale,true,{jobId:oldBody.jobId,status:'partial'});
+  await stalePromise;
+  assert.equal(ctx.nodes['relay-bridge'].src,staleRoundSrc,'no further bridge round (a retry put) may follow a stale ambiguous status for an archived job');
+  assert.equal(fakeDB.peek('sender').pendingJob.body.jobId,newJobId,'a stale delayed check for the archived job must never resurrect it as current');
 });
 
 async function fixture() { const recipient=await C.generateRecipientIdentity('d2-passphrase',{crypto:webcrypto}); const sender=await C.generateSenderIdentity({crypto:webcrypto}); const offer=await C.createPairingOffer(recipient,{crypto:webcrypto,now:()=>1}); const response=await C.createPairingResponse(offer,sender,{crypto:webcrypto,now:()=>2}); const registry=await C.verifyPairingResponse(offer,response,{crypto:webcrypto,now:()=>3}); const marker='SYNTHETIC_CLINICAL_MARKER_NEVER_IN_RELAY_META'; const pkg=await T.buildPackage(REF,{workOrderRef:REF,trialMarker:marker},[{meta:{attachmentId:'att-123e4567-e89b-42d3-a456-426614174001',kind:'file',mime:'application/octet-stream',size:4},blob:new Blob([Uint8Array.from([1,2,3,4])])}],{crypto:webcrypto,now:()=>4,chunkSize:4}); const envelope=await C.encryptPackage(pkg,sender,recipient,{crypto:webcrypto,now:()=>5}); const built=await R.buildCreateRequest(envelope,sender,{crypto:webcrypto,now:()=>6,recipientPublicInfo:recipient,bootstrapApi:B}); return {recipient,registry,built,marker}; }
