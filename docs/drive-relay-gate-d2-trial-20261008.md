@@ -84,3 +84,51 @@ operator-provisioned outside this repository; no real path, key, job id, or secr
 any tracked file. This path assumes a trusted local operator-provisioned configuration and a
 single, non-hostile, non-concurrently-mutated filesystem during a run -- it is not a guarantee
 against a concurrently hostile actor racing the same files on disk.
+
+### FINAL AUDIT REPAIR (same four files, no scope expansion)
+
+Two concrete defects found in manual adversarial review of the prior candidate were fixed,
+source-only, within the same four files:
+
+1. `run-d2-retained-trial.ps1`'s `Invoke-D2RetainedTrial` previously invoked the node child
+   directly (`& $NodePath @nodeArgs`), so the child's own stdout flowed into that function's
+   success-output pipeline; PowerShell then folded the leaked output together with the real
+   `return` value into an array (e.g. `@('some native line', 0)`), corrupting `$exitCode` into a
+   non-scalar and breaking every downstream exit-code comparison and the final `exit $exitCode`.
+   The node invocation is now an isolated helper, `Invoke-D2RetainedNodeChild`, that redirects
+   the child's stderr into the same captured stream as its stdout and discards the whole
+   collection into `$null` without ever logging it, then returns only a freshly captured,
+   explicitly `[int]`-cast `$LASTEXITCODE`. A regression test extracts this exact helper
+   function, verbatim, from the real script source and runs it in an isolated harness against
+   two fake "node" executables (one exiting 0 with stdout/stderr, one exiting 7 with
+   stdout/stderr) -- asserting a single scalar `Int32` exit code and that neither fake child's
+   output ever reaches the harness's own captured output. No DPAPI call and no real secret are
+   involved in this regression.
+2. `receiveD2RetainedJob`'s sync/inbox root overlap check used `realOrResolved`, which fell back
+   to a purely lexical `path.resolve` on *any* `fs.realpath` failure (not only a missing leaf) --
+   so a sync root that did not exist yet at the time of that first check (the ordinary case,
+   since Drive has not synced it yet) could later turn out, once materialized, to be a
+   symlink/junction alias directly into the local inbox root, without ever being caught.
+   `realOrResolved` now walks up to the *nearest existing* ancestor, `realpath`s only that
+   existing ancestor (resolving any symlink/junction already present on it), and rejoins the
+   still-missing trailing components lexically; any non-`ENOENT` access failure on an existing
+   ancestor now fails closed instead of falling back. The root-overlap comparison itself
+   (`pathOverlaps`) was also rewritten to compare resolved paths one filesystem *component* at a
+   time (case-insensitively on Windows) instead of a raw string/`startsWith('..')` check on
+   `path.relative`'s output. The overlap check is now performed a second time, with both roots
+   re-resolved through the real filesystem, immediately after `waitForD2RetainedReady` confirms
+   the sync root/job actually exist and strictly before any decrypt or persist -- closing the
+   window above. A new local-root link guard (`assertLocalRootNotLinked`) also rejects the local
+   inbox root itself being a symlink/junction (the dedicated Drive sync root remains exempt from
+   this, exactly as before, since it may legitimately carry reparse attributes). A new regression
+   test creates the sync root as a symlink into the inbox root only *after* the bounded wait has
+   already started polling, and asserts the call is rejected with `D2_RETAIN_ROOT_OVERLAP` with
+   no decrypt/persist ever having happened. `waitForD2RetainedReady`'s bounded-wait default clock
+   was also switched from `Date.now` to the monotonic `performance.now`, and its per-iteration
+   sleep is now capped to whatever time actually remains before the deadline -- it remains the
+   single bounded-wait authority; this is not a new wait mechanism and not a guarantee that an
+   underlying filesystem call can never itself block past the deadline.
+
+All prior tests for this Issue (and the full existing suite) were preserved and re-run against
+this candidate; no real job, DPAPI, Google Drive, task registration, network, or ACK/delete was
+touched while making or testing this repair, and nothing was committed or pushed.

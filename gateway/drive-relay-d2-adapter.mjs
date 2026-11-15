@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash, webcrypto } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { createRequire } from 'node:module';
 import { reconstructEnvelope, computeAckProof, resolveSenderRegistry } from './receiver-core.mjs';
 import { persistVerifiedPackage } from './local-store.mjs';
@@ -124,10 +125,40 @@ const RETAIN_DEFAULT_TIMEOUT_MS=180000;
 const RETAIN_DEFAULT_POLL_MS=200;
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
-// True if `inner` is equal to or nested inside `outer` (lexical path containment, used only
-// after both sides have already been resolved -- realpath when available, else normalized).
-function pathOverlaps(outer,inner){const rel=path.relative(outer,inner);return rel===''||(!rel.startsWith('..')&&!path.isAbsolute(rel));}
-async function realOrResolved(dir){try{return await fs.realpath(dir);}catch{return path.resolve(dir);}}
+// True if `inner` is equal to or nested inside `outer`, compared one path *component* at a
+// time (never a raw string prefix/`startsWith('..')` trick on `path.relative`'s output, which
+// is the exact defect this audit repair closes) -- used only after both sides have already
+// been resolved via realOrResolved below.
+function pathSegments(value){return path.resolve(value).split(path.sep).filter(Boolean);}
+function pathOverlaps(outer,inner){
+  const outerSegments=pathSegments(outer),innerSegments=pathSegments(inner);
+  if(innerSegments.length<outerSegments.length)return false;
+  const same=process.platform==='win32'?(a,b)=>a.toLowerCase()===b.toLowerCase():(a,b)=>a===b;
+  for(let i=0;i<outerSegments.length;i++)if(!same(outerSegments[i],innerSegments[i]))return false;
+  return true;
+}
+// Resolves `dir` through the real filesystem even when `dir` itself (or a trailing part of it)
+// does not exist yet: walks up to the *nearest existing* ancestor, realpath's only that
+// existing ancestor (resolving any symlink/junction already present on it), then rejoins the
+// still-missing trailing components lexically. This closes the audit-repair defect where a
+// missing sync root fell back to a purely lexical resolve, silently skipping over an
+// already-existing symlinked ancestor that could alias it into the other root. Any access
+// failure other than ENOENT on an existing ancestor fails closed rather than falling back.
+async function realOrResolved(dir){
+  let current=path.resolve(dir);const remainder=[];
+  for(;;){
+    try{
+      const real=await fs.realpath(current);
+      return remainder.length?path.join(real,...remainder):real;
+    }catch(error){
+      if(error&&error.code!=='ENOENT')throw fail('D2_RETAIN_PATH_ACCESS_FAILED');
+      const parent=path.dirname(current);
+      if(parent===current)throw fail('D2_RETAIN_PATH_ACCESS_FAILED');
+      remainder.unshift(path.basename(current));
+      current=parent;
+    }
+  }
+}
 
 // Presence probe for the Drive-virtual-root itself: uses fs.stat (follows any reparse point)
 // rather than lstat, so the mounted Drive folder's own reparse attributes are never treated as
@@ -161,7 +192,11 @@ export async function waitForD2RetainedReady(syncRoot,expectedJobId,options={}){
   if(!path.isAbsolute(syncRoot||'')||!/^job_[0-9a-f]{64}$/.test(expectedJobId||''))throw fail('D2_RETAIN_CONFIG_INVALID');
   const timeoutMs=Number.isInteger(options.timeoutMs)&&options.timeoutMs>0&&options.timeoutMs<=RETAIN_DEFAULT_TIMEOUT_MS?options.timeoutMs:RETAIN_DEFAULT_TIMEOUT_MS;
   const pollMs=Number.isInteger(options.pollIntervalMs)&&options.pollIntervalMs>0?options.pollIntervalMs:RETAIN_DEFAULT_POLL_MS;
-  const nowFn=options.monotonicNow||Date.now,sleepFn=options.sleep||delay;
+  // Monotonic by default (performance.now), not wall-clock Date.now: a system clock
+  // adjustment during the wait must never shorten or extend the actual bound (Issue #172 /
+  // FINAL AUDIT REPAIR). Still only one wait authority -- the override below exists purely
+  // for deterministic tests, never a second retry loop.
+  const nowFn=options.monotonicNow||(()=>performance.now()),sleepFn=options.sleep||delay;
   const resolvedRoot=path.normalize(path.resolve(syncRoot)),jobDir=path.join(resolvedRoot,expectedJobId);
   const deadline=nowFn()+timeoutMs;
   let meta=null,metaBytes=null,markerOk=false;
@@ -202,11 +237,24 @@ export async function waitForD2RetainedReady(syncRoot,expectedJobId,options={}){
         }
       }
     }
-    if(nowFn()>=deadline)throw fail('D2_RETAIN_WAIT_TIMEOUT');
-    await sleepFn(pollMs);
+    // The deadline bounds *this* wait loop only -- it is not a guarantee that an underlying
+    // filesystem call can never itself block past it. Cap the sleep to whatever time actually
+    // remains so a long pollMs can never overshoot the deadline by more than one tick.
+    const remainingMs=deadline-nowFn();
+    if(remainingMs<=0)throw fail('D2_RETAIN_WAIT_TIMEOUT');
+    await sleepFn(Math.min(pollMs,remainingMs));
   }
 }
 
+// Rejects the local inbox root itself being a symlink/junction -- the "local destination" half
+// of Issue #172 finding A3/the audit repair's "reject linked inbox root/ancestors" requirement.
+// The dedicated Drive sync root is deliberately exempt from this (see statSyncRootOrMissing):
+// only the local inbox root, which is never the mounted Drive folder, is rejected for being a
+// link. Missing is fine -- persistVerifiedPackage creates it on first use.
+async function assertLocalRootNotLinked(root){
+  let stat;try{stat=await fs.lstat(root);}catch(error){if(error&&error.code==='ENOENT')return;throw fail('D2_RETAIN_FILE_ACCESS_FAILED');}
+  if(stat.isSymbolicLink())throw fail('D2_RETAIN_LINK_REJECTED');
+}
 // Defense in depth beyond viewer-core's own per-file symlink checks (Issue #172 / finding A3):
 // also rejects a linked inbox job directory itself and a linked media/ directory underneath
 // it, so an ancestor link cannot smuggle a store/verify onto a path outside the inbox.
@@ -251,9 +299,20 @@ export async function receiveD2RetainedJob(options={}){
   const[realSync,realInbox]=await Promise.all([realOrResolved(resolvedSyncRoot),realOrResolved(resolvedInboxRoot)]);
   if(pathOverlaps(realSync,realInbox)||pathOverlaps(realInbox,realSync))throw fail('D2_RETAIN_ROOT_OVERLAP');
 
+  await assertLocalRootNotLinked(resolvedInboxRoot);
   await assertInboxJobLinkSafe(resolvedInboxRoot,expectedJobId);
 
   const{meta,jobDir}=await waitForD2RetainedReady(resolvedSyncRoot,expectedJobId,options);
+
+  // FINAL AUDIT REPAIR #2: the sync root is now guaranteed to exist (waitForD2RetainedReady
+  // only returns once it does), so re-resolve both roots through the real filesystem and
+  // recheck containment *again*, before any decrypt/persist. The first check above, taken
+  // while the sync root might still have been missing, could only ever lexically/ancestor-
+  // resolve it; a root that was an alias/symlink into the other root would only reveal that
+  // once Drive actually materialized it -- this second check closes that window.
+  const[realSyncAfterReady,realInboxAfterReady]=await Promise.all([realOrResolved(resolvedSyncRoot),realOrResolved(resolvedInboxRoot)]);
+  if(pathOverlaps(realSyncAfterReady,realInboxAfterReady)||pathOverlaps(realInboxAfterReady,realSyncAfterReady))throw fail('D2_RETAIN_ROOT_OVERLAP');
+
   const{envelope,decrypted}=await decryptD2Job(jobDir,{...options,expectedJobId,recipientKeyRingOrIdentity});
   await assertExactRetainedSyntheticJob(decrypted);
 

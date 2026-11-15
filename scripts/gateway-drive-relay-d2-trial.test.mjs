@@ -1359,6 +1359,45 @@ test('D2 retained receive: rejects a linked job directory under the sync root be
   } finally { await fs.rm(base, { recursive: true, force: true }); }
 });
 
+// FINAL AUDIT REPAIR #2: a sync root that does not exist yet when receiveD2RetainedJob first
+// checks for an overlap (so it can only be ancestor-resolved, not realpath-resolved) must still
+// be caught if it later turns out -- once Drive actually materializes it -- to alias directly
+// into the local inbox root. The old `realOrResolved` silently fell back to a purely lexical
+// resolve on ANY realpath failure (not just a missing leaf), which could miss exactly this.
+test('D2 retained receive: a sync root that only becomes an inbox-root alias once Drive materializes it (mid-wait) is caught before any decrypt/persist', async () => {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'd2-retain-alias-'));
+  const inboxRoot = path.join(base, 'inbox');
+  const syncRoot = path.join(base, 'synclink'); // deliberately does not exist at call start
+  await fs.mkdir(inboxRoot, { recursive: true });
+  try {
+    // Feasibility probe for this platform's symlink/junction support; skip (never false-fail)
+    // rather than depend on timing-sensitive link creation the environment cannot perform.
+    const probeTarget = path.join(base, 'probe-target'), probeLink = path.join(base, 'probe-link');
+    await fs.mkdir(probeTarget, { recursive: true });
+    let linked = true;
+    try { await fs.symlink(probeTarget, probeLink, 'junction'); await fs.rm(probeLink, { recursive: true, force: true }); }
+    catch { linked = false; }
+    if (!linked) { return; }
+
+    const f = await retainFixture();
+    // Written directly under the real inbox-root path: once the delayed symlink below exists,
+    // <syncRoot>/<jobId> and <inboxRoot>/<jobId> are the exact same real path.
+    const { jobId } = await writeRetainedJob(f, inboxRoot);
+    const createAliasLater = (async () => {
+      await new Promise(r => setTimeout(r, 150));
+      await fs.symlink(inboxRoot, syncRoot, 'junction');
+    })();
+    try {
+      await assert.rejects(
+        () => receiveD2RetainedJob({ syncRoot, inboxRoot, expectedJobId: jobId, recipientKeyRingOrIdentity: f.recipient, timeoutMs: 3000, pollIntervalMs: 20 }),
+        { code: 'D2_RETAIN_ROOT_OVERLAP' }
+      );
+    } finally { await createAliasLater; }
+    // No decrypt/persist must ever have happened through either path.
+    await assert.rejects(() => fs.stat(path.join(inboxRoot, jobId, 'receipt.json')), { code: 'ENOENT' });
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
+});
+
 test('D2 retained bounded wait: distinguishes missing (retried) from malformed (terminated immediately), honors the deadline, and is monotonic-clock driven', async () => {
   const { base, syncRoot } = await tmpRoots();
   try {
@@ -1522,5 +1561,53 @@ test('D2 retained Windows PowerShell script: isolated synthetic fixture fails cl
     const badTimeout = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', scriptPath, '-ConfigPath', configPath, '-SecretsPath', secretsPath, '-RetainTimeoutMs', '0'], { windowsHide: true, encoding: 'utf8' });
     assert.notEqual(badTimeout.status, 0);
     assert.doesNotMatch(String(badTimeout.stdout) + String(badTimeout.stderr), /ProtectedData|Unprotect/);
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
+});
+
+// FINAL AUDIT REPAIR #1 regression: a prior version of the script invoked the node child
+// directly inside Invoke-D2RetainedTrial (`& $NodePath @nodeArgs`), so the child's own stdout
+// flowed into that function's success-output pipeline; PowerShell then folded the leaked output
+// together with the real `return` value into an array, corrupting `$exitCode` into e.g.
+// `@('some native output line', 0)` and breaking every downstream exit-code comparison. This
+// extracts and runs ONLY the real script's `Invoke-D2RetainedNodeChild` helper, verbatim from
+// its actual source, against fake "node" executables -- no config/secrets/DPAPI anywhere here.
+test('D2 retained Windows PowerShell script: Invoke-D2RetainedNodeChild returns only a scalar exit code and never leaks the child stdout/stderr', { skip: !hasPowerShell() }, async () => {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'd2-retain-ps-nodechild-'));
+  try {
+    const source = await fs.readFile(path.resolve('gateway/windows/run-d2-retained-trial.ps1'), 'utf8');
+    const match = /function Invoke-D2RetainedNodeChild[\s\S]*?\n\}\r?\n/.exec(source);
+    assert.ok(match, 'Invoke-D2RetainedNodeChild must exist, verbatim, in the real script source');
+    const extracted = match[0];
+    assert.doesNotMatch(extracted, /ProtectedData|Unprotect|DWO_RECIPIENT_BACKUP_PASSPHRASE/, 'the extracted helper must be the pure node-invocation function, with no DPAPI/secret handling in it');
+
+    const harnessPath = path.join(base, 'harness.ps1');
+    const harnessSource = [
+      'param([string]$NodePath, [string[]]$NodeArgs = @())',
+      extracted,
+      '$code = Invoke-D2RetainedNodeChild -NodePath $NodePath -NodeArgs $NodeArgs',
+      'Write-Output ("HARNESS_EXIT=" + $code)',
+      'Write-Output ("HARNESS_TYPE=" + $code.GetType().Name)',
+      'exit $code'
+    ].join("\n");
+    await fs.writeFile(harnessPath, harnessSource);
+
+    const fakeNodeOk = path.join(base, 'fake-node-ok.cmd');
+    await fs.writeFile(fakeNodeOk, '@echo off\r\necho FAKE_NODE_STDOUT_OK\r\necho FAKE_NODE_STDERR_OK>&2\r\nexit /b 0\r\n');
+    const fakeNodeFail = path.join(base, 'fake-node-fail.cmd');
+    await fs.writeFile(fakeNodeFail, '@echo off\r\necho FAKE_NODE_STDOUT_FAIL\r\necho FAKE_NODE_STDERR_FAIL>&2\r\nexit /b 7\r\n');
+
+    const ok = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', harnessPath, '-NodePath', fakeNodeOk], { windowsHide: true, encoding: 'utf8' });
+    assert.equal(ok.status, 0, 'a successful child must yield a scalar 0 exit code, never an array');
+    assert.match(ok.stdout, /HARNESS_EXIT=0/);
+    assert.match(ok.stdout, /HARNESS_TYPE=Int32/, 'the returned exit code must be a single scalar Int32, never an array folded together with leaked stdout');
+    assert.doesNotMatch(ok.stdout, /FAKE_NODE_STDOUT_OK/, "the child's own stdout must never leak into the caller's captured output");
+    assert.doesNotMatch(String(ok.stderr), /FAKE_NODE_STDERR_OK/, "the child's own stderr must never leak either");
+
+    const failRun = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', harnessPath, '-NodePath', fakeNodeFail], { windowsHide: true, encoding: 'utf8' });
+    assert.equal(failRun.status, 7, "a failing child's real exit code must still come through as a scalar, unmangled");
+    assert.match(failRun.stdout, /HARNESS_EXIT=7/);
+    assert.match(failRun.stdout, /HARNESS_TYPE=Int32/);
+    assert.doesNotMatch(failRun.stdout, /FAKE_NODE_STDOUT_FAIL/);
+    assert.doesNotMatch(String(failRun.stderr), /FAKE_NODE_STDERR_FAIL/);
   } finally { await fs.rm(base, { recursive: true, force: true }); }
 });

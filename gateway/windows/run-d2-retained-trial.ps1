@@ -63,6 +63,26 @@ function Write-Status([string]$Code) {
   Write-Output ("[d2-retain] status=" + $Code)
 }
 
+# Invokes exactly one native child process and returns ONLY a scalar [int] exit code -- never
+# the child's own stdout/stderr. (FINAL AUDIT REPAIR: a prior version let the native command's
+# stdout flow directly into this script's own function-return pipeline; PowerShell then folds
+# that leaked output together with the real return value into an array, so a caller doing
+# `$exitCode = Invoke-D2RetainedTrial ...` got back e.g. `@('some native output line', 0)`
+# instead of the scalar `0`, breaking every downstream `-eq`/`-ne` exit-code comparison and the
+# final `exit $exitCode`.) `2>&1` merges the child's stderr into the same captured stream so
+# neither stream is ever written to this function's own output; `$null = ...` discards the
+# whole captured collection without ever logging it. `$LASTEXITCODE` is captured immediately
+# afterward, before any other statement can overwrite it, and is force-cast to `[int]` so this
+# function can never itself return anything but a single scalar integer.
+function Invoke-D2RetainedNodeChild {
+  param(
+    [Parameter(Mandatory = $true)][string]$NodePath,
+    [string[]]$NodeArgs
+  )
+  $null = & $NodePath @NodeArgs 2>&1
+  return [int]$LASTEXITCODE
+}
+
 # All real work happens inside this function and returns a small closed exit-code integer;
 # it never calls `exit` itself, so the `finally` below always runs before the script's own
 # single top-level `exit` call, on every outcome (success, every failure, or a thrown error).
@@ -158,10 +178,11 @@ function Invoke-D2RetainedTrial {
     # A single synchronous child invocation (Issue #172 / finding A6): the Node adapter owns
     # the only bounded wait; this call either returns (success or the adapter's own bounded
     # failure/timeout) or node itself cannot be launched at all -- both are reported only as
-    # the one sanitized code 15 below, never as raw exception text.
+    # the one sanitized code 15 below, never as raw exception text. Invoke-D2RetainedNodeChild
+    # (above) guarantees $nodeExitCode is always a single scalar [int], never the child's own
+    # stdout/stderr folded into an array.
     try {
-      & $NodePath @nodeArgs
-      $nodeExitCode = $LASTEXITCODE
+      $nodeExitCode = Invoke-D2RetainedNodeChild -NodePath $NodePath -NodeArgs $nodeArgs
     } catch { return 15 }
     if ($nodeExitCode -ne 0) { return 15 }
     return 0
