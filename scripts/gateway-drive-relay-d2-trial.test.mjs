@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash, webcrypto } from 'node:crypto';
 import fs from 'node:fs/promises'; import os from 'node:os'; import path from 'node:path'; import test from 'node:test'; import vm from 'node:vm'; import { createRequire } from 'node:module';
-import { constants, createAppsScriptControl, processD2SyncedJob, readVerifiedSyncedJob, receiveD2Job } from '../gateway/drive-relay-d2-adapter.mjs';
+import { spawnSync } from 'node:child_process';
+import { constants, createAppsScriptControl, processD2SyncedJob, readVerifiedSyncedJob, receiveD2Job, receiveD2RetainedJob, runD2RetainedTrialOnce, waitForD2RetainedReady, parseD2CliArgs } from '../gateway/drive-relay-d2-adapter.mjs';
 import { persistVerifiedPackage } from '../gateway/local-store.mjs';
 const require = createRequire(import.meta.url); const T = require('../media-transfer-package.js'); const C = require('../media-transfer-crypto.js'); const B = require('../media-receiver-bootstrap.js'); const R = require('../media-relay.js');
 function testHookSource(source){
@@ -1119,4 +1120,717 @@ test('D2 duplicate sender identity fails before persistence or deletion',async()
   await assert.rejects(()=>processD2SyncedJob(dir,{recipientKeyRingOrIdentity:f.recipient,inboxRoot:path.join(root,'inbox'),senderRegistries:{senders:[f.registry,f.registry]},persist:async()=>{persisted=true;return{status:'stored'};},control:{issueAckCapability:async()=>{issued=true;},ack:async()=>{throw Error('unexpected ACK');}}}),{code:'GATEWAY_SENDER_REGISTRY_MISSING'});
   assert.equal(persisted,false);assert.equal(issued,false);
  }finally{await fs.rm(root,{recursive:true,force:true});}
+});
+
+// ============================================================
+// Issue #172: bounded D2 Windows logon receiver -- retained-only path (no ACK, no network).
+// ============================================================
+const RETAIN_REF=constants.RETAIN_SYNTHETIC_WORK_ORDER_REF;
+const RETAIN_BYTES=Buffer.from(constants.RETAIN_SYNTHETIC_ATTACHMENT_BYTES);
+
+async function retainFixture(workOrderOverride, attachmentBytesOverride, recipientOverride) {
+  const recipient = recipientOverride || await C.generateRecipientIdentity('d2-retain-fixture-passphrase', { crypto: webcrypto });
+  const sender = await C.generateSenderIdentity({ crypto: webcrypto });
+  const offer = await C.createPairingOffer(recipient, { crypto: webcrypto, now: () => 1 });
+  const response = await C.createPairingResponse(offer, sender, { crypto: webcrypto, now: () => 2 });
+  const registry = await C.verifyPairingResponse(offer, response, { crypto: webcrypto, now: () => 3 });
+  const workOrder = workOrderOverride || { workOrderRef: RETAIN_REF, trial: 'D2-SYNTHETIC', createdFor: 'test-only' };
+  const attachmentBytes = attachmentBytesOverride || RETAIN_BYTES;
+  const pkg = await T.buildPackage(RETAIN_REF, workOrder, [
+    { meta: { attachmentId: 'att-323e4567-e89b-42d3-a456-426614174002', kind: 'file', mime: 'application/octet-stream', size: attachmentBytes.length }, blob: new Blob([attachmentBytes]) }
+  ], { crypto: webcrypto, now: () => 4, chunkSize: 4 });
+  const envelope = await C.encryptPackage(pkg, sender, recipient, { crypto: webcrypto, now: () => 5 });
+  const built = await R.buildCreateRequest(envelope, sender, { crypto: webcrypto, now: () => 6, recipientPublicInfo: recipient, bootstrapApi: B });
+  return { recipient, registry, built };
+}
+// Writes a retained fixture directly as <syncRoot>/<jobDirName>, matching the "direct job
+// child of the dedicated sync root" layout the retained path requires. `jobDirName` defaults
+// to the fixture's own real jobId; a caller-supplied different name is used to exercise a
+// configured expectedJobId that does not match the ciphertext actually synced under it.
+async function writeRetainedJob(f, syncRoot, jobDirName) {
+  const descriptorSha256 = f.built.request.envelopeHeader.descriptorSha256;
+  const realJobId = 'job_' + descriptorSha256;
+  const dir = path.join(syncRoot, jobDirName || realJobId);
+  await fs.mkdir(dir, { recursive: true });
+  const objects = [];
+  for (const [ordinal, part] of f.built.parts.entries()) {
+    const bytes = Buffer.from(await part.blob.arrayBuffer());
+    const name = `obj_${String(ordinal).padStart(4, '0')}.bin`;
+    await fs.writeFile(path.join(dir, name), bytes);
+    objects.push({ ordinal, name, fileId: `synthetic_${ordinal}`, size: bytes.length, ciphertextSha256: h(bytes) });
+  }
+  const first = f.built.request.plan.entries[0];
+  const planSha256 = h(Buffer.from(R.canonicalJson(f.built.request.plan)));
+  const totalBytes = objects.reduce((n, o) => n + o.size, 0);
+  const meta = { version: constants.META_VERSION, state: 'ready', jobId: realJobId, descriptorSha256, ackProofHash: 'b'.repeat(64), planSha256, totalBytes, objects, bootstrap: { version: first.bootstrapVersion, recipientKeyId: first.recipientKeyId, ephemeralPublicJwk: first.ephemeralPublicJwk, hkdfSalt: first.hkdfSalt, iv: first.iv, ciphertextSize: objects[0].size, ciphertextSha256: objects[0].ciphertextSha256 } };
+  const metaText = JSON.stringify(meta);
+  await fs.writeFile(path.join(dir, 'meta.json'), metaText);
+  await fs.writeFile(path.join(dir, 'ready.json'), JSON.stringify({ version: constants.META_VERSION, jobId: realJobId, state: 'ready', planSha256, metaSha256: h(Buffer.from(metaText)) }));
+  await fs.writeFile(path.join(syncRoot, 'pairing.json'), JSON.stringify({ clinicDeviceId: f.registry.clinicDeviceId, signingKeyId: f.registry.activeSigningKey.signingKeyId, signingPublicJwk: f.registry.activeSigningKey.publicJwk, recipientKeyId: f.registry.pairedRecipientKeyId }));
+  return { dir, jobId: realJobId, meta };
+}
+async function withNetworkSpy(run) {
+  const originalFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = async (...args) => { called = true; throw Object.assign(Error('D2_TEST_NETWORK_FORBIDDEN'), { args }); };
+  try { return { result: await run(), called }; }
+  catch (error) { return { error, called }; }
+  finally { globalThis.fetch = originalFetch; }
+}
+async function tmpRoots() {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'd2-retain-'));
+  const syncRoot = path.join(base, 'sync'), inboxRoot = path.join(base, 'inbox');
+  await fs.mkdir(syncRoot, { recursive: true });
+  return { base, syncRoot, inboxRoot };
+}
+
+test('D2 retained receive: valid exact fixture persists locally with no control/network and no cloudStatus field', async () => {
+  const { base, syncRoot, inboxRoot } = await tmpRoots();
+  try {
+    const f = await retainFixture();
+    const { jobId } = await writeRetainedJob(f, syncRoot);
+    const { result, called } = await withNetworkSpy(() => receiveD2RetainedJob({ syncRoot, inboxRoot, expectedJobId: jobId, recipientKeyRingOrIdentity: f.recipient }));
+    assert.equal(called, false, 'retained receive must never touch the network');
+    assert.equal(result.status, 'stored');
+    assert.equal(result.jobId, jobId);
+    assert.equal(result.workOrderRef, RETAIN_REF);
+    assert.equal('cloudStatus' in result, false, 'retained receive never ACKs/deletes, so it must never report a cloudStatus');
+    const receipt = JSON.parse(await fs.readFile(path.join(inboxRoot, jobId, 'receipt.json'), 'utf8'));
+    assert.equal(receipt.jobId, jobId);
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
+});
+
+test('D2 retained receive: a repeated call preserves the exact old receipt and content unchanged, with no overwrite', async () => {
+  const { base, syncRoot, inboxRoot } = await tmpRoots();
+  try {
+    const f = await retainFixture();
+    const { jobId } = await writeRetainedJob(f, syncRoot);
+    const run = () => receiveD2RetainedJob({ syncRoot, inboxRoot, expectedJobId: jobId, recipientKeyRingOrIdentity: f.recipient });
+    const first = await run();
+    const receiptPath = path.join(inboxRoot, jobId, 'receipt.json');
+    const receiptBefore = await fs.readFile(receiptPath, 'utf8');
+    const statBefore = await fs.stat(receiptPath);
+    const { result: second, called } = await withNetworkSpy(run);
+    assert.equal(called, false);
+    assert.equal(second.status, 'already-stored');
+    assert.equal(second.jobId, first.jobId);
+    const receiptAfter = await fs.readFile(receiptPath, 'utf8');
+    const statAfter = await fs.stat(receiptPath);
+    assert.equal(receiptAfter, receiptBefore, 'the exact old receipt must be byte-for-byte unchanged on repeat');
+    assert.equal(statAfter.mtimeMs, statBefore.mtimeMs, 'the old receipt file must never be rewritten on repeat');
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
+});
+
+test('D2 retained receive: never constructs control, never calls fetch, and rejects a caller-supplied control object', async () => {
+  const { base, syncRoot, inboxRoot } = await tmpRoots();
+  try {
+    const f = await retainFixture();
+    const { jobId } = await writeRetainedJob(f, syncRoot);
+    await assert.rejects(() => receiveD2RetainedJob({ syncRoot, inboxRoot, expectedJobId: jobId, recipientKeyRingOrIdentity: f.recipient, control: { ack: async () => ({}) } }), { code: 'D2_RETAIN_CONTROL_FORBIDDEN' });
+    await assert.rejects(() => fs.stat(path.join(inboxRoot, jobId)), { code: 'ENOENT' });
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
+});
+
+test('D2 retained receive: wrong configured expectedJobId, wrong ref, extra work-order fields, and wrong attachment bytes are all rejected before any persistence', async () => {
+  const { base, syncRoot, inboxRoot } = await tmpRoots();
+  try {
+    // (a) the directory name (configured expectedJobId) does not match the real synced job.
+    {
+      const f = await retainFixture();
+      const wrongJobId = 'job_' + 'a'.repeat(64);
+      await writeRetainedJob(f, syncRoot, wrongJobId);
+      await assert.rejects(() => receiveD2RetainedJob({ syncRoot, inboxRoot, expectedJobId: wrongJobId, recipientKeyRingOrIdentity: f.recipient, timeoutMs: 500, pollIntervalMs: 20 }), { code: 'D2_RETAIN_JOB_ID_MISMATCH' });
+      await assert.rejects(() => fs.stat(path.join(inboxRoot, wrongJobId)), { code: 'ENOENT' });
+    }
+    // (b) a different, structurally valid work-order ref (the only built-in fixture ref #1).
+    {
+      const sender = await C.generateSenderIdentity({ crypto: webcrypto });
+      const recipient = await C.generateRecipientIdentity('d2-retain-wrong-ref', { crypto: webcrypto });
+      const offer = await C.createPairingOffer(recipient, { crypto: webcrypto, now: () => 1 });
+      const resp = await C.createPairingResponse(offer, sender, { crypto: webcrypto, now: () => 2 });
+      const registry = await C.verifyPairingResponse(offer, resp, { crypto: webcrypto, now: () => 3 });
+      const pkg = await T.buildPackage(REF, { workOrderRef: RETAIN_REF, trial: 'D2-SYNTHETIC', createdFor: 'test-only' }, [
+        { meta: { attachmentId: 'att-423e4567-e89b-42d3-a456-426614174003', kind: 'file', mime: 'application/octet-stream', size: 4 }, blob: new Blob([RETAIN_BYTES]) }
+      ], { crypto: webcrypto, now: () => 4, chunkSize: 4 });
+      const envelope = await C.encryptPackage(pkg, sender, recipient, { crypto: webcrypto, now: () => 5 });
+      const built = await R.buildCreateRequest(envelope, sender, { crypto: webcrypto, now: () => 6, recipientPublicInfo: recipient, bootstrapApi: B });
+      const f2 = { recipient, registry, built };
+      const { jobId } = await writeRetainedJob(f2, syncRoot);
+      await assert.rejects(() => receiveD2RetainedJob({ syncRoot, inboxRoot, expectedJobId: jobId, recipientKeyRingOrIdentity: recipient }), { code: 'D2_RETAIN_REF_REJECTED' });
+      await assert.rejects(() => fs.stat(path.join(inboxRoot, jobId)), { code: 'ENOENT' });
+    }
+    // (c) an extra work-order key beyond the exact closed {workOrderRef,trial,createdFor} set.
+    {
+      const f = await retainFixture({ workOrderRef: RETAIN_REF, trial: 'D2-SYNTHETIC', createdFor: 'test-only', extra: 'nope' });
+      const { jobId } = await writeRetainedJob(f, syncRoot);
+      await assert.rejects(() => receiveD2RetainedJob({ syncRoot, inboxRoot, expectedJobId: jobId, recipientKeyRingOrIdentity: f.recipient }), { code: 'D2_RETAIN_CONTENT_REJECTED' });
+      await assert.rejects(() => fs.stat(path.join(inboxRoot, jobId)), { code: 'ENOENT' });
+    }
+    // (d) a cryptographically valid attachment whose decrypted bytes are not exactly [68,50,0,1].
+    {
+      const f = await retainFixture(undefined, Buffer.from([1, 2, 3, 4]));
+      const { jobId } = await writeRetainedJob(f, syncRoot);
+      await assert.rejects(() => receiveD2RetainedJob({ syncRoot, inboxRoot, expectedJobId: jobId, recipientKeyRingOrIdentity: f.recipient }), { code: 'D2_RETAIN_CONTENT_REJECTED' });
+      await assert.rejects(() => fs.stat(path.join(inboxRoot, jobId)), { code: 'ENOENT' });
+    }
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
+});
+
+test('D2 retained receive: corrupt/missing ciphertext objects and a conflicting pre-existing local receipt all fail closed without overwrite', async () => {
+  const { base, syncRoot, inboxRoot } = await tmpRoots();
+  try {
+    const f = await retainFixture();
+    const { dir, jobId, meta } = await writeRetainedJob(f, syncRoot);
+    // Missing object: bounded wait must time out (missing, not malformed).
+    {
+      const victim = path.join(dir, meta.objects[1].name);
+      const saved = await fs.readFile(victim);
+      await fs.rm(victim);
+      await assert.rejects(() => receiveD2RetainedJob({ syncRoot, inboxRoot, expectedJobId: jobId, recipientKeyRingOrIdentity: f.recipient, timeoutMs: 400, pollIntervalMs: 20 }), { code: 'D2_RETAIN_WAIT_TIMEOUT' });
+      await fs.writeFile(victim, saved);
+    }
+    // Corrupt object (present, wrong bytes): must fail closed immediately via the real hash
+    // check, never silently retried as "missing".
+    {
+      const victim = path.join(dir, meta.objects[1].name);
+      const saved = await fs.readFile(victim);
+      await fs.writeFile(victim, Buffer.from('corrupted-not-missing'));
+      await assert.rejects(() => receiveD2RetainedJob({ syncRoot, inboxRoot, expectedJobId: jobId, recipientKeyRingOrIdentity: f.recipient, timeoutMs: 2000, pollIntervalMs: 20 }), error => /D2_SYNC_OBJECT_(SIZE|HASH)_MISMATCH|D2_RETAIN_OBJECT_SIZE_MISMATCH/.test(error.code));
+      await fs.writeFile(victim, saved);
+    }
+    await assert.rejects(() => fs.stat(path.join(inboxRoot, jobId)), { code: 'ENOENT' });
+    // Now actually store it once, then corrupt only the local receipt and confirm the conflict
+    // fails closed without ever overwriting the corrupted file.
+    const stored = await receiveD2RetainedJob({ syncRoot, inboxRoot, expectedJobId: jobId, recipientKeyRingOrIdentity: f.recipient });
+    assert.equal(stored.status, 'stored');
+    const receiptPath = path.join(inboxRoot, jobId, 'receipt.json');
+    await fs.writeFile(receiptPath, 'not json');
+    await assert.rejects(() => receiveD2RetainedJob({ syncRoot, inboxRoot, expectedJobId: jobId, recipientKeyRingOrIdentity: f.recipient }), { code: 'GATEWAY_EXISTING_JOB_CONFLICT' });
+    assert.equal(await fs.readFile(receiptPath, 'utf8'), 'not json', 'a corrupted existing receipt must never be overwritten');
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
+});
+
+test('D2 retained receive: rejects an overlapping sync/inbox root configuration before touching either', async () => {
+  const { base } = await tmpRoots();
+  const shared = path.join(base, 'shared');
+  await fs.mkdir(shared, { recursive: true });
+  try {
+    await assert.rejects(() => receiveD2RetainedJob({ syncRoot: shared, inboxRoot: path.join(shared, 'nested'), expectedJobId: 'job_' + 'a'.repeat(64), recipientKeyRingOrIdentity: {} }), { code: 'D2_RETAIN_ROOT_OVERLAP' });
+    await assert.rejects(() => receiveD2RetainedJob({ syncRoot: shared, inboxRoot: shared, expectedJobId: 'job_' + 'a'.repeat(64), recipientKeyRingOrIdentity: {} }), { code: 'D2_RETAIN_ROOT_OVERLAP' });
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
+});
+
+test('D2 retained receive: rejects a linked inbox job directory and a linked media directory before any store/verification', async () => {
+  const { base, syncRoot, inboxRoot } = await tmpRoots();
+  await fs.mkdir(inboxRoot, { recursive: true });
+  try {
+    const f = await retainFixture();
+    const { jobId } = await writeRetainedJob(f, syncRoot);
+    const outside = path.join(base, 'outside-target');
+    await fs.mkdir(outside, { recursive: true });
+    let linked = true;
+    try { await fs.symlink(outside, path.join(inboxRoot, jobId), 'junction'); }
+    catch { linked = false; }
+    if (!linked) { return; } // symlink/junction creation unsupported in this environment; skip rather than false-fail.
+    // Primarily this must be caught explicitly (D2_RETAIN_LINK_REJECTED, via lstat before any
+    // store/verification); if a given platform's lstat does not flag this particular link type,
+    // the unchanged local-store "already exists" conflict guard is still a safe fail-closed
+    // fallback (it would never write real content through the link either way).
+    await assert.rejects(() => receiveD2RetainedJob({ syncRoot, inboxRoot, expectedJobId: jobId, recipientKeyRingOrIdentity: f.recipient }), error => error.code === 'D2_RETAIN_LINK_REJECTED' || error.code === 'GATEWAY_EXISTING_JOB_CONFLICT');
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
+});
+
+test('D2 retained receive: rejects a linked job directory under the sync root before reading any file inside it', async () => {
+  const { base, syncRoot, inboxRoot } = await tmpRoots();
+  try {
+    const f = await retainFixture();
+    const realDir = await fs.mkdtemp(path.join(os.tmpdir(), 'd2-retain-outside-'));
+    const { jobId } = await writeRetainedJob(f, realDir);
+    let linked = true;
+    try { await fs.symlink(path.join(realDir, jobId), path.join(syncRoot, jobId), 'junction'); }
+    catch { linked = false; }
+    if (!linked) { return; }
+    // Depending on how the platform's lstat reports a directory junction, this is caught
+    // either as an explicit link rejection or (if lstat itself does not flag it) by the
+    // realpath-containment check once resolved -- both are a correct fail-closed rejection
+    // before any store/verification, which is what this test actually requires.
+    await assert.rejects(() => receiveD2RetainedJob({ syncRoot, inboxRoot, expectedJobId: jobId, recipientKeyRingOrIdentity: f.recipient }), error => error.code === 'D2_RETAIN_LINK_REJECTED' || error.code === 'D2_RETAIN_PATH_ESCAPE');
+    await fs.rm(realDir, { recursive: true, force: true });
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
+});
+
+// FINAL AUDIT REPAIR #2: a sync root that does not exist yet when receiveD2RetainedJob first
+// checks for an overlap (so it can only be ancestor-resolved, not realpath-resolved) must still
+// be caught if it later turns out -- once Drive actually materializes it -- to alias directly
+// into the local inbox root. The old `realOrResolved` silently fell back to a purely lexical
+// resolve on ANY realpath failure (not just a missing leaf), which could miss exactly this.
+test('D2 retained receive: a sync root that only becomes an inbox-root alias once Drive materializes it (mid-wait) is caught before any decrypt/persist', async () => {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'd2-retain-alias-'));
+  const inboxRoot = path.join(base, 'inbox');
+  const syncRoot = path.join(base, 'synclink'); // deliberately does not exist at call start
+  await fs.mkdir(inboxRoot, { recursive: true });
+  try {
+    // Feasibility probe for this platform's symlink/junction support; skip (never false-fail)
+    // rather than depend on timing-sensitive link creation the environment cannot perform.
+    const probeTarget = path.join(base, 'probe-target'), probeLink = path.join(base, 'probe-link');
+    await fs.mkdir(probeTarget, { recursive: true });
+    let linked = true;
+    try { await fs.symlink(probeTarget, probeLink, 'junction'); await fs.rm(probeLink, { recursive: true, force: true }); }
+    catch { linked = false; }
+    if (!linked) { return; }
+
+    const f = await retainFixture();
+    // Written directly under the real inbox-root path: once the delayed symlink below exists,
+    // <syncRoot>/<jobId> and <inboxRoot>/<jobId> are the exact same real path.
+    const { jobId } = await writeRetainedJob(f, inboxRoot);
+    const createAliasLater = (async () => {
+      await new Promise(r => setTimeout(r, 150));
+      await fs.symlink(inboxRoot, syncRoot, 'junction');
+    })();
+    try {
+      await assert.rejects(
+        () => receiveD2RetainedJob({ syncRoot, inboxRoot, expectedJobId: jobId, recipientKeyRingOrIdentity: f.recipient, timeoutMs: 3000, pollIntervalMs: 20 }),
+        { code: 'D2_RETAIN_ROOT_OVERLAP' }
+      );
+    } finally { await createAliasLater; }
+    // No decrypt/persist must ever have happened through either path.
+    await assert.rejects(() => fs.stat(path.join(inboxRoot, jobId, 'receipt.json')), { code: 'ENOENT' });
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
+});
+
+test('D2 retained bounded wait: distinguishes missing (retried) from malformed (terminated immediately), honors the deadline, and is monotonic-clock driven', async () => {
+  const { base, syncRoot } = await tmpRoots();
+  try {
+    const f = await retainFixture();
+    const jobId = 'job_' + f.built.request.envelopeHeader.descriptorSha256;
+    // Nothing exists yet -> must time out, never hang.
+    await assert.rejects(() => waitForD2RetainedReady(syncRoot, jobId, { timeoutMs: 300, pollIntervalMs: 20 }), { code: 'D2_RETAIN_WAIT_TIMEOUT' });
+    // Missing, then arrives mid-wait: a deferred write after the wait has already started must
+    // still be observed before the deadline.
+    const writePromise = (async () => { await new Promise(r => setTimeout(r, 100)); await writeRetainedJob(f, syncRoot); })();
+    const ready = await waitForD2RetainedReady(syncRoot, jobId, { timeoutMs: 3000, pollIntervalMs: 20 });
+    await writePromise;
+    assert.equal(ready.meta.jobId, jobId);
+    // Malformed metadata present (even though nothing else is missing) must terminate
+    // immediately, not be retried as though it were absent.
+    await fs.writeFile(path.join(syncRoot, jobId, 'meta.json'), 'not json');
+    await assert.rejects(() => waitForD2RetainedReady(syncRoot, jobId, { timeoutMs: 3000, pollIntervalMs: 20 }), { code: 'D2_RETAIN_METADATA_INVALID' });
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
+});
+
+test('D2 retained bounded wait: a four-object layout and bounded per-object size are enforced before any blob is read', async () => {
+  const { base, syncRoot } = await tmpRoots();
+  try {
+    const f = await retainFixture();
+    const { jobId, dir, meta } = await writeRetainedJob(f, syncRoot);
+    const tamperedMeta = { ...meta, objects: meta.objects.slice(0, 3), totalBytes: meta.objects.slice(0, 3).reduce((n, o) => n + o.size, 0) };
+    const metaText = JSON.stringify(tamperedMeta);
+    await fs.writeFile(path.join(dir, 'meta.json'), metaText);
+    await fs.writeFile(path.join(dir, 'ready.json'), JSON.stringify({ version: constants.META_VERSION, jobId, state: 'ready', planSha256: tamperedMeta.planSha256, metaSha256: h(Buffer.from(metaText)) }));
+    await assert.rejects(() => waitForD2RetainedReady(syncRoot, jobId, { timeoutMs: 1000, pollIntervalMs: 20 }), { code: 'D2_RETAIN_LAYOUT_INVALID' });
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
+});
+
+test('D2 retained CLI: argument parsing is closed and mutually exclusive between --config= and --retain-config=', () => {
+  assert.deepEqual(parseD2CliArgs(['--config=foo.json']), { mode: 'config', configPath: 'foo.json' });
+  assert.deepEqual(parseD2CliArgs(['--retain-config=bar.json']), { mode: 'retain', configPath: 'bar.json', timeoutMs: undefined });
+  assert.deepEqual(parseD2CliArgs(['--retain-config=bar.json', '--retain-timeout-ms=500']), { mode: 'retain', configPath: 'bar.json', timeoutMs: 500 });
+  assert.throws(() => parseD2CliArgs([]), { code: 'D2_TRIAL_ARGS_INVALID' });
+  assert.throws(() => parseD2CliArgs(['--config=a.json', '--retain-config=b.json']), { code: 'D2_TRIAL_ARGS_INVALID' });
+  assert.throws(() => parseD2CliArgs(['--config=a.json', 'extra']), { code: 'D2_TRIAL_CONFIG_REQUIRED' });
+  assert.throws(() => parseD2CliArgs(['--retain-config=']), { code: 'D2_RETAIN_CONFIG_REQUIRED' });
+  assert.throws(() => parseD2CliArgs(['--retain-config=bar.json', '--retain-timeout-ms=0']), { code: 'D2_RETAIN_TIMEOUT_INVALID' });
+  assert.throws(() => parseD2CliArgs(['--retain-config=bar.json', '--retain-timeout-ms=999999']), { code: 'D2_RETAIN_TIMEOUT_INVALID' });
+  assert.throws(() => parseD2CliArgs(['--retain-config=bar.json', 'extra']), { code: 'D2_RETAIN_ARGS_INVALID' });
+});
+
+test('D2 retained CLI: runD2RetainedTrialOnce validates config/secret before use and never needs a receiver bearer', async () => {
+  const { base, syncRoot, inboxRoot } = await tmpRoots();
+  try {
+    const f = await retainFixture();
+    const { jobId } = await writeRetainedJob(f, syncRoot);
+    const configPath = path.join(base, 'retain-config.json');
+    const backupPath = path.join(base, 'backup.json');
+    const identity = await C.generateRecipientIdentity('d2-retain-cli-passphrase', { crypto: webcrypto });
+    await fs.writeFile(backupPath, JSON.stringify(identity.backup));
+    await fs.writeFile(configPath, JSON.stringify({ schemaVersion: 1, expectedJobId: jobId, syncRoot: 'sync', inboxRoot: 'inbox', recipientBackupPath: 'backup.json' }));
+
+    delete process.env.DWO_RECIPIENT_BACKUP_PASSPHRASE;
+    await assert.rejects(() => runD2RetainedTrialOnce(configPath), { code: 'D2_RETAIN_SECRET_MISSING' });
+
+    await fs.writeFile(configPath, JSON.stringify({ schemaVersion: 2, expectedJobId: jobId, syncRoot: 'sync', inboxRoot: 'inbox', recipientBackupPath: 'backup.json' }));
+    process.env.DWO_RECIPIENT_BACKUP_PASSPHRASE = 'd2-retain-cli-passphrase';
+    await assert.rejects(() => runD2RetainedTrialOnce(configPath), { code: 'D2_RETAIN_CONFIG_INVALID' });
+
+    await fs.writeFile(configPath, JSON.stringify({ schemaVersion: 1, expectedJobId: jobId, syncRoot: 'sync', inboxRoot: 'inbox', recipientBackupPath: 'missing-backup.json' }));
+    await assert.rejects(() => runD2RetainedTrialOnce(configPath), { code: 'D2_RETAIN_BACKUP_READ_FAILED' });
+
+    await fs.writeFile(configPath, JSON.stringify({ schemaVersion: 1, expectedJobId: jobId, syncRoot: 'sync', inboxRoot: 'inbox', recipientBackupPath: 'backup.json' }));
+    // The real job was encrypted for a *different* recipient identity than the one this CLI
+    // backup restores, so decryption itself must fail -- proving the CLI never fabricates a
+    // success, never ACKs, and never needed/used a receiver bearer anywhere in this call.
+    const { error, called } = await withNetworkSpy(() => runD2RetainedTrialOnce(configPath, { timeoutMs: 3000, pollIntervalMs: 20 }));
+    assert.ok(error, 'decrypting with the wrong recipient backup must fail, never silently succeed');
+    assert.equal(called, false);
+  } finally {
+    delete process.env.DWO_RECIPIENT_BACKUP_PASSPHRASE;
+    await fs.rm(base, { recursive: true, force: true });
+  }
+});
+
+test('D2 retained CLI: runD2RetainedTrialOnce end-to-end stores the exact fixture using only the recipient-backup passphrase', async () => {
+  const { base, syncRoot, inboxRoot } = await tmpRoots();
+  try {
+    const passphrase = 'd2-retain-e2e-passphrase';
+    const recipient = await C.generateRecipientIdentity(passphrase, { crypto: webcrypto });
+    const f = await retainFixture(undefined, undefined, recipient);
+    const { jobId } = await writeRetainedJob(f, syncRoot);
+    const configPath = path.join(base, 'retain-config.json');
+    const backupPath = path.join(base, 'backup.json');
+    await fs.writeFile(backupPath, JSON.stringify(recipient.backup));
+    await fs.writeFile(configPath, JSON.stringify({ schemaVersion: 1, expectedJobId: jobId, syncRoot: 'sync', inboxRoot: 'inbox', recipientBackupPath: 'backup.json' }));
+    process.env.DWO_RECIPIENT_BACKUP_PASSPHRASE = passphrase;
+    const { result, called } = await withNetworkSpy(() => runD2RetainedTrialOnce(configPath, { timeoutMs: 3000, pollIntervalMs: 20 }));
+    assert.equal(called, false);
+    assert.equal(result.status, 'stored');
+    assert.equal(result.jobId, jobId);
+    const receipt = JSON.parse(await fs.readFile(path.join(inboxRoot, jobId, 'receipt.json'), 'utf8'));
+    assert.equal(receipt.jobId, jobId);
+  } finally {
+    delete process.env.DWO_RECIPIENT_BACKUP_PASSPHRASE;
+    await fs.rm(base, { recursive: true, force: true });
+  }
+});
+
+test('D2 retained Windows PowerShell script: source only invokes the retain CLI, reuses the established CurrentUser DPAPI secrets format, and never registers a scheduled task, forwards a receiver bearer, or logs the passphrase', async () => {
+  const source = await fs.readFile(new URL('../gateway/windows/run-d2-retained-trial.ps1', import.meta.url), 'utf8');
+  assert.match(source, /--retain-config=/);
+  assert.doesNotMatch(source, /--config=/);
+  // Must reuse the exact established ConvertTo-SecureString / CurrentUser-DPAPI restore
+  // pattern (same as run-receiver.ps1), never the incompatible raw-base64 ProtectedData.Unprotect
+  // format a prior candidate introduced.
+  assert.match(source, /ConvertTo-SecureString\s+\$secrets\.backupPassphraseProtected/);
+  assert.doesNotMatch(source, /ProtectedData\]::Unprotect/);
+  assert.doesNotMatch(source, /FromBase64String\(\s*\$secrets\.backupPassphraseProtected/);
+  // Forbid actual executable LocalMachine-scope DPAPI usage specifically (not the word
+  // "LocalMachine" appearing at all -- the explanatory doc comment legitimately says "there is
+  // no LocalMachine fallback", and that comment must not itself trip this check).
+  assert.doesNotMatch(source, /-Scope\s+LocalMachine/i);
+  assert.doesNotMatch(source, /DataProtectionScope\]::LocalMachine/);
+  assert.doesNotMatch(source, /ProtectedData\]::(Protect|Unprotect)\([^)]*LocalMachine/);
+  assert.doesNotMatch(source, /Register-ScheduledTask/i);
+  assert.doesNotMatch(source, /schtasks/i);
+  assert.doesNotMatch(source, /-Credential\b/);
+  assert.doesNotMatch(source, /Restart-Computer|shutdown\.exe/i);
+  // Forbid forwarding/setting a receiver bearer from any decrypted/new/hardcoded value; the
+  // only permitted assignment to this env var anywhere is the scoped `finally` restoration of
+  // whatever value the parent shell already had set before the single child invocation
+  // (`$env:DWO_D2_RECEIVER_BEARER = $savedBearer`), never a credential/token forwarded to or
+  // read from the child, the decrypted secrets, or any literal.
+  const bearerAssignments = [...source.matchAll(/\$env:DWO_D2_RECEIVER_BEARER\s*=\s*(\S+)/g)];
+  assert.ok(bearerAssignments.length > 0, 'expected the scoped restore assignment to be present');
+  for (const [, rhs] of bearerAssignments) {
+    assert.equal(rhs, '$savedBearer');
+  }
+  assert.match(source, /Remove-Item\s+Env:\\DWO_D2_RECEIVER_BEARER/);
+  assert.match(source, /Remove-Item\s+Env:\\DWO_RECEIVER_TOKEN/);
+  // receiverTokenProtected must be schema-checked only -- never unprotected/converted/used.
+  assert.match(source, /receiverTokenProtected/);
+  assert.doesNotMatch(source, /ConvertTo-SecureString\s+\$secrets\.receiverTokenProtected/);
+  assert.doesNotMatch(source, /Invoke-WebRequest|Invoke-RestMethod|Start-BitsTransfer/i);
+  assert.match(source, /finally/i);
+  assert.match(source, /Remove-Item\s+Env:\\DWO_RECIPIENT_BACKUP_PASSPHRASE/);
+  assert.match(source, /\$secureString\.Dispose\(\)/);
+  assert.doesNotMatch(source, /Write-(Output|Host)\s*\(?\s*\$passphrase\b/i);
+});
+
+function hasPowerShell() {
+  try {
+    const probe = spawnSync('powershell.exe', ['-NoProfile', '-Command', 'exit 0'], { windowsHide: true });
+    return !probe.error && probe.status === 0;
+  } catch { return false; }
+}
+
+test('D2 retained Windows PowerShell script: source parses cleanly under the real PowerShell parser', { skip: !hasPowerShell() }, () => {
+  const scriptPath = path.resolve('gateway/windows/run-d2-retained-trial.ps1');
+  const command = "$errors=$null; [void][System.Management.Automation.Language.Parser]::ParseFile('" + scriptPath.replace(/'/g, "''") + "', [ref]$null, [ref]$errors); if ($errors.Count -gt 0) { exit 1 } else { exit 0 }";
+  const run = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { windowsHide: true });
+  assert.equal(run.status, 0, 'run-d2-retained-trial.ps1 must parse with zero syntax errors');
+});
+
+test('D2 retained Windows PowerShell script: isolated synthetic fixture fails closed before any DPAPI call when secrets/config are missing or mismatched', { skip: !hasPowerShell() }, async () => {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'd2-retain-ps-'));
+  try {
+    const scriptPath = path.resolve('gateway/windows/run-d2-retained-trial.ps1');
+    const configPath = path.join(base, 'retain-config.json');
+    const backupPath = path.join(base, 'backup.json');
+    const secretsPath = path.join(base, 'secrets.json');
+    await fs.writeFile(configPath, JSON.stringify({ schemaVersion: 1, expectedJobId: 'job_' + 'a'.repeat(64), syncRoot: 'sync', inboxRoot: 'inbox', recipientBackupPath: 'backup.json' }));
+    await fs.writeFile(backupPath, JSON.stringify((await C.generateRecipientIdentity('d2-retain-ps-passphrase', { crypto: webcrypto })).backup));
+
+    // (a) secrets file missing entirely -- must fail before any DPAPI call.
+    const missing = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', scriptPath, '-ConfigPath', configPath, '-SecretsPath', secretsPath], { windowsHide: true, encoding: 'utf8' });
+    assert.notEqual(missing.status, 0);
+    assert.doesNotMatch(String(missing.stdout) + String(missing.stderr), /ProtectedData|Unprotect|SecureString/);
+
+    // (b) secrets present (established version=1 four-key shape) but recipientKeyId mismatches
+    // the real backup's -- must still fail before any DPAPI/SecureString call (the plain-field
+    // mismatch is checked first).
+    const backup = JSON.parse(await fs.readFile(backupPath, 'utf8'));
+    await fs.writeFile(secretsPath, JSON.stringify({ version: 1, receiverTokenProtected: 'AAAA', recipientKeyId: backup.recipientKeyId.slice(0, -1) + (backup.recipientKeyId.slice(-1) === 'a' ? 'b' : 'a'), backupPassphraseProtected: 'AAAA' }));
+    const mismatched = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', scriptPath, '-ConfigPath', configPath, '-SecretsPath', secretsPath], { windowsHide: true, encoding: 'utf8' });
+    assert.notEqual(mismatched.status, 0);
+    assert.doesNotMatch(String(mismatched.stdout) + String(mismatched.stderr), /ProtectedData|Unprotect|SecureString/);
+
+    // (c) an out-of-bounds timeout override must fail before any DPAPI call.
+    await fs.writeFile(secretsPath, JSON.stringify({ version: 1, receiverTokenProtected: 'AAAA', recipientKeyId: backup.recipientKeyId, backupPassphraseProtected: 'AAAA' }));
+    const badTimeout = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', scriptPath, '-ConfigPath', configPath, '-SecretsPath', secretsPath, '-RetainTimeoutMs', '0'], { windowsHide: true, encoding: 'utf8' });
+    assert.notEqual(badTimeout.status, 0);
+    assert.doesNotMatch(String(badTimeout.stdout) + String(badTimeout.stderr), /ProtectedData|Unprotect|SecureString/);
+
+    // (d) the exact established secrets format (version=1, receiverTokenProtected,
+    // backupPassphraseProtected, recipientKeyId) generated by the real
+    // protect-receiver-secrets.ps1 pattern but with a merely malformed (non-SecureString)
+    // backupPassphraseProtected value must still fail closed (SecureString restore failure),
+    // never crash or emit a path/secret -- this is the real-format compatibility counterexample:
+    // the established shape itself must be accepted by schema (reach exit 13, not 11) once it is
+    // otherwise well-formed. A deliberately wrong-shaped value here still correctly fails (13)
+    // because it is not a valid DPAPI-protected SecureString blob, not because the shape itself
+    // is rejected.
+    await fs.writeFile(secretsPath, JSON.stringify({ version: 1, receiverTokenProtected: 'not-a-real-protected-securestring', backupPassphraseProtected: 'not-a-real-protected-securestring', recipientKeyId: backup.recipientKeyId }));
+    const malformedBlob = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', scriptPath, '-ConfigPath', configPath, '-SecretsPath', secretsPath], { windowsHide: true, encoding: 'utf8' });
+    assert.notEqual(malformedBlob.status, 0);
+    assert.equal(malformedBlob.status, 13, 'a well-formed established-shape secrets file with an invalid SecureString blob must reach the SecureString-restore failure code (13), proving the established shape itself is accepted');
+    assert.doesNotMatch(String(malformedBlob.stdout) + String(malformedBlob.stderr), /ProtectedData|Unprotect|SecureString|not-a-real-protected-securestring/);
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
+});
+
+// FINAL AUDIT REPAIR #1 regression: a prior version of the script invoked the node child
+// directly inside Invoke-D2RetainedTrial (`& $NodePath @nodeArgs`), so the child's own stdout
+// flowed into that function's success-output pipeline; PowerShell then folded the leaked output
+// together with the real `return` value into an array, corrupting `$exitCode` into e.g.
+// `@('some native output line', 0)` and breaking every downstream exit-code comparison. This
+// extracts and runs ONLY the real script's `Invoke-D2RetainedNodeChild` helper, verbatim from
+// its actual source, against fake "node" executables -- no config/secrets/DPAPI anywhere here.
+test('D2 retained Windows PowerShell script: Invoke-D2RetainedNodeChild returns only a scalar exit code and never leaks the child stdout/stderr', { skip: !hasPowerShell() }, async () => {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'd2-retain-ps-nodechild-'));
+  try {
+    const source = await fs.readFile(path.resolve('gateway/windows/run-d2-retained-trial.ps1'), 'utf8');
+    const match = /function Invoke-D2RetainedNodeChild[\s\S]*?\n\}\r?\n/.exec(source);
+    assert.ok(match, 'Invoke-D2RetainedNodeChild must exist, verbatim, in the real script source');
+    const extracted = match[0];
+    assert.doesNotMatch(extracted, /ProtectedData|Unprotect|DWO_RECIPIENT_BACKUP_PASSPHRASE/, 'the extracted helper must be the pure node-invocation function, with no DPAPI/secret handling in it');
+
+    const harnessPath = path.join(base, 'harness.ps1');
+    const harnessSource = [
+      'param([string]$NodePath, [string[]]$NodeArgs = @())',
+      extracted,
+      '$code = Invoke-D2RetainedNodeChild -NodePath $NodePath -NodeArgs $NodeArgs',
+      'Write-Output ("HARNESS_EXIT=" + $code)',
+      'Write-Output ("HARNESS_TYPE=" + $code.GetType().Name)',
+      'exit $code'
+    ].join("\n");
+    await fs.writeFile(harnessPath, harnessSource);
+
+    const fakeNodeOk = path.join(base, 'fake-node-ok.cmd');
+    await fs.writeFile(fakeNodeOk, '@echo off\r\necho FAKE_NODE_STDOUT_OK\r\necho FAKE_NODE_STDERR_OK>&2\r\nexit /b 0\r\n');
+    const fakeNodeFail = path.join(base, 'fake-node-fail.cmd');
+    await fs.writeFile(fakeNodeFail, '@echo off\r\necho FAKE_NODE_STDOUT_FAIL\r\necho FAKE_NODE_STDERR_FAIL>&2\r\nexit /b 7\r\n');
+
+    const ok = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', harnessPath, '-NodePath', fakeNodeOk], { windowsHide: true, encoding: 'utf8' });
+    assert.equal(ok.status, 0, 'a successful child must yield a scalar 0 exit code, never an array');
+    assert.match(ok.stdout, /HARNESS_EXIT=0/);
+    assert.match(ok.stdout, /HARNESS_TYPE=Int32/, 'the returned exit code must be a single scalar Int32, never an array folded together with leaked stdout');
+    assert.doesNotMatch(ok.stdout, /FAKE_NODE_STDOUT_OK/, "the child's own stdout must never leak into the caller's captured output");
+    assert.doesNotMatch(String(ok.stderr), /FAKE_NODE_STDERR_OK/, "the child's own stderr must never leak either");
+
+    const failRun = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', harnessPath, '-NodePath', fakeNodeFail], { windowsHide: true, encoding: 'utf8' });
+    assert.equal(failRun.status, 7, "a failing child's real exit code must still come through as a scalar, unmangled");
+    assert.match(failRun.stdout, /HARNESS_EXIT=7/);
+    assert.match(failRun.stdout, /HARNESS_TYPE=Int32/);
+    assert.doesNotMatch(failRun.stdout, /FAKE_NODE_STDOUT_FAIL/);
+    assert.doesNotMatch(String(failRun.stderr), /FAKE_NODE_STDERR_FAIL/);
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
+});
+
+// Issue #172 final compatibility repair: the launcher must never forward this host process's
+// own DWO_D2_RECEIVER_BEARER / DWO_RECEIVER_TOKEN (if either is already set in the parent
+// shell) to the single node child, and must restore them afterward on every outcome -- without
+// ever logging or unprotecting them. This extracts both Invoke-D2RetainedNodeChild (unchanged)
+// and the new Invoke-D2RetainedNodeChildScoped wrapper, verbatim from the real script source,
+// and runs them in an isolated harness against sentinel (non-secret) values -- no DPAPI, config,
+// or real secrets file anywhere in this test.
+test('D2 retained Windows PowerShell script: Invoke-D2RetainedNodeChildScoped removes DWO_D2_RECEIVER_BEARER/DWO_RECEIVER_TOKEN before the child and restores them afterward, without ever logging them', { skip: !hasPowerShell() }, async () => {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'd2-retain-ps-scoped-'));
+  try {
+    const source = await fs.readFile(path.resolve('gateway/windows/run-d2-retained-trial.ps1'), 'utf8');
+    const childMatch = /function Invoke-D2RetainedNodeChild[\s\S]*?\n\}\r?\n/.exec(source);
+    const scopedMatch = /function Invoke-D2RetainedNodeChildScoped[\s\S]*?\n\}\r?\n/.exec(source);
+    assert.ok(childMatch, 'Invoke-D2RetainedNodeChild must exist, verbatim, in the real script source');
+    assert.ok(scopedMatch, 'Invoke-D2RetainedNodeChildScoped must exist, verbatim, in the real script source');
+    assert.doesNotMatch(scopedMatch[0], /ProtectedData|ConvertTo-SecureString|DWO_RECIPIENT_BACKUP_PASSPHRASE/, 'the scoped wrapper must only ever touch the receiver bearer/token env vars, never a secret');
+
+    const harnessPath = path.join(base, 'harness.ps1');
+    const harnessSource = [
+      'param([string]$NodePath, [string[]]$NodeArgs = @())',
+      childMatch[0],
+      scopedMatch[0],
+      '$code = Invoke-D2RetainedNodeChildScoped -NodePath $NodePath -NodeArgs $NodeArgs',
+      'Write-Output ("HARNESS_EXIT=" + $code)',
+      'Write-Output ("HARNESS_AFTER_BEARER=" + $env:DWO_D2_RECEIVER_BEARER)',
+      'Write-Output ("HARNESS_AFTER_TOKEN=" + $env:DWO_RECEIVER_TOKEN)',
+      'exit $code'
+    ].join('\n');
+    await fs.writeFile(harnessPath, harnessSource);
+
+    const leakFile = path.join(base, 'leak.txt');
+    const fakeNode = path.join(base, 'fake-node.cmd');
+    await fs.writeFile(fakeNode, [
+      '@echo off',
+      'if defined DWO_D2_RECEIVER_BEARER (',
+      '  (echo LEAKED_BEARER)> "' + leakFile + '"',
+      ')',
+      'if defined DWO_RECEIVER_TOKEN (',
+      '  (echo LEAKED_TOKEN)>> "' + leakFile + '"',
+      ')',
+      'exit /b 0',
+      ''
+    ].join('\r\n'));
+
+    const run = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', harnessPath, '-NodePath', fakeNode], {
+      windowsHide: true,
+      encoding: 'utf8',
+      env: { ...process.env, DWO_D2_RECEIVER_BEARER: 'sentinel-bearer-value', DWO_RECEIVER_TOKEN: 'sentinel-token-value' }
+    });
+    assert.equal(run.status, 0, run.stderr);
+    await assert.rejects(fs.stat(leakFile), { code: 'ENOENT' }, 'the child must never see either sentinel receiver bearer/token value');
+    assert.match(run.stdout, /HARNESS_AFTER_BEARER=sentinel-bearer-value/, 'the parent process env must be restored exactly afterward');
+    assert.match(run.stdout, /HARNESS_AFTER_TOKEN=sentinel-token-value/, 'the parent process env must be restored exactly afterward');
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
+});
+
+// Issue #172 final compatibility repair: a focused, real executable regression. Uses only a
+// newly generated synthetic CurrentUser-DPAPI SecureString (via the real `ConvertTo-SecureString`
+// / `ConvertFrom-SecureString` cmdlets) and a temporary, entirely fictional backup/config/secrets
+// fixture -- never any actual/production job, secret, Drive data, or network call. Confirms the
+// real script delivers the correct passphrase to a harmless fake child without ever exposing it
+// in its own stdout/stderr, returns a scalar 0 on success, surfaces a failing child as 15, and
+// fails closed (11/12) on a wrong key or a malformed secrets file before the child ever runs.
+test('D2 retained Windows PowerShell script: real executable regression with a freshly generated synthetic CurrentUser DPAPI SecureString delivers the correct passphrase to a harmless fake child, hides it from the script\'s own output, and rejects a failing child, wrong key, and malformed secrets', { skip: !hasPowerShell() }, async () => {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'd2-retain-ps-exec-'));
+  try {
+    const scriptPath = path.resolve('gateway/windows/run-d2-retained-trial.ps1');
+    const passphrase = 'd2172SyntheticOnlyPassphrase'; // fictional, >=12 chars, alnum-only (safe for batch echo)
+
+    async function protectWithDpapi(plainText) {
+      const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+        '$s = ConvertTo-SecureString -String $env:D2_TEST_PLAINTEXT -AsPlainText -Force; ConvertFrom-SecureString $s'
+      ], { windowsHide: true, encoding: 'utf8', env: { ...process.env, D2_TEST_PLAINTEXT: plainText } });
+      assert.equal(result.status, 0, 'synthetic CurrentUser DPAPI protect helper must succeed: ' + result.stderr);
+      return result.stdout.trim();
+    }
+
+    const recipient = await C.generateRecipientIdentity(passphrase, { crypto: webcrypto });
+    const backupPath = path.join(base, 'backup.json');
+    await fs.writeFile(backupPath, JSON.stringify(recipient.backup));
+    const configPath = path.join(base, 'retain-config.json');
+    await fs.writeFile(configPath, JSON.stringify({ schemaVersion: 1, expectedJobId: 'job_' + 'a'.repeat(64), syncRoot: 'sync', inboxRoot: 'inbox', recipientBackupPath: 'backup.json' }));
+    const adapterPath = path.join(base, 'fake-adapter.mjs');
+    await fs.writeFile(adapterPath, '// synthetic placeholder only -- the fake -NodePath below never actually executes this file.\n');
+
+    const protectedToken = await protectWithDpapi('d2-172-synthetic-receiver-token-never-unprotected');
+    const protectedPassphrase = await protectWithDpapi(passphrase);
+    const secretsPath = path.join(base, 'secrets.json');
+    await fs.writeFile(secretsPath, JSON.stringify({ version: 1, receiverTokenProtected: protectedToken, backupPassphraseProtected: protectedPassphrase, recipientKeyId: recipient.backup.recipientKeyId }));
+
+    const fakeNodeOk = path.join(base, 'fake-node-ok.cmd');
+    await fs.writeFile(fakeNodeOk, [
+      '@echo off',
+      'if defined DWO_RECIPIENT_BACKUP_PASSPHRASE (',
+      '  (echo %DWO_RECIPIENT_BACKUP_PASSPHRASE%)> "%D2_TEST_PASSPHRASE_FILE%"',
+      ')',
+      'if defined DWO_D2_RECEIVER_BEARER (',
+      '  (echo LEAKED_BEARER)> "%D2_TEST_BEARER_LEAK_FILE%"',
+      ')',
+      'if defined DWO_RECEIVER_TOKEN (',
+      '  (echo LEAKED_TOKEN)> "%D2_TEST_TOKEN_LEAK_FILE%"',
+      ')',
+      'exit /b 0',
+      ''
+    ].join('\r\n'));
+    const fakeNodeFail = path.join(base, 'fake-node-fail.cmd');
+    await fs.writeFile(fakeNodeFail, [
+      '@echo off',
+      'if defined DWO_RECIPIENT_BACKUP_PASSPHRASE (',
+      '  (echo %DWO_RECIPIENT_BACKUP_PASSPHRASE%)> "%D2_TEST_PASSPHRASE_FILE%"',
+      ')',
+      'exit /b 9',
+      ''
+    ].join('\r\n'));
+
+    function runScript(nodePath, overrideSecretsPath) {
+      const unique = Math.random().toString(36).slice(2);
+      const passphraseFile = path.join(base, 'passphrase-out-' + unique + '.txt');
+      const bearerLeakFile = path.join(base, 'bearer-leak-' + unique + '.txt');
+      const tokenLeakFile = path.join(base, 'token-leak-' + unique + '.txt');
+      const env = {
+        ...process.env,
+        // Simulates an operator shell that already happens to have a receiver bearer/token set
+        // from unrelated work -- the script must still never forward either to this child.
+        DWO_D2_RECEIVER_BEARER: 'sentinel-parent-bearer-never-inherited',
+        DWO_RECEIVER_TOKEN: 'sentinel-parent-token-never-inherited',
+        D2_TEST_PASSPHRASE_FILE: passphraseFile,
+        D2_TEST_BEARER_LEAK_FILE: bearerLeakFile,
+        D2_TEST_TOKEN_LEAK_FILE: tokenLeakFile
+      };
+      const run = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', scriptPath,
+        '-ConfigPath', configPath, '-SecretsPath', overrideSecretsPath || secretsPath,
+        '-NodePath', nodePath, '-AdapterPath', adapterPath
+      ], { windowsHide: true, encoding: 'utf8', env });
+      return { run, passphraseFile, bearerLeakFile, tokenLeakFile };
+    }
+
+    // Success: the exact correct passphrase reaches the fake child; the receiver bearer/token
+    // are never inherited; the script's own stdout/stderr never exposes the passphrase or
+    // either sentinel secret value.
+    {
+      const { run, passphraseFile, bearerLeakFile, tokenLeakFile } = runScript(fakeNodeOk);
+      assert.equal(run.status, 0, 'a successful fake child must yield the scalar exit code 0: ' + run.stderr);
+      assert.match(String(run.stdout), /status=ok/);
+      const delivered = (await fs.readFile(passphraseFile, 'utf8')).trim();
+      assert.equal(delivered, passphrase, 'the fake child must receive the exact correct restored passphrase');
+      await assert.rejects(fs.stat(bearerLeakFile), { code: 'ENOENT' }, 'the receiver bearer must never be inherited by the child');
+      await assert.rejects(fs.stat(tokenLeakFile), { code: 'ENOENT' }, 'the receiver token must never be inherited by the child');
+      const combinedOutput = String(run.stdout) + String(run.stderr);
+      assert.doesNotMatch(combinedOutput, new RegExp(passphrase), "the script's own output must never expose the passphrase");
+      assert.doesNotMatch(combinedOutput, /sentinel-parent-(bearer|token)-never-inherited/);
+    }
+
+    // Child failure: the fake child's own non-zero exit must surface only as the one sanitized
+    // code 15, after still having correctly received the passphrase.
+    {
+      const { run, passphraseFile } = runScript(fakeNodeFail);
+      assert.equal(run.status, 15, "a failing fake child's exit must surface as the single sanitized code 15");
+      assert.equal((await fs.readFile(passphraseFile, 'utf8')).trim(), passphrase);
+    }
+
+    // Wrong key: a recipientKeyId mismatch must fail with code 12 before the child ever runs.
+    {
+      const wrongKeySecretsPath = path.join(base, 'secrets-wrong-key.json');
+      await fs.writeFile(wrongKeySecretsPath, JSON.stringify({ version: 1, receiverTokenProtected: protectedToken, backupPassphraseProtected: protectedPassphrase, recipientKeyId: 'rk_' + 'z'.repeat(20) }));
+      const { run, passphraseFile } = runScript(fakeNodeOk, wrongKeySecretsPath);
+      assert.equal(run.status, 12, 'a recipientKeyId mismatch must fail with the dedicated code 12');
+      await assert.rejects(fs.stat(passphraseFile), { code: 'ENOENT' }, 'the child must never be invoked on a key mismatch');
+    }
+
+    // Malformed secret: a missing required key (the established four-key shape is not satisfied)
+    // must fail with code 11 before the child ever runs.
+    {
+      const malformedSecretsPath = path.join(base, 'secrets-malformed.json');
+      await fs.writeFile(malformedSecretsPath, JSON.stringify({ version: 1, backupPassphraseProtected: protectedPassphrase, recipientKeyId: recipient.backup.recipientKeyId }));
+      const { run, passphraseFile } = runScript(fakeNodeOk, malformedSecretsPath);
+      assert.equal(run.status, 11, 'a missing receiverTokenProtected key must fail with the dedicated code 11');
+      await assert.rejects(fs.stat(passphraseFile), { code: 'ENOENT' }, 'the child must never be invoked on a malformed secrets file');
+    }
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
 });
