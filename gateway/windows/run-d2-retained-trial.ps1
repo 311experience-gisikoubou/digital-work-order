@@ -162,7 +162,7 @@ function Invoke-D2RetainedTrial {
   )
 
   if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) { return 10 }
-  try { $configRaw = Get-Content -LiteralPath $ConfigPath -Raw -ErrorAction Stop } catch { return 10 }
+  try { $configRaw = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 -ErrorAction Stop } catch { return 10 }
   try { $config = $configRaw | ConvertFrom-Json -ErrorAction Stop } catch { return 10 }
   if ($null -eq $config) { return 10 }
   $requiredConfigKeys = @('schemaVersion', 'expectedJobId', 'syncRoot', 'inboxRoot', 'recipientBackupPath')
