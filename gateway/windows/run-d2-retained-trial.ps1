@@ -69,7 +69,14 @@ Exit codes (sanitized; stdout/stderr never contain a path, stack trace, or secre
        a corrupt protected blob, or an implausibly short decoded passphrase).
   14 = the Node adapter script could not be found.
   15 = the Node child process exited non-zero (includes the adapter's own bounded-wait
-       timeout, a rejected/corrupt job, or any other adapter-reported failure).
+       timeout, a rejected/corrupt job, or any other adapter-reported failure), or the native
+       child invocation itself could not be launched. The emitted `status=error-15` line is
+       unchanged; it may optionally be followed by one `reason=<CODE>` token taken ONLY from the
+       finite, closed allowlist below (never arbitrary child text) -- see
+       `$script:D2RetainAllowedChildFailureReasons`. An unrecognized/malformed/absent reason is
+       surfaced only as the literal `reason=UNKNOWN`, never as the child's own raw output. This
+       script's own stdout/stderr never contains the child's raw stdout/stderr, a path, a
+       bearer/token, or any other secret, regardless of which branch above is taken.
 #>
 [CmdletBinding()]
 param(
@@ -83,8 +90,56 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function Write-Status([string]$Code) {
-  Write-Output ("[d2-retain] status=" + $Code)
+function Write-Status([string]$Code, [string]$Reason) {
+  if ([string]::IsNullOrEmpty($Reason)) {
+    Write-Output ("[d2-retain] status=" + $Code)
+  } else {
+    Write-Output ("[d2-retain] status=" + $Code + " reason=" + $Reason)
+  }
+}
+
+# Issue #172 (error-15 diagnostic repair): a finite, closed allowlist of already-existing,
+# non-sensitive Node-adapter `fail(code)` codes (gateway/drive-relay-d2-adapter.mjs) that this
+# script is ever permitted to surface as a categorical reason when returning sanitized code 15.
+# This is never free-form/pattern-based: a code outside this exact list is never accepted, and
+# no other substring of the child's own stdout/stderr is ever surfaced, by construction below.
+$script:D2RetainAllowedChildFailureReasons = @(
+  'D2_RETAIN_BACKUP_READ_FAILED',
+  'D2_RETAIN_ROOT_OVERLAP',
+  'D2_RETAIN_WAIT_TIMEOUT',
+  'D2_RETAIN_PERSIST_FAILED',
+  'D2_TRIAL_FAILED'
+)
+
+# Set ONLY by Invoke-D2RetainedNodeChild, immediately after classifying (never echoing raw) the
+# child's own discarded output, and always cleared again once the top-level script has read it
+# once. This indirection lets Invoke-D2RetainedNodeChild / -Scoped / Invoke-D2RetainedTrial keep
+# returning the exact same plain scalar [int] they always did -- so already-qualified callers and
+# tests that depend on that scalar-int contract remain valid -- without ever threading the raw
+# captured child output itself through any function's return value.
+$script:D2RetainedChildFailureReason = $null
+
+# Extracts a reason ONLY from an exact, anchored "[d2-trial] fatal: CODE" line -- the one and
+# only fatal-status line the Node adapter itself ever writes (gateway/drive-relay-d2-adapter.mjs)
+# -- and ONLY when CODE is a member of the finite, closed
+# $script:D2RetainAllowedChildFailureReasons allowlist above. A non-matching line, extra
+# surrounding/trailing text, a code outside the allowlist, or no fatal line at all always returns
+# the literal 'UNKNOWN' rather than ever echoing the child's own (possibly sensitive) text.
+# $CapturedOutput is read once here and never retained by the caller afterward.
+function Get-D2RetainedChildFailureReason {
+  param($CapturedOutput)
+  if ($null -ne $CapturedOutput) {
+    foreach ($item in @($CapturedOutput)) {
+      $line = [string]$item
+      if ($line -match '^\[d2-trial\] fatal: ([A-Z0-9_]+)\s*$') {
+        $code = $Matches[1]
+        if ($script:D2RetainAllowedChildFailureReasons -contains $code) {
+          return $code
+        }
+      }
+    }
+  }
+  return 'UNKNOWN'
 }
 
 # Invokes exactly one native child process and returns ONLY a scalar [int] exit code -- never
@@ -94,17 +149,45 @@ function Write-Status([string]$Code) {
 # `$exitCode = Invoke-D2RetainedTrial ...` got back e.g. `@('some native output line', 0)`
 # instead of the scalar `0`, breaking every downstream `-eq`/`-ne` exit-code comparison and the
 # final `exit $exitCode`.) `2>&1` merges the child's stderr into the same captured stream so
-# neither stream is ever written to this function's own output; `$null = ...` discards the
-# whole captured collection without ever logging it. `$LASTEXITCODE` is captured immediately
-# afterward, before any other statement can overwrite it, and is force-cast to `[int]` so this
-# function can never itself return anything but a single scalar integer.
+# neither stream is ever written to this function's own output.
+#
+# PS 5.1 stderr robustness: a native command's stderr line, once merged via `2>&1`, is surfaced
+# as an ErrorRecord; with the script-wide `$ErrorActionPreference = 'Stop'` left active, that
+# record would throw a terminating error on the very first stderr line instead of letting this
+# single already-launched child finish and report its own real exit code.
+# `$ErrorActionPreference` is therefore temporarily set to `'Continue'` scoped strictly around
+# this one native child launch only, and is deterministically restored to its exact prior value
+# in a `finally` immediately afterward, on every outcome -- so no other statement anywhere in
+# this script ever runs under a weakened `$ErrorActionPreference`, and the child is launched
+# exactly once either way.
+#
+# The captured collection is classified (never echoed) via Get-D2RetainedChildFailureReason and
+# then immediately discarded (`$captured = $null`); only the already-classified,
+# allowlisted-or-UNKNOWN reason string (stashed in $script:D2RetainedChildFailureReason, read
+# once by the caller) and the plain scalar exit code below ever leave this function.
+# `$LASTEXITCODE` is captured immediately afterward, before any other statement can overwrite
+# it, and is force-cast to `[int]` so this function can never itself return anything but a
+# single scalar integer.
 function Invoke-D2RetainedNodeChild {
   param(
     [Parameter(Mandatory = $true)][string]$NodePath,
     [string[]]$NodeArgs
   )
-  $null = & $NodePath @NodeArgs 2>&1
-  return [int]$LASTEXITCODE
+  $script:D2RetainedChildFailureReason = $null
+  $previousEap = $ErrorActionPreference
+  $captured = $null
+  try {
+    $ErrorActionPreference = 'Continue'
+    $captured = & $NodePath @NodeArgs 2>&1
+  } finally {
+    $ErrorActionPreference = $previousEap
+  }
+  $exitCode = [int]$LASTEXITCODE
+  if ($exitCode -ne 0) {
+    $script:D2RetainedChildFailureReason = Get-D2RetainedChildFailureReason -CapturedOutput $captured
+  }
+  $captured = $null
+  return $exitCode
 }
 
 # Converts the existing CurrentUser-DPAPI-protected SecureString (as produced by
@@ -257,7 +340,13 @@ function Invoke-D2RetainedTrial {
     # single scalar [int], never the child's own stdout/stderr folded into an array.
     try {
       $nodeExitCode = Invoke-D2RetainedNodeChildScoped -NodePath $NodePath -NodeArgs $nodeArgs
-    } catch { return 15 }
+    } catch {
+      # The native invocation itself failed to launch (e.g. node could not be started at all):
+      # no child ever ran, so no reason was ever classified -- clear any stale value and preserve
+      # the exact same generic sanitized 15 as before this repair, with no reason token.
+      $script:D2RetainedChildFailureReason = $null
+      return 15
+    }
     if ($nodeExitCode -ne 0) { return 15 }
     return 0
   } finally {
@@ -276,5 +365,14 @@ if ($PSBoundParameters.ContainsKey('RetainTimeoutMs')) { $timeoutArg = $RetainTi
 
 $exitCode = Invoke-D2RetainedTrial -ConfigPath $ConfigPath -SecretsPath $SecretsPath -NodePath $NodePath -AdapterPath $AdapterPath -RetainTimeoutMs $timeoutArg
 
-if ($exitCode -eq 0) { Write-Status 'ok' } else { Write-Status ('error-' + $exitCode) }
+if ($exitCode -eq 0) {
+  Write-Status 'ok'
+} elseif ($exitCode -eq 15) {
+  # The only place the optional, already-classified, allowlisted-or-UNKNOWN reason token is ever
+  # appended -- read exactly once here, then cleared immediately so nothing lingers afterward.
+  Write-Status ('error-' + $exitCode) $script:D2RetainedChildFailureReason
+} else {
+  Write-Status ('error-' + $exitCode)
+}
+$script:D2RetainedChildFailureReason = $null
 exit $exitCode
