@@ -99,8 +99,8 @@ function Write-Status([string]$Code, [string]$Reason, [string]$Phase) {
 
 
 # Issue #172 (error-15 diagnostic repair): a finite, closed allowlist of already-existing,
-# non-sensitive Node-adapter `fail(code)` codes (gateway/drive-relay-d2-adapter.mjs) that this
-# script is ever permitted to surface as a categorical reason when returning sanitized code 15.
+# non-sensitive fixed code literals from the adapter, local store and viewer, plus
+# known filesystem codes, permitted as categorical reasons for sanitized error 15.
 # This is never free-form/pattern-based: a code outside this exact list is never accepted, and
 # no other substring of the child's own stdout/stderr is ever surfaced, by construction below.
 $script:D2RetainAllowedChildFailureReasons = @(
@@ -123,7 +123,42 @@ $script:D2RetainAllowedChildFailureReasons = @(
   'D2_RETAIN_METADATA_INVALID',
   'D2_RETAIN_CONTENT_REJECTED',
   'D2_RETAIN_REF_REJECTED',
-  'D2_RETAIN_SECRET_MISSING'
+  'D2_RETAIN_SECRET_MISSING',
+  'GATEWAY_ATTACHMENT_HASH_MISMATCH',
+  'GATEWAY_ATTACHMENT_MISSING',
+  'GATEWAY_EXISTING_JOB_CONFLICT',
+  'GATEWAY_INVALID_ATTACHMENT_ID',
+  'GATEWAY_INVALID_BLOB',
+  'GATEWAY_INVALID_JOB_ID',
+  'GATEWAY_INVALID_PACKAGE',
+  'GATEWAY_INVALID_ROOT',
+  'GATEWAY_INVALID_WORK_ORDER_REF',
+  'GATEWAY_WORK_ORDER_HASH_MISMATCH',
+  'VIEWER_ATTACHMENT_FILE_MISSING',
+  'VIEWER_ATTACHMENT_HASH_MISMATCH',
+  'VIEWER_ATTACHMENT_SIZE_MISMATCH',
+  'VIEWER_FILE_INVALID_JSON',
+  'VIEWER_FILE_MISSING',
+  'VIEWER_INVALID_JOB_ID',
+  'VIEWER_MALFORMED_MANIFEST',
+  'VIEWER_MALFORMED_RECEIPT',
+  'VIEWER_PATH_TRAVERSAL_REJECTED',
+  'VIEWER_RECEIPT_MANIFEST_MISMATCH',
+  'VIEWER_UNSAFE_FILE_TYPE',
+  'VIEWER_WORK_ORDER_HASH_MISMATCH',
+  'VIEWER_WORK_ORDER_REF_MISMATCH',
+  'D2_LOCAL_DESCRIPTOR_MISMATCH',
+  'D2_LOCAL_ID_INVALID',
+  'D2_LOCAL_MANIFEST_MISMATCH',
+  'EACCES',
+  'EPERM',
+  'ENOENT',
+  'ENOSPC',
+  'EROFS',
+  'EIO',
+  'EBUSY',
+  'EEXIST',
+  'ENOTEMPTY'
 )
 
 # Set ONLY by Invoke-D2RetainedNodeChild, immediately after classifying (never echoing raw) the
