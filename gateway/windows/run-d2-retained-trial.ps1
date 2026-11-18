@@ -90,13 +90,13 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function Write-Status([string]$Code, [string]$Reason) {
-  if ([string]::IsNullOrEmpty($Reason)) {
-    Write-Output ("[d2-retain] status=" + $Code)
-  } else {
-    Write-Output ("[d2-retain] status=" + $Code + " reason=" + $Reason)
-  }
+function Write-Status([string]$Code, [string]$Reason, [string]$Phase) {
+  $message = '[d2-retain] status=' + $Code
+  if (-not [string]::IsNullOrEmpty($Reason)) { $message += ' reason=' + $Reason }
+  if (-not [string]::IsNullOrEmpty($Phase)) { $message += ' phase=' + $Phase }
+  Write-Output $message
 }
+
 
 # Issue #172 (error-15 diagnostic repair): a finite, closed allowlist of already-existing,
 # non-sensitive Node-adapter `fail(code)` codes (gateway/drive-relay-d2-adapter.mjs) that this
@@ -132,7 +132,16 @@ $script:D2RetainAllowedChildFailureReasons = @(
 # returning the exact same plain scalar [int] they always did -- so already-qualified callers and
 # tests that depend on that scalar-int contract remain valid -- without ever threading the raw
 # captured child output itself through any function's return value.
+$script:D2RetainAllowedChildPhases = @(
+  'BACKUP_RESTORE',
+  'SYNC_VALIDATE',
+  'ENVELOPE_VERIFY',
+  'SIGNATURE_DECRYPT',
+  'SYNTHETIC_CHECK',
+  'SAVE_VERIFY'
+)
 $script:D2RetainedChildFailureReason = $null
+$script:D2RetainedChildFailurePhase = $null
 
 # Extracts a reason ONLY from an exact, anchored "[d2-trial] fatal: CODE" line -- the one and
 # only fatal-status line the Node adapter itself ever writes (gateway/drive-relay-d2-adapter.mjs)
@@ -151,6 +160,21 @@ function Get-D2RetainedChildFailureReason {
         if ($script:D2RetainAllowedChildFailureReasons -contains $code) {
           return $code
         }
+      }
+    }
+  }
+  return 'UNKNOWN'
+}
+
+# A second closed, anchored classifier for non-sensitive stage labels only.
+function Get-D2RetainedChildFailurePhase {
+  param($CapturedOutput)
+  if ($null -ne $CapturedOutput) {
+    foreach ($item in @($CapturedOutput)) {
+      $line = [string]$item
+      if ($line -cmatch '^\[d2-trial\] phase: ([A-Z_]+)$') {
+        $phase = $Matches[1]
+        if ($script:D2RetainAllowedChildPhases -contains $phase) { return $phase }
       }
     }
   }
@@ -189,6 +213,7 @@ function Invoke-D2RetainedNodeChild {
     [string[]]$NodeArgs
   )
   $script:D2RetainedChildFailureReason = $null
+  $script:D2RetainedChildFailurePhase = $null
   $previousEap = $ErrorActionPreference
   $captured = $null
   try {
@@ -200,6 +225,7 @@ function Invoke-D2RetainedNodeChild {
   $exitCode = [int]$LASTEXITCODE
   if ($exitCode -ne 0) {
     $script:D2RetainedChildFailureReason = Get-D2RetainedChildFailureReason -CapturedOutput $captured
+    $script:D2RetainedChildFailurePhase = Get-D2RetainedChildFailurePhase -CapturedOutput $captured
   }
   $captured = $null
   return $exitCode
@@ -360,6 +386,7 @@ function Invoke-D2RetainedTrial {
       # no child ever ran, so no reason was ever classified -- clear any stale value and preserve
       # the exact same generic sanitized 15 as before this repair, with no reason token.
       $script:D2RetainedChildFailureReason = $null
+      $script:D2RetainedChildFailurePhase = $null
       return 15
     }
     if ($nodeExitCode -ne 0) { return 15 }
@@ -385,9 +412,10 @@ if ($exitCode -eq 0) {
 } elseif ($exitCode -eq 15) {
   # The only place the optional, already-classified, allowlisted-or-UNKNOWN reason token is ever
   # appended -- read exactly once here, then cleared immediately so nothing lingers afterward.
-  Write-Status ('error-' + $exitCode) $script:D2RetainedChildFailureReason
+  Write-Status ('error-' + $exitCode) $script:D2RetainedChildFailureReason $script:D2RetainedChildFailurePhase
 } else {
   Write-Status ('error-' + $exitCode)
 }
 $script:D2RetainedChildFailureReason = $null
+$script:D2RetainedChildFailurePhase = $null
 exit $exitCode

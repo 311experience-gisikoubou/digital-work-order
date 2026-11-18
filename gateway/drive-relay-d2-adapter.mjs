@@ -13,6 +13,8 @@ const require=createRequire(import.meta.url),Crypto=require('../media-transfer-c
 const META_VERSION='dwo-drive-relay-d2-v1',HEX64=/^[0-9a-f]{64}$/,OBJ=/^obj_([0-9]{4})\.bin$/;
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const fail=code=>Object.assign(new Error(code),{code});
+const RETAIN_SAFE_PHASES=Object.freeze(['BACKUP_RESTORE','SYNC_VALIDATE','ENVELOPE_VERIFY','SIGNATURE_DECRYPT','SYNTHETIC_CHECK','SAVE_VERIFY']);
+function tagRetainedFailure(error,phase){if(error&&typeof error==='object'&&RETAIN_SAFE_PHASES.includes(phase))error.retainedPhase=phase;return error;}
 const plain=value=>!!value&&typeof value==='object'&&!Array.isArray(value);
 function exact(value,keys){return plain(value)&&Object.keys(value).length===keys.length&&keys.every(key=>Object.hasOwn(value,key));}
 function validJwk(value){return plain(value)&&value.kty==='EC'&&value.crv==='P-256'&&/^[A-Za-z0-9_-]{40,50}$/.test(value.x||'')&&/^[A-Za-z0-9_-]{40,50}$/.test(value.y||'');}
@@ -79,10 +81,12 @@ async function decryptD2Job(dir,options={}){
   const {meta,blobs}=await readVerifiedSyncedJob(dir),crypto=options.crypto||webcrypto;
   if(options.expectedJobId&&meta.jobId!==options.expectedJobId)throw fail('D2_LOCAL_ID_INVALID');
   const plan={version:'dwo-receiver-api-v1',jobId:meta.jobId,ackCapability:'A'.repeat(43),bootstrap:meta.bootstrap,objects:meta.objects.map(object=>({ordinal:object.ordinal,size:object.size,ciphertextSha256:object.ciphertextSha256,downloadUrl:'https://d2.invalid/'+object.name}))};
+  if(typeof options.onRetainedPhase==='function')options.onRetainedPhase('ENVELOPE_VERIFY');
   const envelope=await reconstructEnvelope(plan,blobs,options.recipientKeyRingOrIdentity,{crypto});
   if(envelope.header.descriptorSha256!==meta.descriptorSha256)throw fail('D2_DESCRIPTOR_MISMATCH');
   const registry=options.senderRegistries||{senders:[await senderRegistryFromPairing(dir)]};
   const sender=resolveSenderRegistry(registry,envelope.descriptor.senderClinicDeviceId);
+  if(typeof options.onRetainedPhase==='function')options.onRetainedPhase('SIGNATURE_DECRYPT');
   const decrypted=await(options.cryptoApi||Crypto).decryptEnvelope(envelope,options.recipientKeyRingOrIdentity,sender,{crypto,transferApi:options.transferApi||Transfer});
   return{meta,envelope,decrypted};
 }
@@ -293,6 +297,8 @@ async function assertExactRetainedSyntheticJob(decrypted){
 // and fail-closed against conflicts/corruption as the ACK path already is.
 export async function receiveD2RetainedJob(options={}){
   if(options.control!==undefined)throw fail('D2_RETAIN_CONTROL_FORBIDDEN');
+  let retainedPhase='SYNC_VALIDATE';
+  try {
   const{syncRoot,inboxRoot,expectedJobId,recipientKeyRingOrIdentity}=options;
   if(!path.isAbsolute(syncRoot||'')||!path.isAbsolute(inboxRoot||'')||!/^job_[0-9a-f]{64}$/.test(expectedJobId||''))throw fail('D2_RETAIN_CONFIG_INVALID');
   const resolvedSyncRoot=path.normalize(path.resolve(syncRoot)),resolvedInboxRoot=path.normalize(path.resolve(inboxRoot));
@@ -313,8 +319,10 @@ export async function receiveD2RetainedJob(options={}){
   const[realSyncAfterReady,realInboxAfterReady]=await Promise.all([realOrResolved(resolvedSyncRoot),realOrResolved(resolvedInboxRoot)]);
   if(pathOverlaps(realSyncAfterReady,realInboxAfterReady)||pathOverlaps(realInboxAfterReady,realSyncAfterReady))throw fail('D2_RETAIN_ROOT_OVERLAP');
 
-  const{envelope,decrypted}=await decryptD2Job(jobDir,{...options,expectedJobId,recipientKeyRingOrIdentity});
+  const{envelope,decrypted}=await decryptD2Job(jobDir,{...options,expectedJobId,recipientKeyRingOrIdentity,onRetainedPhase:phase=>{if(RETAIN_SAFE_PHASES.includes(phase))retainedPhase=phase;}});
+  retainedPhase='SYNTHETIC_CHECK';
   await assertExactRetainedSyntheticJob(decrypted);
+  retainedPhase='SAVE_VERIFY';
 
   const stored=await(options.persist||persistVerifiedPackage)({jobId:meta.jobId,workOrderRef:decrypted.workOrderRef,pkg:decrypted.package,descriptorSha256:envelope.header.descriptorSha256},{root:resolvedInboxRoot,now:options.now});
   if(!stored||!['stored','already-stored'].includes(stored.status))throw fail('D2_RETAIN_PERSIST_FAILED');
@@ -323,6 +331,7 @@ export async function receiveD2RetainedJob(options={}){
   void verified;
 
   return{jobId:meta.jobId,status:stored.status,workOrderRef:decrypted.workOrderRef};
+  } catch(error) {throw tagRetainedFailure(error,retainedPhase);}
 }
 
 function validateRetainedConfig(value){
@@ -342,7 +351,9 @@ export async function runD2RetainedTrialOnce(configPath,options={}){
   const base=path.dirname(path.resolve(configPath));
   const syncRoot=path.resolve(base,config.syncRoot),inboxRoot=path.resolve(base,config.inboxRoot);
   let backup;try{backup=JSON.parse(await fs.readFile(path.resolve(base,config.recipientBackupPath),'utf8'));}catch{throw fail('D2_RETAIN_BACKUP_READ_FAILED');}
-  const recipient=await Crypto.restoreRecipientIdentity(backup,passphrase,{crypto:webcrypto});
+  let recipient;
+  try{recipient=await Crypto.restoreRecipientIdentity(backup,passphrase,{crypto:webcrypto});}
+  catch(error){throw tagRetainedFailure(error,'BACKUP_RESTORE');}
   const result=await receiveD2RetainedJob({syncRoot,inboxRoot,expectedJobId:config.expectedJobId,recipientKeyRingOrIdentity:recipient,timeoutMs:options.timeoutMs,pollIntervalMs:options.pollIntervalMs});
   return{jobId:result.jobId,status:result.status};
 }
@@ -384,6 +395,6 @@ if(isMain){
   if(parsed){
     const resolvedPath=fileURLToPath(pathToFileURL(path.resolve(parsed.configPath)));
     const run=parsed.mode==='config'?runD2TrialOnce(resolvedPath):runD2RetainedTrialOnce(resolvedPath,{timeoutMs:parsed.timeoutMs});
-    run.then(result=>process.stdout.write('[d2-trial] status='+result.status+'\n')).catch(error=>{process.stderr.write('[d2-trial] fatal: '+(error&&error.code||'D2_TRIAL_FAILED')+'\n');process.exitCode=1;});
+    run.then(result=>process.stdout.write('[d2-trial] status='+result.status+'\n')).catch(error=>{process.stderr.write('[d2-trial] fatal: '+(error&&error.code||'D2_TRIAL_FAILED')+'\n');if(parsed.mode==='retain'&&error&&RETAIN_SAFE_PHASES.includes(error.retainedPhase))process.stderr.write('[d2-trial] phase: '+error.retainedPhase+'\n');process.exitCode=1;});
   }
 }
