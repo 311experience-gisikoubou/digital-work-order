@@ -9,7 +9,7 @@
   "canonicalContract": {
     "schemaVersion": 1,
     "contractId": "digital-work-order-contract",
-    "contractVersion": "3",
+    "contractVersion": "4",
     "approved": true,
     "artifacts": [
       {
@@ -56,7 +56,7 @@
         "id": "digital-work-order-layout-20261001-v1",
         "kind": "DESIGN",
         "slot": "ui-layout",
-        "status": "CURRENT",
+        "status": "SUPERSEDED",
         "sources": [
           "docs/canonical/business-layout-20261001-toothchart-compact-sync-v1.json",
           "docs/canonical/tooth-chart-sync-spec-v1.json"
@@ -64,6 +64,28 @@
         "visual": {
           "designId": "digital-work-order-layout-20261001-v1",
           "version": "2026-10-01-v1",
+          "scope": [
+            "clinic-input",
+            "tooth-chart"
+          ],
+          "baseline": "MACHINE_READABLE"
+        },
+        "supersededBy": "digital-work-order-layout-20261021-teal-v1"
+      },
+      {
+        "id": "digital-work-order-layout-20261021-teal-v1",
+        "kind": "DESIGN",
+        "slot": "ui-layout",
+        "status": "CURRENT",
+        "sources": [
+          "docs/canonical/approved-fullscreen-layout-20261021-teal.json",
+          "docs/canonical/approved-fullscreen-design-20261021.md",
+          "docs/canonical/assets/approved-fullscreen-teal-20261021.png",
+          "docs/canonical/tooth-chart-sync-spec-v1.json"
+        ],
+        "visual": {
+          "designId": "digital-work-order-layout-20261021-teal-v1",
+          "version": "2026-10-21-v1",
           "scope": [
             "clinic-input",
             "tooth-chart"
@@ -120,7 +142,7 @@
         "replaces": null,
         "artifactIds": [
           "digital-work-order-phase2-business-v1",
-          "digital-work-order-layout-20261001-v1"
+          "digital-work-order-layout-20261021-teal-v1"
         ]
       },
       {
@@ -133,7 +155,7 @@
         "type": "DESIGN",
         "replaces": null,
         "artifactIds": [
-          "digital-work-order-layout-20261001-v1",
+          "digital-work-order-layout-20261021-teal-v1",
           "digital-work-order-phase2-business-v1"
         ]
       },
@@ -147,7 +169,7 @@
         "type": "DESIGN",
         "replaces": null,
         "artifactIds": [
-          "digital-work-order-layout-20261001-v1",
+          "digital-work-order-layout-20261021-teal-v1",
           "digital-work-order-phase2-business-v1"
         ]
       },
@@ -162,7 +184,7 @@
         "replaces": null,
         "artifactIds": [
           "digital-work-order-phase2-business-v1",
-          "digital-work-order-layout-20261001-v1"
+          "digital-work-order-layout-20261021-teal-v1"
         ]
       },
       {
@@ -254,6 +276,19 @@
         "replaces": null,
         "artifactIds": [
           "digital-work-order-phase2-business-v1"
+        ]
+      },
+      {
+        "id": "U14",
+        "topic": "approved-fullscreen-layout-teal-20261021",
+        "status": "CONFIRMED",
+        "summary": "ユーザーが提供した2026-10-21の青緑アクセント版1536x864画像を画面全体のデザイン正本として採用。カード・歯式図・数字歯式・総義歯ボタン・クラスプ配置と歯牙形態は固定し、既存の指示書機能を保護して実装する。iPad横向きの寸法調整以外で無断再配置しない。",
+        "decidedAt": "2026-10-21",
+        "source": "EXPLICIT_HUMAN",
+        "type": "DESIGN",
+        "replaces": null,
+        "artifactIds": [
+          "digital-work-order-layout-20261021-teal-v1"
         ]
       }
     ],

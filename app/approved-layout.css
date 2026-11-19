@@ -1,0 +1,267 @@
+/* 2026-10-21 approved dashboard; preserve IDs, inputs, persistence, PDF and editing. */
+#view-clinic {
+  --glass-bg: #ffffff;
+  --input-bg: #ffffff;
+  --text-primary: #183451;
+  --text-secondary: #536b88;
+  --text-muted: #7890ad;
+  --border-color: #d7e4f3;
+  --accent-teal: #1e6cb8;
+  width: 100%;
+  max-width: 1760px;
+  margin: 0 auto;
+  padding: 16px 20px 26px;
+  box-sizing: border-box;
+  color: #183451;
+}
+#approved-full-form {
+  display: grid;
+  grid-template-columns: repeat(12,minmax(0,1fr));
+  align-items: start;
+  gap: 12px;
+}
+#approved-full-form > .card {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 14px 16px;
+  background: white;
+  border: 1px solid #d7e4f3;
+  border-radius: 10px;
+  box-shadow: 0 2px 6px rgba(30,65,110,.035);
+}
+#approved-full-form > .approved-card-patient { order: 1; grid-column: span 6; }
+#approved-full-form > .approved-card-delivery { order: 2; grid-column: span 6; }
+#approved-full-form > .approved-card-prosthetics { order: 3; grid-column: span 6; }
+#approved-full-form > .approved-card-insurance { order: 4; grid-column: span 2; }
+#approved-full-form > .approved-card-order-type { order: 5; grid-column: span 4; }
+#approved-full-form > .approved-card-options { order: 6; grid-column: span 6; }
+#approved-full-form > .approved-card-remarks { order: 7; grid-column: span 6; }
+#approved-full-form > .approved-card-tooth { order: 8; grid-column: 1 / -1; }
+#approved-full-form > .submit-area { order: 9; grid-column: 1 / -1; }
+#approved-full-form > :not(.card):not(.submit-area) { grid-column: 1 / -1; }
+#approved-full-form .card-title {
+  margin-bottom: 10px;
+  padding-bottom: 5px;
+  letter-spacing: 0;
+  color: #183451;
+  font-size: 14px;
+}
+#approved-full-form .form-group { min-width: 0; }
+#approved-full-form .delivery-system { margin: 0; padding: 0; border: 0; box-shadow: none; }
+#approved-full-form .ds-title { display: none; }
+#approved-full-form .delivery-result { margin-top: 5px; }
+#approved-full-form .approved-card-patient > .form-row { gap: 9px; }
+#approved-full-form .approved-card-remarks textarea { min-height: 105px; }
+
+#approved-full-form .approved-card-tooth {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) minmax(250px,26%);
+  align-items: stretch;
+  gap: 12px;
+  padding: 10px;
+}
+/* Legacy editor and summary are retained in DOM, but not duplicated in compact layout. */
+#approved-full-form .approved-card-tooth > :not(.approved-chart-shell):not(.approved-clasp-panel) { display: none !important; }
+#approved-full-form .approved-chart-shell { min-width: 0; }
+#approved-full-form .approved-chart-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  border-bottom: 1px solid #d7e4f3; padding: 4px 6px 9px; margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+#approved-full-form .approved-chart-header h3 {
+  margin: 0; font-size: 16px; font-weight: 700; white-space: nowrap; color: #143d68;
+}
+#approved-full-form .approved-chart-header .tooth-toolbar {
+  border: 0; background: transparent; padding: 0; margin: 0;
+  display:flex; align-items:center; gap: 5px; flex-wrap:wrap;
+}
+#approved-full-form .approved-chart-header .mode-btn {
+  font-size: 11px; border-width: 1px; padding: 7px 10px; min-height: 34px;
+}
+#approved-full-form .approved-chart-body {
+  display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.1fr);
+  align-items: center; gap: 12px;
+}
+#approved-full-form .approved-mini-figures {
+  display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px;
+  align-items: start;
+}
+#approved-full-form .approved-mini-jaw {
+  display: block; width:100%; min-width:0; padding:6px; margin:0;
+  border:1px solid #cddff2; border-radius:7px; background:white; color:#204870;
+  text-align:left; cursor:pointer; font-family:inherit;
+}
+#approved-full-form .approved-mini-jaw:focus-visible,
+#approved-full-form .approved-total-btn:focus-visible {
+  outline:3px solid #317ccf; outline-offset:2px;
+}
+#approved-full-form .approved-mini-title { font-weight:700; font-size:11px; margin:2px 3px 5px; }
+#approved-full-form .approved-mini-canvas { display:block; width:100%; height:auto; max-height:285px; object-fit:contain; }
+#approved-full-form .approved-chart-numeric { min-width:0; }
+#approved-full-form .approved-numeric-head {
+  font-weight:700; font-size:13px; margin-bottom:9px;
+}
+#approved-full-form .approved-chart-numeric .tooth-chart-wrap { padding:0; overflow:visible; }
+#approved-full-form .approved-chart-numeric .tooth-chart { display:flex; width:100%; min-width:0; gap:3px; }
+#approved-full-form .approved-numeric-line {
+  display:grid; grid-template-columns:34px minmax(0,1fr);
+  gap:2px; align-items:center; min-width:0;
+}
+#approved-full-form .approved-numeric-label {
+  font-size:11px; color:#193e67; font-weight:700; white-space:nowrap;
+}
+#approved-full-form .approved-numeric-line .jaw-row {
+  display:grid;
+  grid-template-columns:repeat(8,minmax(0,1fr)) 3px repeat(8,minmax(0,1fr));
+  gap:2px; width:100%; min-width:0;
+}
+#approved-full-form .approved-numeric-line .tooth {
+  width:auto; min-width:0; max-width:none; height:28px; padding:0;
+  font-size:10px; line-height:1; border:1px solid #c5d9f0;
+  border-radius:4px; color:#154574; background:#fff;
+}
+#approved-full-form .approved-numeric-line .tooth.selected { color:#fff; background:#c92222; }
+#approved-full-form .approved-numeric-line .tooth.abutment { color:#fff; background:#2563a8; }
+#approved-full-form .approved-numeric-line .tooth.caution { outline:2px dashed #dc850b; }
+#approved-full-form .approved-numeric-line .midline {
+  width:2px; height:28px; justify-self:center; background:#d9ad40;
+}
+#approved-full-form .approved-total-placement { display:flex; align-items:center; min-height:34px; }
+#approved-full-form .approved-total-btn {
+  padding:6px 12px; margin:0;
+  border:1px solid #a9cbed; border-radius:6px;
+  background:#f6faff; color:#164a84; font-size:11px; font-weight:700;
+  cursor:pointer;
+}
+#approved-full-form .approved-chart-foot {
+  margin-top:9px; padding:8px 10px; font-size:10px;
+  color:#3d638b; background:#f3f8fe; border:1px solid #d5e6f8; border-radius:7px;
+}
+#approved-full-form .approved-clasp-panel {
+  min-width:0; max-width:none; width:100%; margin:0; padding:9px;
+  border:1px solid #d8e5f3; border-radius:9px; background:#f8fbff;
+}
+#approved-full-form .approved-clasp-panel h3 {
+  margin:0 0 10px; color:#173d66; font-size:15px; font-weight:700;
+  text-transform:none; letter-spacing:0;
+}
+#approved-full-form .approved-clasp-details {
+  border:1px solid #d6e5f4; border-radius:7px; background:white;
+  margin-bottom:7px; overflow:hidden;
+}
+#approved-full-form .approved-clasp-details > summary {
+  padding:10px 12px; cursor:pointer; font-weight:650; font-size:12px;
+  color:#1e4876; list-style:revert;
+}
+#approved-full-form .approved-clasp-details[open] > summary {
+  border-bottom:1px solid #e0eaf7; background:#f8f4fa;
+}
+#approved-full-form .approved-clasp-details #claspToolbar {
+  display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:6px; margin:6px; padding:6px; max-height:none;
+}
+#approved-full-form .approved-clasp-details .clasp-btn { font-size:10px; min-width:0; padding:6px 7px; }
+#approved-full-form .approved-clasp-details .clasp-result,
+#approved-full-form .approved-clasp-details .memo-wrap,
+#approved-full-form .approved-clasp-details #twinHint { margin:6px; }
+body.approved-editor-open { overflow:hidden; }
+.approved-editor-backdrop[hidden] { display:none!important; }
+.approved-editor-backdrop {
+  display:flex; position:fixed; inset:0; z-index:2000; align-items:flex-start;
+  justify-content:center; padding:14px; background:rgba(7,31,61,.68);
+  overflow:auto; box-sizing:border-box;
+}
+.approved-editor-panel {
+  width:min(1050px,100%); min-height:0; padding:12px;
+  background:white; color:#193858; border-radius:12px;
+  border:1px solid #c9d9ec;
+}
+.approved-editor-head { display:flex; justify-content:space-between; align-items:center; padding:4px 6px 10px; }
+.approved-editor-close {
+  min-height:42px; padding:8px 17px; border:1px solid #acc9e6;
+  border-radius:7px; background:#f4faff; color:#143f70; font-weight:700; cursor:pointer;
+}
+.approved-editor-panel .chart-wrap { display:block; max-width:600px; width:100%; margin:auto; }
+@media(max-width:1200px) {
+  #approved-full-form .approved-card-patient,#approved-full-form .approved-card-delivery { grid-column:span 6; }
+  #approved-full-form .approved-card-prosthetics { grid-column:span 8; }
+  #approved-full-form .approved-card-insurance { grid-column:span 4; }
+  #approved-full-form .approved-card-order-type { grid-column:span 12; }
+  #approved-full-form .approved-chart-body { grid-template-columns:1fr; }
+  #approved-full-form .approved-mini-figures { max-width:650px; }
+}
+@media(max-width:900px) {
+  #view-clinic { padding:10px 12px 20px; }
+  #approved-full-form > .card { grid-column:1 / -1; }
+  #approved-full-form .approved-card-tooth { grid-template-columns: minmax(0,1fr); }
+  #approved-full-form .approved-clasp-panel { width:auto; }
+}
+@media(max-width:600px) {
+  #approved-full-form .approved-numeric-line { grid-template-columns:25px minmax(0,1fr); }
+  #approved-full-form .approved-numeric-line .tooth { height:24px; font-size:9px; }
+  #approved-full-form .approved-numeric-line .midline { height:24px; }
+  #approved-full-form .approved-chart-header h3 { font-size:14px; }
+  #approved-full-form .approved-mini-canvas { max-height:200px; }
+  #approved-full-form .approved-total-btn { padding:6px 9px; }
+}
+
+#approved-full-form > .approved-form-actions {
+  order:0; grid-column:1 / -1; display:flex; align-items:center;
+  justify-content:space-between; gap:12px; min-width:0; background:white;
+  border:1px solid #d7e4f3; border-radius:10px; padding:11px 16px;
+}
+#approved-full-form .approved-form-identification {display:flex; flex-direction:column; gap:3px;}
+#approved-full-form .approved-form-identification strong {font-size:16px; color:#153b65;}
+#approved-full-form .approved-form-identification small {color:#59728b; font-size:11px;}
+#approved-full-form .approved-form-actions .submit-area {
+  margin:0; padding:0; display:flex; flex-wrap:wrap; gap:7px; align-items:center;
+}
+#approved-full-form .approved-form-actions .submit-area button {margin:0;}
+@media(max-width:950px) {
+  #approved-full-form > .approved-form-actions { flex-direction:column; align-items:stretch; }
+}
+
+/* Keep insurance/order type accessible inside the delivery region. */
+#approved-full-form > .approved-card-prosthetics { grid-column: span 5; order:3; }
+#approved-full-form > .approved-card-options { grid-column: span 3; order:4; }
+#approved-full-form > .approved-card-media { grid-column: span 2; order:5; }
+#approved-full-form > .approved-card-remarks { grid-column: span 2; order:6; }
+#approved-full-form .approved-delivery-options {
+  display:flex; flex-wrap:wrap; gap:8px; margin-top:8px;
+}
+#approved-full-form .approved-delivery-options > .card {
+  flex:1 1 180px; min-width:0; padding:7px 9px; margin:0;
+  border:1px solid #d8e5f4; border-radius:7px; background:#fbfdff;
+}
+#approved-full-form .approved-delivery-options .card-title { margin-bottom:4px; font-size:12px; padding:0; }
+#approved-full-form .approved-delivery-options .number { display:none; }
+#approved-full-form .approved-delivery-options .check-group { gap:8px; }
+#approved-full-form > .approved-card-prosthetics,
+#approved-full-form > .approved-card-options,
+#approved-full-form > .approved-card-media,
+#approved-full-form > .approved-card-remarks {
+  max-height:260px; overflow-y:auto; scrollbar-width:thin;
+}
+#approved-full-form .approved-card-media .media-actions { display:flex; flex-wrap:wrap; gap:6px; }
+#approved-full-form .approved-card-media .media-actions .btn-secondary { padding:6px 8px; font-size:11px; }
+#approved-full-form .approved-card-media .media-hint { font-size:10px; }
+#approved-full-form .approved-card-media .media-list { max-height:110px; overflow:auto; }
+@media(max-width:900px){
+  #approved-full-form > .approved-card-prosthetics,
+  #approved-full-form > .approved-card-options,
+  #approved-full-form > .approved-card-media,
+  #approved-full-form > .approved-card-remarks { max-height:none; overflow:visible; }
+}
+
+/* This is intentionally last: wide-screen card spans must not override iPad stacking. */
+@media(max-width:900px) {
+  #approved-full-form > .approved-card-prosthetics,
+  #approved-full-form > .approved-card-options,
+  #approved-full-form > .approved-card-media,
+  #approved-full-form > .approved-card-remarks {
+    grid-column:1 / -1;
+    max-height:none;
+    overflow:visible;
+  }
+}
