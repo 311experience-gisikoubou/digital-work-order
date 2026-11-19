@@ -4,7 +4,9 @@ import path from 'node:path';
 
 const RECEIPT_VERSION = 'dwo-gateway-receipt-v1';
 const JOB_ID = /^job_[A-Za-z0-9_-]+$/;
-const ATTACHMENT_ID = /^att-[A-Za-z0-9-]{1,120}$/;
+// The D2 synthetic sender uses Base64URL identifiers, which may contain '_'.
+// Keep att- prefix and a traversal-safe, tightly bounded filename charset.
+const ATTACHMENT_ID = /^att-[A-Za-z0-9_-]{1,120}$/;
 
 function storeError(code, detail) {
   const error = new Error(detail ? code + ': ' + detail : code);
