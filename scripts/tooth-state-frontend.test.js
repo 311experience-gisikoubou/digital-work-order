@@ -48,7 +48,7 @@ const functionNames = [
   'refreshCanonicalToothState',
   'handleCanonicalNumericToothClick',
   'handleCanonicalSvgToothClick',
-  'setTeethMissing',
+  'toggleCompleteDentureArch',
   'getToothStateSnapshot',
   'isValidToothStateSnapshot',
   'restoreToothStateSnapshot',
@@ -194,7 +194,7 @@ test('strict restore rejects malformed snapshots without partial mutation', () =
   assert.deepEqual(plain(context.getToothStateSnapshot()), before);
 });
 
-test('7-7 denture helpers always set missing regardless of current mode', () => {
+test('7-7 denture helpers toggle arch 14 teeth and preserve 8 / caution / opposite jaw', () => {
   const { context } = boot();
   context.currentMode = 'caution';
   context.toothState[16].caution = true;
@@ -208,6 +208,14 @@ test('7-7 denture helpers always set missing regardless of current mode', () => 
   context.selectLowerDentureCanonical();
   const lower77 = [47,46,45,44,43,42,41,31,32,33,34,35,36,37];
   for (const num of lower77) assert.equal(context.toothState[num].baseState, 'missing');
+  assert.equal(context.toothState[48].baseState, 'normal');
+  context.selectUpperDentureCanonical();
+  for (const num of upper77) assert.equal(context.toothState[num].baseState, 'normal');
+  for (const num of lower77) assert.equal(context.toothState[num].baseState, 'missing');
+  assert.equal(context.toothState[16].caution, true);
+  assert.equal(context.toothState[18].baseState, 'normal');
+  context.selectLowerDentureCanonical();
+  for (const num of lower77) assert.equal(context.toothState[num].baseState, 'normal');
   assert.equal(context.toothState[48].baseState, 'normal');
 });
 
