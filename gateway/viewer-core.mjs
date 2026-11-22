@@ -19,7 +19,9 @@ const MediaTransferPackage = require('../media-transfer-package.js');
 const RECEIPT_VERSION = 'dwo-gateway-receipt-v1';
 const MANIFEST_SCHEMA_VERSION = 'dwo-media-transfer-v1';
 const JOB_ID = /^job_[A-Za-z0-9_-]+$/;
-const ATTACHMENT_ID = /^att-[A-Za-z0-9-]{1,120}$/;
+// The D2 synthetic sender uses Base64URL identifiers, which may contain '_'.
+// Keep att- prefix and a traversal-safe, tightly bounded filename charset.
+const ATTACHMENT_ID = /^att-[A-Za-z0-9_-]{1,120}$/;
 const WORK_ORDER_REF = /^dwo:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HEX64 = /^[0-9a-f]{64}$/;
 const KINDS = ['image', 'video', 'audio', 'file'];

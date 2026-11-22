@@ -998,3 +998,51 @@ body:has(#view-clinic.active) .app-header .tab-btn.active {
     flex: 1 1 150px;
   }
 }
+
+/* DWO #162: finish the human-approved 1536x864 teal desktop layout.
+   Scoped to min-width:1201px only — strictly above every existing iPad
+   breakpoint (<=1200px) and independent from the pointer:coarse touch
+   rules above, which still win on touch devices via !important.
+   No JS/HTML/IDs/data/media/PDF behavior is touched; sizes only. */
+@media (min-width:1201px) {
+  /* Align the grid content inset with the already-centered .app-header
+     (max-width:1482px), closing the 1px systematic x/width offset that
+     was shifting the action bar and every card row below it. */
+  #view-clinic { padding-left:27px; padding-right:27px; padding-top:11px; }
+
+  #approved-full-form > .approved-form-actions { margin-bottom:3px; }
+
+  #approved-full-form > .approved-second-row { margin-top:7px; margin-bottom:1px; column-gap:9px; }
+
+  /* The source .submit-btn/.btn-secondary padding (16px/10px vertical)
+     was inflating the compact action bar to 76px instead of the
+     approved 64px. Cap the two buttons' own height; the bar's existing
+     min-height:64px + align-items:center then centers them exactly. */
+  #approved-full-form .approved-form-actions .submit-area #submit-btn,
+  #approved-full-form .approved-form-actions .submit-area #draft-save-btn {
+    height:40px; min-height:40px;
+    display:inline-flex; align-items:center; justify-content:center;
+  }
+  #approved-full-form .approved-form-actions .submit-area #submit-btn { padding:0 20px; }
+  #approved-full-form .approved-form-actions .submit-area #draft-save-btn { padding:0 18px; }
+
+  /* The four second-row cards (prosthetics/options/media/remarks) measure
+     139px tall in the approved mock, not 136px. */
+  #approved-full-form > .approved-second-row > .card { min-height:139px; max-height:139px; }
+  #approved-full-form > .approved-second-row > .approved-card-media:has(#media-list li),
+  #approved-full-form > .approved-second-row > .approved-card-options:has(#articulator-area.open),
+  #approved-full-form > .approved-second-row > .approved-card-options:has(#articulator-area.expanded) {
+    min-height:139px!important;
+  }
+
+  /* The approved mock's clasp panel (314px) is genuinely taller than the
+     tooth-chart shell (302px); both were incorrectly forced to an equal
+     301px. Both child heights are explicit (not auto), so this only
+     changes their own box sizes — it does not stretch or clip either one. */
+  #approved-full-form > .approved-card-tooth {
+    height:314px; min-height:314px; max-height:314px;
+    grid-template-columns:minmax(0,1fr) 392px;
+  }
+  #approved-full-form .approved-chart-shell { height:302px; }
+  #approved-full-form .approved-clasp-panel { height:314px; }
+}

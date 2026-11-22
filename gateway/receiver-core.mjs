@@ -276,7 +276,7 @@ export async function reconstructEnvelope(plan, blobs, recipientKeyRingOrIdentit
   };
 }
 
-function resolveSenderRegistry(collection, clinicDeviceId) {
+export function resolveSenderRegistry(collection, clinicDeviceId) {
   const list = Array.isArray(collection)
     ? collection
     : (collection && Array.isArray(collection.senders) ? collection.senders : []);
