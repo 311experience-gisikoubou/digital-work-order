@@ -17,9 +17,11 @@ async function isFile(path) {
 function normalize(text) {
   return String(text).replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
 }
-export function coreBody(coreText) {
+export function coreBody(coreText, corePath = 'CORE.md') {
   const normalized = normalize(coreText);
-  return normalized.replace(/^# CORE\.md\n+/, '').trimEnd();
+  const body = normalized.replace(/^# CORE\.md\n+/, '').trimEnd();
+  return body.replace(/^## 【最重要原則】目的の固定と完遂\n[\s\S]*?(?=\n## |$)/,
+    `## 【最重要原則】目的の固定と完遂\n\n作業開始前に [CORE.md の原則本文](${corePath}#最重要原則目的の固定と完遂)を読み、目的・完成条件・安全な継続・終了判定に適用する。既存の安全・承認・安全保留条件を弱めない。\n`);
 }
 export function renderAgents(coreText, indexText) {
   return [
@@ -41,7 +43,7 @@ export function renderAntigravity(coreText) {
     '<!-- GENERATED FROM CORE.md. DO NOT EDIT DIRECTLY. -->',
     '# AI Foundation — Always-on Tier 0',
     '',
-    coreBody(coreText),
+    coreBody(coreText, '../../CORE.md'),
     '',
     '## Project entry',
     '',

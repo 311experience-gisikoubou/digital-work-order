@@ -63,6 +63,24 @@ function isFoundationPollerNativeWindowsSecurity(file) {
   return FOUNDATION_POLLER_TOP_LEVEL_PS1_RE.test(file) && !isFoundationPollerCliScript(file);
 }
 const CLI_SCRIPT_RE = /^(?:(?:src\/)?(?:cli|command)\.(?:js|ts|mjs|cjs)|src\/(?:cli|commands?)\/.+\.(?:js|ts|mjs|cjs|ps1)|src\/core\/.+\.(?:mjs|cjs)|tests?\/.+\.(?:mjs|cjs))$/i;
+// DDB #649 common-rule-integration-audit MERGE_EXISTING decision: the three
+// source-reviewed DDB proof scripts below (release-manifest selftest,
+// read-only Git verification source gate, and its own temp-synthetic-fixture
+// selftest) have no application install, registry, prod DB access,
+// security/consent role, or OS modification. This is a tightly closed exact
+// path set, not a broadened scripts/* rule: any different name, nested path,
+// extra suffix, .ps1 extension, or native file is rejected and falls through
+// to the ordinary rules (UNKNOWN unless otherwise matched) unchanged. Native
+// Windows security priority is unaffected -- isNativeWindowsSecurityFile is
+// still evaluated first wherever this set is consulted.
+const DDB649_REVIEWED_CLI_SCRIPT_EXACT_PATHS = new Set([
+  'scripts/personal-release-bundle-targets.selftest.mjs',
+  'scripts/personal-v101-to-v110-rollback-source-gate.mjs',
+  'scripts/personal-v101-to-v110-rollback-source-gate.selftest.mjs',
+]);
+function isDdb649ReviewedCliScript(file) {
+  return DDB649_REVIEWED_CLI_SCRIPT_EXACT_PATHS.has(file.toLowerCase());
+}
 // Narrow local transport executables: only files whose basename contains a
 // delimited `mcp` or `stdio` semantic under src/transport. Generic transport
 // modules (for example src/transport/http.ts) remain subject to the normal
@@ -163,6 +181,56 @@ function isRealDeviceVerificationScript(file) {
   return segments.some(segment => REAL_DEVICE_VERIFICATION_SEMANTIC_SEGMENTS.has(segment));
 }
 
+// Issue #404: a closed, exact-path set of the fixed user-facing PWA app
+// assets reproduced in that issue. This intentionally does NOT broadly
+// classify every *.svg, *.webmanifest, or *.json file as frontend — only
+// these three known, fixed asset paths. Any other SVG/manifest/JSON path
+// (including same-named files outside app/, or unreviewed new PWA asset
+// names) is not matched here and falls through to the existing rules
+// (fail-closed to UNKNOWN when nothing else applies).
+const FOUNDATION_PWA_ASSET_EXACT_PATHS = new Set([
+  'app/icon.svg',
+  'app/manifest.webmanifest',
+  'app/manifest-demo.webmanifest',
+]);
+function isFoundationPwaAsset(file) {
+  return FOUNDATION_PWA_ASSET_EXACT_PATHS.has(file.toLowerCase());
+}
+
+// Foundation Issue #404 / DWO Issue #162: a closed, exact-path set of the
+// six DWO-approved frontend assets and ten DWO frontend tests reproduced in
+// that issue. This intentionally does NOT broadly allowlist every assets/
+// *.png, manifest*.webmanifest, or tests/*.test.js path -- only these
+// sixteen known, fixed paths. Any other similarly-named path (a different
+// suffix, a nested directory, a different extension, or an unreviewed new
+// name) is not matched here and falls through to the existing rules
+// (fail-closed to UNKNOWN when nothing else applies). This set is consulted
+// only in the per-file classification branch below, and deliberately is NOT
+// added to hasStrongFrontendAnchor, so it cannot manufacture a frontend
+// companion anchor for an unrelated root JS file (e.g. a root orders.js
+// stays UNKNOWN when only one of these assets is present alongside it).
+const DWO162_REVIEWED_FRONTEND_EXACT_PATHS = new Set([
+  'assets/approved-teeth-lower-20261021.png',
+  'assets/approved-teeth-upper-20261021.png',
+  'assets/pwa-icon-180.png',
+  'assets/pwa-icon-192.png',
+  'assets/pwa-icon-512.png',
+  'manifest.webmanifest',
+  'tests/all-expansion-responsive.test.js',
+  'tests/approved-layout-contract.test.js',
+  'tests/approved-reference-source.test.js',
+  'tests/date-insurance-compact-spacing.test.js',
+  'tests/expanded-fields-data-integrity.test.js',
+  'tests/ipad-adaptive-clinic-lab.test.js',
+  'tests/ipad-home-screen-webapp.test.js',
+  'tests/ipad-safari-native-date-overflow.test.js',
+  'tests/preview-sample-data.test.js',
+  'tests/shade-selector-compact-layout.test.js',
+]);
+function isDwo162ReviewedFrontendAsset(file) {
+  return DWO162_REVIEWED_FRONTEND_EXACT_PATHS.has(file.toLowerCase());
+}
+
 function unique(values) {
   return [...new Set(values)];
 }
@@ -177,7 +245,7 @@ function validRepoPath(value) {
 }
 
 export function classifyFiles(changedFiles) {
-  const hasCliScriptAnchor = changedFiles.some(file => !isNativeWindowsSecurityFile(file) && (CLI_SCRIPT_RE.test(file) || isFoundationPollerCliScript(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file)));
+  const hasCliScriptAnchor = changedFiles.some(file => !isNativeWindowsSecurityFile(file) && (CLI_SCRIPT_RE.test(file) || isFoundationPollerCliScript(file) || isDdb649ReviewedCliScript(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file)));
 
   // Anchor candidates exclude anything already resolved as backend (a
   // dedicated gateway script test, or any BACKEND_RE path such as a
@@ -185,7 +253,14 @@ export function classifyFiles(changedFiles) {
   // backend-classified file can never manufacture a frontend companion
   // anchor for an otherwise-unrelated root JS file.
   const hasStrongFrontendAnchor = changedFiles.some(file => {
-    if (isNativeWindowsSecurityFile(file) || CLI_SCRIPT_RE.test(file) || isFoundationPollerCliScript(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file) || isGatewayDedicatedScriptTest(file) || BACKEND_RE.test(file)) return false;
+    if (isNativeWindowsSecurityFile(file) || CLI_SCRIPT_RE.test(file) || isFoundationPollerCliScript(file) || isDdb649ReviewedCliScript(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file) || isGatewayDedicatedScriptTest(file) || BACKEND_RE.test(file)) return false;
+    // isFoundationPwaAsset is intentionally NOT included here: these three
+    // fixed PWA asset paths are classified directly per-file below (see the
+    // isFoundationPwaAsset(file) check in the classification loop), but they
+    // must not act as a "strong frontend anchor" that silently pulls an
+    // unrelated companion file (e.g. a root orders.js) into FRONTEND_ONLY via
+    // ROOT_FRONTEND_JS_COMPANION_RE. Granting that anchor role was reviewed
+    // and rejected as an unapproved permission widening (Codex P1).
     return ROOT_INDEX_HTML_RE.test(file) || FRONTEND_VERIFICATION_SCRIPT_RE.test(file) || isUserFacingFrontendSelftest(file) || isRealDeviceVerificationScript(file) || FRONTEND_RE.test(file);
   });
 
@@ -241,11 +316,11 @@ export function classifyFiles(changedFiles) {
       flags.backend = true;
       continue;
     }
-    if (CLI_SCRIPT_RE.test(file) || isFoundationPollerCliScript(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file)) {
+    if (CLI_SCRIPT_RE.test(file) || isFoundationPollerCliScript(file) || isDdb649ReviewedCliScript(file) || LOCAL_STDIO_TRANSPORT_RE.test(file) || LOCAL_TOOL_LAUNCHER_RE.test(file)) {
       flags.cli = true;
       continue;
     }
-    if (ROOT_INDEX_HTML_RE.test(file) || FRONTEND_VERIFICATION_SCRIPT_RE.test(file) || isUserFacingFrontendSelftest(file) || isRealDeviceVerificationScript(file) || FRONTEND_RE.test(file)) {
+    if (ROOT_INDEX_HTML_RE.test(file) || FRONTEND_VERIFICATION_SCRIPT_RE.test(file) || isUserFacingFrontendSelftest(file) || isRealDeviceVerificationScript(file) || isFoundationPwaAsset(file) || isDwo162ReviewedFrontendAsset(file) || FRONTEND_RE.test(file)) {
       flags.frontend = true;
       continue;
     }

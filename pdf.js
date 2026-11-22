@@ -677,6 +677,20 @@ function _buildPrintHTML(order1, chartHtml, order2, memoHtml, chartHtml2, memoHt
     });
     var reinforcementWireCount = Number.parseInt(order.reinforcementWireCount, 10) || 0;
     if (reinforcementWireCount > 0) deviceCountItems.push('補強線 ×' + reinforcementWireCount);
+    // The compact PDF replaces the older right column (R = compactR).
+    // Preserve explicitly selected base/rim jaw positions and retention count
+    // in the EXISTING device chip row; a second row would change B5 geometry.
+    // Also keep selected GoA and older records with only the parent device.
+    var selectedDeviceNames = Array.isArray(order.devices)
+      ? order.devices.filter(function(value) { return typeof value === 'string' && value && value !== 'on'; })
+      : [];
+    selectedDeviceNames.forEach(function(value) {
+      if (['クラスプ','バー','補強線','メタルアップ','リマウント咬合調整'].includes(value)) return;
+      if (value === '基礎床' && selectedDeviceNames.some(function(name) { return /^基礎床[上下]$/.test(name); })) return;
+      if (value === 'ロー提' && selectedDeviceNames.some(function(name) { return /^ロー提[上下]$/.test(name); })) return;
+      if (value === '保持' && selectedDeviceNames.some(function(name) { return /^保持 [0-9]+$/.test(name); })) return;
+      if (!deviceCountItems.includes(value)) deviceCountItems.push(value);
+    });
     if (deviceCountItems.length) {
       pushHtmlRow(
         '装置',

@@ -31,6 +31,17 @@ const repositoryIndex = await readFile(new URL('../../../templates/AGENTS.index.
 assert.equal(repositoryIndex.includes('`PROJECT_COMPLETION.md`が存在すれば'), true);
 assert.equal(repositoryIndex.includes('work-start-guard.mjs --mode write'), true);
 
+// New top principle remains canonical once; generated entries carry its reference.
+const principleCore = '# CORE.md\n\n## 【最重要原則】目的の固定と完遂\nCANONICAL_PRINCIPLE_BODY\n\n## Safety\n\n- never weaken safety\n- no secrets\n';
+const referenceAgents = renderAgents(principleCore, index);
+assert.equal(referenceAgents.includes('CORE.md#最重要原則目的の固定と完遂'), true);
+assert.equal(referenceAgents.includes('CANONICAL_PRINCIPLE_BODY'), false);
+assert.equal(referenceAgents.endsWith(agentsA.slice(agentsA.indexOf('## Safety'))), true);
+assert.equal(referenceAgents, renderAgents(principleCore.replaceAll('\n', '\r\n'), index));
+assert.equal(renderAntigravity(principleCore).includes('(../../CORE.md#最重要原則目的の固定と完遂)'), true);
+assert.equal(renderAntigravity(principleCore).includes('CANONICAL_PRINCIPLE_BODY'), false);
+assert.equal(renderAgents('# CORE.md\n\n## Other\nunchanged\n', index).includes('unchanged'), true);
+
 const root = await mkdtemp(join(tmpdir(), 'foundation-entrypoints-'));
 try {
   async function put(rel, content) {

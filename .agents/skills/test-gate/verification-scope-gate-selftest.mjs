@@ -788,4 +788,280 @@ cli = spawnSync(process.execPath, [GATE_CLI_PATH, '--help', 'extra'], { encoding
 assert.equal(cli.status, 2, `--help plus extra arg expected exit 2: ${cli.stdout} ${cli.stderr}`);
 assert(cli.stdout.includes('ARGUMENT_INVALID'), `--help plus extra arg expected ARGUMENT_INVALID: ${cli.stdout}`);
 
+// --- Issue #404: fixed PWA app asset classification (narrow, exact-path) --
+//
+// The three fixed user-facing PWA app assets reproduced in Issue #404 must
+// resolve to the established FRONTEND_ONLY profile instead of the prior
+// CHANGE_SCOPE_UNKNOWN STOP. This is a closed, exact-path set, not a broad
+// SVG/webmanifest/JSON allowance.
+
+assert.equal(classifyFiles(['app/icon.svg']).profile, 'FRONTEND_ONLY');
+assert.equal(classifyFiles(['app/manifest.webmanifest']).profile, 'FRONTEND_ONLY');
+assert.equal(classifyFiles(['app/manifest-demo.webmanifest']).profile, 'FRONTEND_ONLY');
+assert.equal(classifyFiles(['app/icon.svg', 'app/manifest.webmanifest', 'app/manifest-demo.webmanifest']).profile, 'FRONTEND_ONLY');
+
+// Case-insensitive exact-path match (same convention as the existing
+// native-verification exact-path set, e.g. TOOLS/ISSUE66-TAP-RESULT.MJS above).
+assert.equal(classifyFiles(['APP/ICON.SVG']).profile, 'FRONTEND_ONLY');
+assert.equal(classifyFiles(['App/Manifest.Webmanifest']).profile, 'FRONTEND_ONLY');
+
+// The exact Issue #404 reproducer now reaches PROCEED with the ordinary
+// frontend minimum check; no new check type is introduced.
+result = evaluate({
+  changedFiles: ['app/icon.svg', 'app/manifest.webmanifest', 'app/manifest-demo.webmanifest'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_FRONTEND_TEST'],
+});
+assert.equal(result.profile, 'FRONTEND_ONLY');
+assert.equal(result.decision, 'PROCEED');
+assert.equal(result.flags.unknown, false);
+
+// Missing the frontend minimum check still STOPs (no silent relabel to PASS).
+result = evaluate({
+  changedFiles: ['app/icon.svg'],
+  plannedChecks: ['DIFF_HYGIENE'],
+});
+assert.equal(result.decision, 'STOP');
+assert.equal(result.code, 'REQUIRED_CHECK_MISSING');
+assert(result.missingMinimumChecks.includes('TARGETED_FRONTEND_TEST'));
+
+// Excessive checks (e.g. a full backend suite) alongside this profile are
+// still flagged, unchanged from the normal frontend-only proportionality rule.
+result = evaluate({
+  changedFiles: ['app/icon.svg'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_FRONTEND_TEST', 'BACKEND_FULL_TEST'],
+});
+assert.equal(result.code, 'EXCESSIVE_CHECKS_UNJUSTIFIED');
+
+// Negative (adversarial): this is a closed, exact-path set, not a broad
+// SVG/webmanifest/JSON allowance. Similarly named but non-reproduced paths
+// must remain UNKNOWN/STOP, never silently relabeled as PASS.
+assert.equal(classifyFiles(['app/icon2.svg']).profile, 'UNKNOWN');
+assert.equal(classifyFiles(['app/icons/icon.svg']).profile, 'UNKNOWN');
+assert.equal(classifyFiles(['icon.svg']).profile, 'UNKNOWN');
+assert.equal(classifyFiles(['app/manifest-staging.webmanifest']).profile, 'UNKNOWN');
+assert.equal(classifyFiles(['app/manifest.json']).profile, 'UNKNOWN');
+assert.equal(classifyFiles(['public/manifest.webmanifest']).profile, 'UNKNOWN');
+assert.equal(classifyFiles(['app/other-icon.svg']).profile, 'UNKNOWN');
+assert.equal(classifyFiles(['random.svg']).profile, 'UNKNOWN');
+assert.equal(classifyFiles(['data/config.json']).profile, 'UNKNOWN');
+
+result = evaluate({
+  changedFiles: ['app/icon.svg', 'app/icon2.svg'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_FRONTEND_TEST'],
+});
+assert.equal(result.decision, 'STOP');
+assert.equal(result.code, 'CHANGE_SCOPE_UNKNOWN');
+
+result = evaluate({
+  changedFiles: ['random.svg'],
+  plannedChecks: ['DIFF_HYGIENE'],
+});
+assert.equal(result.decision, 'STOP');
+assert.equal(result.code, 'CHANGE_SCOPE_UNKNOWN');
+
+// Negative: existing precedence for native-security, dependency, migration,
+// and other runtime kinds (backend, CLI) is preserved even when a PWA asset
+// path is present in the same changeset.
+assert.equal(classifyFiles(['app/icon.svg', 'package-lock.json']).profile, 'DEPENDENCY_CHANGE');
+assert.equal(classifyFiles(['app/icon.svg', 'migrations/0012_x.sql']).profile, 'DB_MIGRATION');
+assert.equal(classifyFiles(['app/icon.svg', 'src-tauri/src/lib.rs']).profile, 'MIXED_RUNTIME');
+assert.equal(classifyFiles(['app/icon.svg', 'src/cli.mjs']).profile, 'MIXED_RUNTIME');
+assert.equal(classifyFiles(['app/icon.svg', 'src/cli/windows-hello-user-click.cpp']).profile, 'NATIVE_WINDOWS_SECURITY');
+// Governance classification of its own dedicated files is unaffected; a
+// PWA asset alongside an unrelated governance file still resolves via the
+// pre-existing (unchanged) frontend-over-governance precedence.
+assert.equal(classifyFiles(['.agents/skills/test-gate/SKILL.md']).profile, 'GOVERNANCE_ONLY');
+assert.equal(classifyFiles(['app/icon.svg', '.agents/skills/test-gate/SKILL.md']).profile, 'FRONTEND_ONLY');
+
+// Negative (Codex P1 fix): a fixed PWA asset must NOT act as a "strong
+// frontend anchor" that pulls an unrelated root JS companion file (e.g.
+// orders.js, which is otherwise UNKNOWN on its own — see the plain
+// classifyFiles(['orders.js']) assertion above) into FRONTEND_ONLY via
+// ROOT_FRONTEND_JS_COMPANION_RE. Before this fix, isFoundationPwaAsset(file)
+// was included in hasStrongFrontendAnchor, which silently widened
+// permission: ['app/icon.svg', 'orders.js'] resolved to FRONTEND_ONLY
+// instead of the correct UNKNOWN. Each of the three fixed PWA asset paths is
+// checked individually alongside orders.js; the PWA asset itself is still
+// classified FRONTEND_ONLY on its own (see the direct per-file assertions
+// above), but orders.js must remain unclassified, so the changeset as a
+// whole must fail closed to UNKNOWN / STOP CHANGE_SCOPE_UNKNOWN.
+assert.equal(classifyFiles(['app/icon.svg', 'orders.js']).profile, 'UNKNOWN');
+assert.equal(classifyFiles(['app/manifest.webmanifest', 'orders.js']).profile, 'UNKNOWN');
+assert.equal(classifyFiles(['app/manifest-demo.webmanifest', 'orders.js']).profile, 'UNKNOWN');
+
+result = evaluate({
+  changedFiles: ['app/icon.svg', 'orders.js'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_FRONTEND_TEST'],
+});
+assert.equal(result.decision, 'STOP');
+assert.equal(result.code, 'CHANGE_SCOPE_UNKNOWN');
+
+result = evaluate({
+  changedFiles: ['app/manifest.webmanifest', 'orders.js'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_FRONTEND_TEST'],
+});
+assert.equal(result.decision, 'STOP');
+assert.equal(result.code, 'CHANGE_SCOPE_UNKNOWN');
+
+result = evaluate({
+  changedFiles: ['app/manifest-demo.webmanifest', 'orders.js'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_FRONTEND_TEST'],
+});
+assert.equal(result.decision, 'STOP');
+assert.equal(result.code, 'CHANGE_SCOPE_UNKNOWN');
+
+// --- DDB #649 reviewed proof-script exact path set (MERGE_EXISTING) ----
+//
+// The three source-reviewed DDB proof scripts are a tightly closed exact
+// path set, not a broadened scripts/* rule. Positive: the exact three
+// paths classify as CLI_SCRIPT and PROCEED with the ordinary CLI minimum
+// (DIFF_HYGIENE + TARGETED_SELFTEST).
+
+const ddb649Files = [
+  'scripts/personal-release-bundle-targets.selftest.mjs',
+  'scripts/personal-v101-to-v110-rollback-source-gate.mjs',
+  'scripts/personal-v101-to-v110-rollback-source-gate.selftest.mjs',
+];
+
+for (const file of ddb649Files) {
+  assert.equal(classifyFiles([file]).profile, 'CLI_SCRIPT', file);
+  const proceed = evaluate({
+    changedFiles: [file],
+    plannedChecks: ['DIFF_HYGIENE', 'TARGETED_SELFTEST'],
+  });
+  assert.equal(proceed.profile, 'CLI_SCRIPT', file);
+  assert.equal(proceed.decision, 'PROCEED', file);
+  assert.equal(proceed.flags.unknown, false, file);
+  assert.equal(proceed.flags.nativeSecurity, false, file);
+
+  const missingSelftest = evaluate({
+    changedFiles: [file],
+    plannedChecks: ['DIFF_HYGIENE'],
+  });
+  assert.equal(missingSelftest.decision, 'STOP', file);
+  assert.equal(missingSelftest.code, 'REQUIRED_CHECK_MISSING', file);
+  assert(missingSelftest.missingMinimumChecks.includes('TARGETED_SELFTEST'), file);
+}
+
+assert.equal(classifyFiles(ddb649Files).profile, 'CLI_SCRIPT');
+let ddb649AllProceed = evaluate({
+  changedFiles: ddb649Files,
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_SELFTEST'],
+});
+assert.equal(ddb649AllProceed.profile, 'CLI_SCRIPT');
+assert.equal(ddb649AllProceed.decision, 'PROCEED');
+
+// Negative (spoofed): a different name, nested path, extra suffix, .ps1
+// extension, or native-looking file must NOT be swept into this exact set.
+// Unrelated spoofed names with no other matching rule stay UNKNOWN.
+for (const spoofed of [
+  'scripts/personal-release-bundle-target.selftest.mjs',
+  'scripts/personal-release-bundle-targets.selftest.mjs.bak',
+  'scripts/nested/personal-release-bundle-targets.selftest.mjs',
+  'scripts/personal-v101-to-v110-rollback-source-gate.ps1',
+  'scripts/personal-v101-to-v110-rollback-source-gate.selftest.js',
+  'scripts/personal-v101-to-v110-rollback-source-gate-extra.selftest.mjs',
+  'tools/personal-v101-to-v110-rollback-source-gate.mjs',
+]) {
+  assert.equal(classifyFiles([spoofed]).profile, 'UNKNOWN', spoofed);
+  assert.notEqual(classifyFiles([spoofed]).profile, 'CLI_SCRIPT', spoofed);
+}
+
+// Negative (native-security precedence preserved): adding this narrow
+// exact CLI set does not weaken native-security priority elsewhere -- a
+// security/consent-named native file still classifies as
+// NATIVE_WINDOWS_SECURITY, never CLI_SCRIPT.
+assert.equal(
+  classifyFiles(['src/cli/personal-rollback-security-consent.ps1']).profile,
+  'NATIVE_WINDOWS_SECURITY',
+);
+
+// Mixed full-scope classification: the three reviewed DDB proof scripts
+// alongside an unrelated frontend file resolve to MIXED_RUNTIME, and
+// alongside an unrelated backend file likewise resolve to MIXED_RUNTIME,
+// each requiring both the CLI and the other runtime's targeted check.
+let ddb649Mixed = evaluate({
+  changedFiles: [...ddb649Files, 'src/main.ts'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_SELFTEST', 'TARGETED_FRONTEND_TEST'],
+});
+assert.equal(ddb649Mixed.profile, 'MIXED_RUNTIME');
+assert.equal(ddb649Mixed.decision, 'PROCEED');
+
+ddb649Mixed = evaluate({
+  changedFiles: [...ddb649Files, 'src-tauri/src/lib.rs'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_SELFTEST', 'TARGETED_BACKEND_TEST'],
+});
+assert.equal(ddb649Mixed.profile, 'MIXED_RUNTIME');
+assert.equal(ddb649Mixed.decision, 'PROCEED');
+
+// Mixed full-scope with an unknown file present: the UNKNOWN file still
+// forces CHANGE_SCOPE_UNKNOWN/STOP even beside the three reviewed scripts,
+// confirming the exact path set does not broaden tolerance for sibling
+// unreviewed scripts/* files in the same change.
+ddb649Mixed = evaluate({
+  changedFiles: [...ddb649Files, 'scripts/unrelated-personal-task.mjs'],
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_SELFTEST'],
+});
+assert.equal(ddb649Mixed.decision, 'STOP');
+assert.equal(ddb649Mixed.code, 'CHANGE_SCOPE_UNKNOWN');
+
+// Excessive-checks precedence: planning FULL_REPOSITORY_SUITE for the
+// ordinary CLI_SCRIPT profile without an escalation reason is unjustified.
+let ddb649Excessive = evaluate({
+  changedFiles: ddb649Files,
+  plannedChecks: ['DIFF_HYGIENE', 'TARGETED_SELFTEST', 'FULL_REPOSITORY_SUITE'],
+});
+assert.equal(ddb649Excessive.code, 'EXCESSIVE_CHECKS_UNJUSTIFIED');
+
+// --- Foundation Issue #404 / DWO Issue #162: reviewed DWO frontend asset
+// and test exact-path set (bounded 16 positive / 9 negative) -------------
+//
+// Six exact DWO frontend assets and ten exact DWO frontend tests are a
+// closed, exact-path set, not a broad assets/*.png, manifest*.webmanifest,
+// or tests/*.test.js allowance. Positive: each of the sixteen exact paths
+// resolves to FRONTEND_ONLY.
+
+const dwo162PositivePaths = [
+  'assets/approved-teeth-lower-20261021.png',
+  'assets/approved-teeth-upper-20261021.png',
+  'assets/pwa-icon-180.png',
+  'assets/pwa-icon-192.png',
+  'assets/pwa-icon-512.png',
+  'manifest.webmanifest',
+  'tests/all-expansion-responsive.test.js',
+  'tests/approved-layout-contract.test.js',
+  'tests/approved-reference-source.test.js',
+  'tests/date-insurance-compact-spacing.test.js',
+  'tests/expanded-fields-data-integrity.test.js',
+  'tests/ipad-adaptive-clinic-lab.test.js',
+  'tests/ipad-home-screen-webapp.test.js',
+  'tests/ipad-safari-native-date-overflow.test.js',
+  'tests/preview-sample-data.test.js',
+  'tests/shade-selector-compact-layout.test.js',
+];
+assert.equal(dwo162PositivePaths.length, 16);
+for (const file of dwo162PositivePaths) {
+  assert.equal(classifyFiles([file]).profile, 'FRONTEND_ONLY', file);
+}
+
+// Negative (adversarial): a different suffix, nested directory, extra
+// extension, unreviewed numeral, dev/config manifest variant, or unreviewed
+// test name must NOT be swept into this exact set and must remain UNKNOWN.
+const dwo162NegativePaths = [
+  'assets/other-icon-180.png',
+  'assets/pwa-icon-1024.png',
+  'assets/pwa-icon-180.png.bak',
+  'assets/nested/pwa-icon-180.png',
+  'manifest-dev.webmanifest',
+  'config.webmanifest',
+  'tests/unknown-scope.test.js',
+  'tests/native-auth.test.js',
+  'tests/ipad-home-screen-webapp.e2e.js',
+];
+assert.equal(dwo162NegativePaths.length, 9);
+for (const file of dwo162NegativePaths) {
+  assert.equal(classifyFiles([file]).profile, 'UNKNOWN', file);
+  assert.notEqual(classifyFiles([file]).profile, 'FRONTEND_ONLY', file);
+}
+
 console.log('verification-scope-gate selftest: PASS');

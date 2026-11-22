@@ -3,6 +3,10 @@
 
 ## Tier 0 — CORE.md から生成
 
+## 【最重要原則】目的の固定と完遂
+
+作業開始前に [CORE.md の原則本文](CORE.md#最重要原則目的の固定と完遂)を読み、目的・完成条件・安全な継続・終了判定に適用する。既存の安全・承認・安全保留条件を弱めない。
+
 ## 位置づけ
 
 これは`ai-dev-foundation`のTier 0（最上位安全原則）です。他のすべての文書（`AGENTS.md`・`OPERATIONS.md`・`roles/`・`learnings/`・各アプリケーションrepositoryの`AGENTS.local.md`）は、この原則を弱めてはならない。要約・整理・統合によってこの文書自体の意味を弱めることも禁止する（`learnings/L-0003.md`参照）。
