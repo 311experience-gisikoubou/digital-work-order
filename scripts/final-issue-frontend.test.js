@@ -56,11 +56,21 @@ function makeHarness(options = {}) {
       return { rolledBack: options.mediaCount === undefined ? 1 : options.mediaCount };
     }
   };
+  let deferredPrepareResolve = null;
+  let deferredPrepareReject = null;
+  let prepareFailOnceRemaining = options.preparePackageFailOnce ? 1 : 0;
   if (!options.noPreparePackage) {
     mediaManager.prepareTransferPackage = async order => {
       events.push('prepare-package:' + (order && order.workOrderRef));
-      if (options.preparePackageFail) {
+      if (options.preparePackageFail || prepareFailOnceRemaining > 0) {
+        prepareFailOnceRemaining = Math.max(0, prepareFailOnceRemaining - 1);
         throw Object.assign(new Error('package failed'), { code: 'MEDIA_STORAGE_RESTORE_FAILED' });
+      }
+      if (options.deferPrepare) {
+        return new Promise((resolve, reject) => {
+          deferredPrepareResolve = resolve;
+          deferredPrepareReject = reject;
+        });
       }
       return { workOrderRef: order && order.workOrderRef, kind: 'transfer-package' };
     };
@@ -129,8 +139,18 @@ function makeHarness(options = {}) {
     workOrderRef,
     mediaManager,
     run: () => boundHandler(),
-    get dwoFinalIssue() { return context.DwoFinalIssue; }
+    get dwoFinalIssue() { return context.DwoFinalIssue; },
+    resolvePrepare(value) {
+      if (deferredPrepareResolve) deferredPrepareResolve(value);
+    },
+    rejectPrepare(error) {
+      if (deferredPrepareReject) deferredPrepareReject(error);
+    }
   };
+}
+
+function microtask() {
+  return new Promise(resolve => setImmediate(resolve));
 }
 
 test('Stage 5 success freezes PDF before committing order/media and clears draft only at the end', async () => {
@@ -272,6 +292,100 @@ test('prepareIssuedTransferPackage fails closed when the media helper is unconfi
     error => error && error.code === 'TRANSFER_PACKAGE_DUPLICATE_ORDER'
   );
   assert.ok(!duplicated.events.some(e => e.startsWith('prepare-package:')));
+});
+
+test('issued transfer status is UNVERIFIED for invalid, never-issued, removed, and duplicated refs', async () => {
+  const h = makeHarness();
+  await h.run();
+
+  assert.equal(h.dwoFinalIssue.getIssuedTransferStatus('not-a-valid-ref'), 'UNVERIFIED');
+  assert.equal(h.dwoFinalIssue.getIssuedTransferStatus(null), 'UNVERIFIED');
+  assert.equal(
+    h.dwoFinalIssue.getIssuedTransferStatus('dwo:00000000-0000-4000-8000-000000000000'),
+    'UNVERIFIED'
+  );
+
+  const rolledBack = makeHarness({ mediaFail: true });
+  await rolledBack.run();
+  assert.equal(rolledBack.dwoFinalIssue.getIssuedTransferStatus(rolledBack.workOrderRef), 'UNVERIFIED');
+
+  h.state.orders.length = 0;
+  assert.equal(h.dwoFinalIssue.getIssuedTransferStatus(h.workOrderRef), 'UNVERIFIED');
+
+  const duplicated = makeHarness();
+  await duplicated.run();
+  duplicated.state.orders.push(Object.assign({}, duplicated.state.orders[0]));
+  assert.equal(duplicated.dwoFinalIssue.getIssuedTransferStatus(duplicated.workOrderRef), 'UNVERIFIED');
+});
+
+test('issued transfer status reports ISSUED_NOT_SENT immediately after a committed issuance', async () => {
+  const h = makeHarness();
+  await h.run();
+  assert.equal(h.dwoFinalIssue.getIssuedTransferStatus(h.workOrderRef), 'ISSUED_NOT_SENT');
+});
+
+test('issued transfer status moves to PREPARING_LOCAL_PACKAGE during an explicit local prepare, then PACKAGE_PREPARED_NOT_SENT on success', async () => {
+  const h = makeHarness({ deferPrepare: true });
+  await h.run();
+
+  const pending = h.dwoFinalIssue.prepareIssuedTransferPackage(h.workOrderRef);
+  await microtask();
+  assert.equal(h.dwoFinalIssue.getIssuedTransferStatus(h.workOrderRef), 'PREPARING_LOCAL_PACKAGE');
+
+  h.resolvePrepare({ workOrderRef: h.workOrderRef, kind: 'transfer-package' });
+  const result = await pending;
+  assert.deepEqual(result, { workOrderRef: h.workOrderRef, kind: 'transfer-package' });
+  assert.equal(h.dwoFinalIssue.getIssuedTransferStatus(h.workOrderRef), 'PACKAGE_PREPARED_NOT_SENT');
+});
+
+test('issued transfer status reports PREPARATION_FAILED_NOT_SENT after a failed local prepare, and allows a new explicit retry', async () => {
+  const h = makeHarness({ preparePackageFailOnce: true });
+  await h.run();
+
+  await assert.rejects(
+    () => h.dwoFinalIssue.prepareIssuedTransferPackage(h.workOrderRef),
+    error => error && error.code === 'MEDIA_STORAGE_RESTORE_FAILED'
+  );
+  assert.equal(h.dwoFinalIssue.getIssuedTransferStatus(h.workOrderRef), 'PREPARATION_FAILED_NOT_SENT');
+
+  // 直前の失敗後は、明示的な新しいリトライを拒否してはならない。
+  const retry = await h.dwoFinalIssue.prepareIssuedTransferPackage(h.workOrderRef);
+  assert.deepEqual(retry, { workOrderRef: h.workOrderRef, kind: 'transfer-package' });
+  assert.equal(h.dwoFinalIssue.getIssuedTransferStatus(h.workOrderRef), 'PACKAGE_PREPARED_NOT_SENT');
+});
+
+test('issued transfer status rejects overlapping prepare calls for the same ref with TRANSFER_PREPARE_IN_PROGRESS without a second delegate call', async () => {
+  const h = makeHarness({ deferPrepare: true });
+  await h.run();
+
+  const first = h.dwoFinalIssue.prepareIssuedTransferPackage(h.workOrderRef);
+  await microtask();
+  assert.equal(h.dwoFinalIssue.getIssuedTransferStatus(h.workOrderRef), 'PREPARING_LOCAL_PACKAGE');
+
+  await assert.rejects(
+    () => h.dwoFinalIssue.prepareIssuedTransferPackage(h.workOrderRef),
+    error => error && error.code === 'TRANSFER_PREPARE_IN_PROGRESS'
+  );
+
+  const calls = h.events.filter(e => e.startsWith('prepare-package:'));
+  assert.equal(calls.length, 1);
+
+  h.resolvePrepare({ workOrderRef: h.workOrderRef, kind: 'transfer-package' });
+  await first;
+});
+
+test('issued transfer status never surfaces sent/received/ACK-style values and the original media helper error propagates unchanged', async () => {
+  const h = makeHarness({ preparePackageFail: true });
+  await h.run();
+
+  const banned = ['sent', 'ready on remote', 'received', 'ACK'];
+  await assert.rejects(
+    () => h.dwoFinalIssue.prepareIssuedTransferPackage(h.workOrderRef),
+    error => error && error.code === 'MEDIA_STORAGE_RESTORE_FAILED' && error.message === 'package failed'
+  );
+  const status = h.dwoFinalIssue.getIssuedTransferStatus(h.workOrderRef);
+  assert.ok(!banned.includes(status));
+  assert.equal(status, 'PREPARATION_FAILED_NOT_SENT');
 });
 
 test('PDF Stage 5 exposes cancellable paper choice and frozen-order blob generation', () => {

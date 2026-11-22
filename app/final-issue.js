@@ -24,6 +24,12 @@
   const WORK_ORDER_REF_PATTERN =
     /^dwo:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+  // このタブ限定・非永続のローカル転送状態（送信・ネットワークは一切行わない）。
+  // 値は 'ISSUED_NOT_SENT' | 'PREPARING_LOCAL_PACKAGE' |
+  // 'PACKAGE_PREPARED_NOT_SENT' | 'PREPARATION_FAILED_NOT_SENT' のみ。
+  // 'sent'・'ready on remote'・'received'・'ACK' は存在せず、エントリも削除しない。
+  const transferStatusByRef = new Map();
+
   function transferPackageError(code) {
     return Object.assign(new Error(code), { code });
   }
@@ -139,6 +145,7 @@
 
       issuanceCommitted = true;
       issuedWorkOrderRefs.add(data.workOrderRef);
+      transferStatusByRef.set(data.workOrderRef, 'ISSUED_NOT_SENT');
       if (typeof renderOrders === 'function') renderOrders();
       showToast('✅ 指示書を発行しました');
       resetForm();
@@ -221,10 +228,52 @@
       throw transferPackageError('TRANSFER_PACKAGE_MEDIA_UNAVAILABLE');
     }
 
-    return mediaManager.prepareTransferPackage(matches[0]);
+    // 同一refに対する準備が既に進行中の場合は、二重の委譲を防ぐため拒否する。
+    // 直前の準備が失敗（PREPARATION_FAILED_NOT_SENT）していた場合は
+    // 新たな明示的リトライとして許可する。
+    if (transferStatusByRef.get(workOrderRef) === 'PREPARING_LOCAL_PACKAGE') {
+      throw transferPackageError('TRANSFER_PREPARE_IN_PROGRESS');
+    }
+
+    transferStatusByRef.set(workOrderRef, 'PREPARING_LOCAL_PACKAGE');
+    try {
+      const result = await mediaManager.prepareTransferPackage(matches[0]);
+      transferStatusByRef.set(workOrderRef, 'PACKAGE_PREPARED_NOT_SENT');
+      return result;
+    } catch (error) {
+      transferStatusByRef.set(workOrderRef, 'PREPARATION_FAILED_NOT_SENT');
+      throw error;
+    }
+  }
+
+  // ============================================================
+  //  このタブ内限定の状態参照（非永続・送信なし）。
+  //  state.ordersから該当refが一意に特定できない場合（未発行・削除済み・
+  //  重複）は常に 'UNVERIFIED' を返し、過去の状態値を漏らさない。
+  // ============================================================
+  function getIssuedTransferStatus(workOrderRef) {
+    if (typeof workOrderRef !== 'string' || !WORK_ORDER_REF_PATTERN.test(workOrderRef)) {
+      return 'UNVERIFIED';
+    }
+    if (!issuedWorkOrderRefs.has(workOrderRef)) {
+      return 'UNVERIFIED';
+    }
+
+    const matches = Array.isArray(state.orders)
+      ? state.orders.filter(order => order && order.workOrderRef === workOrderRef)
+      : [];
+    if (matches.length !== 1) {
+      return 'UNVERIFIED';
+    }
+
+    return transferStatusByRef.get(workOrderRef) || 'ISSUED_NOT_SENT';
   }
 
   // 初期のdisabled解除はcalendar.jsに任せる。
   // 模型発送日から納期・急ぎ料金の判定が完了する前には発行できない。
-  global.DwoFinalIssue = { issueCurrentOrder, prepareIssuedTransferPackage };
+  global.DwoFinalIssue = {
+    issueCurrentOrder,
+    prepareIssuedTransferPackage,
+    getIssuedTransferStatus
+  };
 })(globalThis);
