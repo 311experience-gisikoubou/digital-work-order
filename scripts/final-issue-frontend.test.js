@@ -56,6 +56,15 @@ function makeHarness(options = {}) {
       return { rolledBack: options.mediaCount === undefined ? 1 : options.mediaCount };
     }
   };
+  if (!options.noPreparePackage) {
+    mediaManager.prepareTransferPackage = async order => {
+      events.push('prepare-package:' + (order && order.workOrderRef));
+      if (options.preparePackageFail) {
+        throw Object.assign(new Error('package failed'), { code: 'MEDIA_STORAGE_RESTORE_FAILED' });
+      }
+      return { workOrderRef: order && order.workOrderRef, kind: 'transfer-package' };
+    };
+  }
   const context = {
     console,
     Error,
@@ -117,7 +126,10 @@ function makeHarness(options = {}) {
     events,
     state,
     button,
-    run: () => boundHandler()
+    workOrderRef,
+    mediaManager,
+    run: () => boundHandler(),
+    get dwoFinalIssue() { return context.DwoFinalIssue; }
   };
 }
 
@@ -200,6 +212,66 @@ test('post-commit PDF opening failure never rolls back an already issued order',
   assert.ok(h.events.includes('draft-remove'));
   assert.ok(h.events.includes('reset'));
   assert.ok(h.events.some(e => e.includes('指示書は発行済み')));
+});
+
+test('prepareIssuedTransferPackage delegates once to the existing media helper for a completed issuance', async () => {
+  const h = makeHarness();
+  await h.run();
+  assert.equal(h.state.orders.length, 1);
+  assert.equal(h.state.orders[0].workOrderRef, h.workOrderRef);
+
+  const result = await h.dwoFinalIssue.prepareIssuedTransferPackage(h.workOrderRef);
+  assert.deepEqual(result, { workOrderRef: h.workOrderRef, kind: 'transfer-package' });
+
+  const calls = h.events.filter(e => e.startsWith('prepare-package:'));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0], 'prepare-package:' + h.workOrderRef);
+});
+
+test('prepareIssuedTransferPackage fails closed for an unverified or never-issued ref without calling the media helper', async () => {
+  const rolledBack = makeHarness({ mediaFail: true });
+  await rolledBack.run();
+  assert.equal(rolledBack.state.orders.length, 0);
+  await assert.rejects(
+    () => rolledBack.dwoFinalIssue.prepareIssuedTransferPackage(rolledBack.workOrderRef),
+    error => error && error.code === 'TRANSFER_PACKAGE_NOT_ISSUED'
+  );
+  assert.ok(!rolledBack.events.some(e => e.startsWith('prepare-package:')));
+
+  const succeeded = makeHarness();
+  await succeeded.run();
+
+  await assert.rejects(
+    () => succeeded.dwoFinalIssue.prepareIssuedTransferPackage('dwo:00000000-0000-4000-8000-000000000000'),
+    error => error && error.code === 'TRANSFER_PACKAGE_NOT_ISSUED'
+  );
+  await assert.rejects(
+    () => succeeded.dwoFinalIssue.prepareIssuedTransferPackage('not-a-valid-ref'),
+    error => error && error.code === 'TRANSFER_PACKAGE_INVALID_REF'
+  );
+  await assert.rejects(
+    () => succeeded.dwoFinalIssue.prepareIssuedTransferPackage(null),
+    error => error && error.code === 'TRANSFER_PACKAGE_INVALID_REF'
+  );
+  assert.ok(!succeeded.events.some(e => e.startsWith('prepare-package:')));
+});
+
+test('prepareIssuedTransferPackage fails closed when the media helper is unconfigured or the ref resolves to more than one order', async () => {
+  const unconfigured = makeHarness({ noPreparePackage: true });
+  await unconfigured.run();
+  await assert.rejects(
+    () => unconfigured.dwoFinalIssue.prepareIssuedTransferPackage(unconfigured.workOrderRef),
+    error => error && error.code === 'TRANSFER_PACKAGE_MEDIA_UNAVAILABLE'
+  );
+
+  const duplicated = makeHarness();
+  await duplicated.run();
+  duplicated.state.orders.push(Object.assign({}, duplicated.state.orders[0]));
+  await assert.rejects(
+    () => duplicated.dwoFinalIssue.prepareIssuedTransferPackage(duplicated.workOrderRef),
+    error => error && error.code === 'TRANSFER_PACKAGE_DUPLICATE_ORDER'
+  );
+  assert.ok(!duplicated.events.some(e => e.startsWith('prepare-package:')));
 });
 
 test('PDF Stage 5 exposes cancellable paper choice and frozen-order blob generation', () => {

@@ -16,6 +16,18 @@
 
   let issueOrderInProgress = false;
 
+  // ローカル転送パッケージ用: このタブで実際に発行完了まで到達した
+  // workOrderRef だけを記録する（セッション内のみ、永続化しない）。
+  // 再読込でstate.ordersへ復元された過去の受注はここに含まれないため、
+  // 後述の prepareIssuedTransferPackage は意図的にfail closedする。
+  const issuedWorkOrderRefs = new Set();
+  const WORK_ORDER_REF_PATTERN =
+    /^dwo:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+  function transferPackageError(code) {
+    return Object.assign(new Error(code), { code });
+  }
+
   function rollbackTentativeOrder(order) {
     const index = state.orders.findIndex(item =>
       item === order || item.workOrderRef === order.workOrderRef
@@ -126,6 +138,7 @@
       }
 
       issuanceCommitted = true;
+      issuedWorkOrderRefs.add(data.workOrderRef);
       if (typeof renderOrders === 'function') renderOrders();
       showToast('✅ 指示書を発行しました');
       resetForm();
@@ -176,7 +189,42 @@
 
   submitButton.addEventListener('click', issueCurrentOrder);
 
+  // ============================================================
+  //  ローカル手渡し専用パッケージ生成（送信・通信は一切行わない）
+  //  既存 ReferenceMediaManager.prepareTransferPackage に委譲するだけで、
+  //  新フォーマットや代替パッケージ構築・メディアの複製は行わない。
+  //  state.orders から該当 workOrderRef を1件だけ特定し、
+  //  このタブで発行完了（issuanceCommitted）まで到達した参照以外はfail closedする。
+  // ============================================================
+  async function prepareIssuedTransferPackage(workOrderRef) {
+    if (typeof workOrderRef !== 'string' || !WORK_ORDER_REF_PATTERN.test(workOrderRef)) {
+      throw transferPackageError('TRANSFER_PACKAGE_INVALID_REF');
+    }
+
+    if (!issuedWorkOrderRefs.has(workOrderRef)) {
+      throw transferPackageError('TRANSFER_PACKAGE_NOT_ISSUED');
+    }
+
+    const matches = Array.isArray(state.orders)
+      ? state.orders.filter(order => order && order.workOrderRef === workOrderRef)
+      : [];
+
+    if (matches.length === 0) {
+      throw transferPackageError('TRANSFER_PACKAGE_ORDER_NOT_FOUND');
+    }
+    if (matches.length > 1) {
+      throw transferPackageError('TRANSFER_PACKAGE_DUPLICATE_ORDER');
+    }
+
+    const mediaManager = global.ReferenceMediaManager;
+    if (!mediaManager || typeof mediaManager.prepareTransferPackage !== 'function') {
+      throw transferPackageError('TRANSFER_PACKAGE_MEDIA_UNAVAILABLE');
+    }
+
+    return mediaManager.prepareTransferPackage(matches[0]);
+  }
+
   // 初期のdisabled解除はcalendar.jsに任せる。
   // 模型発送日から納期・急ぎ料金の判定が完了する前には発行できない。
-  global.DwoFinalIssue = { issueCurrentOrder };
+  global.DwoFinalIssue = { issueCurrentOrder, prepareIssuedTransferPackage };
 })(globalThis);
