@@ -172,6 +172,12 @@ export function buildReadiness({
   const adapters = [codexAdapter, claudeAdapter, geminiAdapter, antigravityAdapter];
   const qualification = qualifyAdapters({ schemaVersion: 1, adapters });
   const codexBlockers = [];
+  const ordinaryIncludedUsageState = codex?.capacity?.ordinaryUsageAllowed === true ? 'ALLOWED'
+    : codex?.capacity?.ordinaryUsageAllowed === false ? 'BLOCKED' : 'UNKNOWN';
+  const spendControlState = codex?.capacity?.spendControlReached === true ? 'REACHED'
+    : codex?.capacity?.spendControlReached === false ? 'NOT_REACHED' : 'UNKNOWN';
+  pushReason(codexBlockers, ordinaryIncludedUsageState !== 'ALLOWED', 'ORDINARY_INCLUDED_USAGE_NOT_CONFIRMED');
+  pushReason(codexBlockers, spendControlState !== 'NOT_REACHED', 'SPEND_CONTROL_NOT_CLEARED');
   pushReason(codexBlockers, !codexAuthOk, 'AUTH_NOT_CHATGPT_ONLY');
   pushReason(codexBlockers, openAiApiKeyPresent === true, 'API_KEY_ENV_PRESENT');
   pushReason(codexBlockers, openAiApiKeyPresent !== true && openAiApiKeyPresent !== false, 'API_KEY_ENV_STATE_UNAVAILABLE');
@@ -199,6 +205,8 @@ export function buildReadiness({
         authState: codexAuthOk ? 'VERIFIED' : 'UNKNOWN',
         capacityState: codexAdapter.capacity.status,
         creditBalanceState: safeCreditBalanceState(credits),
+        ordinaryIncludedUsageState,
+        spendControlState,
         isolationFlagsSupported: codexSupportOk,
         deniedReadRestrictions: codexDoctor?.deniedReadRestrictions === true ? 'ENFORCED'
           : codexDoctor?.deniedReadRestrictions === false ? 'NOT_ENFORCED' : 'UNKNOWN',

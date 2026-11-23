@@ -128,6 +128,29 @@ function built(overrides = {}) {
   });
 }
 
+for (const [ordinary, spend, expectedOrdinary, expectedSpend] of [
+  [true, false, 'ALLOWED', 'NOT_REACHED'],
+  [false, false, 'BLOCKED', 'NOT_REACHED'],
+  [null, null, 'UNKNOWN', 'UNKNOWN'],
+  ['true', 'false', 'UNKNOWN', 'UNKNOWN'],
+  [true, true, 'ALLOWED', 'REACHED'],
+  [undefined, undefined, 'UNKNOWN', 'UNKNOWN'],
+]) {
+  const result = built({
+    codex: { cliStatus: 'AVAILABLE', capacity: {
+      ...capacity(), ordinaryUsageAllowed: ordinary, spendControlReached: spend,
+    } },
+    codexDoctor: doctor({ deniedReadRestrictions: true }),
+  });
+  const observed = result.readiness.codex;
+  assert(observed.ordinaryIncludedUsageState === expectedOrdinary, 'ordinary usage observation');
+  assert(observed.spendControlState === expectedSpend, 'spend control observation');
+  assert(observed.blockers.includes('ORDINARY_INCLUDED_USAGE_NOT_CONFIRMED') === (expectedOrdinary !== 'ALLOWED'), 'ordinary usage blocker');
+  assert(observed.blockers.includes('SPEND_CONTROL_NOT_CLEARED') === (expectedSpend !== 'NOT_REACHED'), 'spend control blocker');
+  assert(observed.blockers.includes('CREDIT_AUTOTOPUP_STATE_UNAVAILABLE'), 'auto-topup unknown must remain blocked');
+  assert(observed.blockers.includes('RUNNER_NOT_IMPLEMENTED'), 'runner must remain blocked');
+  assert(!result.qualification.qualifiedRoutes.some(route => route.provider === 'openai'), 'diagnostic evidence never promotes Codex');
+}
 for (const fragment of ['--ignore-user-config','--ignore-rules','--strict-config','--ephemeral','--sandbox <SANDBOX_MODE>','read-only','--cd <DIR>']) {
   const broken = codexCliSupport(codexHelp.replace(fragment, 'REMOVED'));
   const result = built({ codexSupport: broken });

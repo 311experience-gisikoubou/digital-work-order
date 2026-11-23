@@ -31,6 +31,24 @@ if (codex.status !== 'AVAILABLE') throw new Error(JSON.stringify(codex));
 if (codex.primary.remainingPercent !== 93 || codex.secondary.remainingPercent !== 50) {
   throw new Error('remaining percent calculation failed');
 }
+for (const [ordinary, spend, expectedOrdinary, expectedSpend] of [
+  [true, false, true, false], [false, false, false, false],
+  [null, null, null, null], ['true', 'false', null, null],
+  [true, true, true, true], [undefined, undefined, null, null],
+]) {
+  const observed = sanitizeCodexRateLimits({
+    result: {
+      ordinaryUsageAllowed: ordinary,
+      accountId: 'SECRET_ACCOUNT_ID',
+      rateLimits: { primary: { usedPercent: 20 }, spendControlReached: spend },
+    },
+  });
+  if (observed.ordinaryUsageAllowed !== expectedOrdinary ||
+      observed.spendControlReached !== expectedSpend ||
+      JSON.stringify(observed).includes('SECRET_ACCOUNT_ID')) {
+    throw new Error('included usage / spend control must be strict boolean-or-null, with no account leak');
+  }
+}
 const claudeRaw = {
   loggedIn: true,
   authMethod: 'claude.ai',

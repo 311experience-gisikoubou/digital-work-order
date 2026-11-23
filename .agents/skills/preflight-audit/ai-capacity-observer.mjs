@@ -164,6 +164,8 @@ export function sanitizeCodexRateLimits(payload) {
   return {
     status: 'AVAILABLE',
     source: 'codex_app_server_account_rateLimits_read',
+    ordinaryUsageAllowed: typeof payload?.result?.ordinaryUsageAllowed === 'boolean' ? payload.result.ordinaryUsageAllowed : null,
+    spendControlReached: typeof rateLimits.spendControlReached === 'boolean' ? rateLimits.spendControlReached : null,
     primary,
     secondary,
     credits: safeCreditsSnapshot(rateLimits.credits),

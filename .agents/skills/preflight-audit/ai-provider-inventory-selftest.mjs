@@ -1,6 +1,8 @@
 #!/usr/bin/env node
+import fs from 'node:fs';
+import os from 'node:os';
 import process from 'node:process';
-import { resolve } from 'node:path';
+import path, { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const inventoryArg = process.argv[2];
@@ -9,7 +11,7 @@ if (!inventoryArg || !routerArg) throw new Error('inventory and router paths req
 
 const inventoryUrl = pathToFileURL(resolve(inventoryArg)).href;
 const routerUrl = pathToFileURL(resolve(routerArg)).href;
-const { buildInventory, conservativeCodexCapacity } = await import(inventoryUrl);
+const { buildInventory, conservativeCodexCapacity, resolveProviderCommand, observeGenericCli } = await import(inventoryUrl);
 const { validateRoute, routeTask } = await import(routerUrl);
 
 function assert(condition, message) {
@@ -60,6 +62,13 @@ function built(overrides = {}) {
     generatedAt: '2026-09-08T00:00:00.000Z',
     ...overrides,
   });
+}
+
+// Run only the new safety property when reusing already-passed legacy tests.
+if (process.argv[4] === '--antigravity-no-probe-only') {
+  const checks = runAntigravityNoProbeRegression();
+  console.log('antigravity no-probe regression: PASS (' + checks.length + ' checks; legacy tests not run)');
+  process.exit(0);
 }
 
 {
@@ -147,5 +156,120 @@ function built(overrides = {}) {
   assert(inventory.observations.claude.apiKeyEnvPresent === true, 'Anthropic API key presence may be exposed only as boolean');
   assert(inventory.routes.every((route) => route.incrementalCost === 'UNKNOWN'), 'API-key presence cannot promote cost evidence');
 }
+
+// Narrow, offline, Issue #251 scope: antigravity CLI *discovery* only.
+// These tests never call a model and never touch real user account config;
+// they redirect LOCALAPPDATA/APPDATA to disposable temp fixture directories
+// and restore the original env vars afterward (finally-guarded).
+if (process.platform === 'win32') {
+  const savedLocalAppData = process.env.LOCALAPPDATA;
+  const savedAppData = process.env.APPDATA;
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agy251-selftest-'));
+  try {
+    {
+      // Windows alias selection: the fixed agy.exe candidate is preferred for kind === 'antigravity'.
+      const localAppData = path.join(fixtureRoot, 'alias-selected', 'Local');
+      const appData = path.join(fixtureRoot, 'alias-selected', 'Roaming');
+      const agyExe = path.join(localAppData, 'agy', 'bin', 'agy.exe');
+      fs.mkdirSync(path.dirname(agyExe), { recursive: true });
+      fs.writeFileSync(agyExe, '');
+      process.env.LOCALAPPDATA = localAppData;
+      process.env.APPDATA = appData;
+      const desc = resolveProviderCommand('antigravity');
+      assert(desc != null, 'antigravity resolver must select the fixed agy.exe candidate when present');
+      assert(desc.file === agyExe, 'antigravity resolver must prefer the known Windows user-local agy.exe path');
+      assert(Array.isArray(desc.prefix) && desc.prefix.length === 0, 'agy.exe is a native executable and needs no shell prefix');
+      const geminiDesc = resolveProviderCommand('gemini');
+      assert(geminiDesc == null || geminiDesc.file !== agyExe, 'the existing gemini resolver must stay distinct and never alias to agy.exe');
+    }
+
+    {
+      // Candidate absence fallback: no agy.exe present, prior antigravity.cmd path is still used.
+      const localAppData = path.join(fixtureRoot, 'fallback', 'Local');
+      const appData = path.join(fixtureRoot, 'fallback', 'Roaming');
+      const legacyCmd = path.join(appData, 'npm', 'antigravity.cmd');
+      fs.mkdirSync(path.dirname(legacyCmd), { recursive: true });
+      fs.writeFileSync(legacyCmd, '@echo off\n');
+      process.env.LOCALAPPDATA = localAppData;
+      process.env.APPDATA = appData;
+      const desc = resolveProviderCommand('antigravity');
+      assert(desc != null, 'antigravity resolver must fall back to the prior npm path when agy.exe is absent');
+      assert(desc.prefix.includes(legacyCmd), 'fallback descriptor must still target the prior antigravity.cmd candidate');
+    }
+
+    {
+      // Invalid/shadow selection: a directory shadowing the expected agy.exe filename
+      // must never be selected as an executable (fail closed on the shadowed candidate
+      // itself). Unrelated real-PATH fallbacks on the test host are out of scope here.
+      const localAppData = path.join(fixtureRoot, 'shadow', 'Local');
+      const appData = path.join(fixtureRoot, 'shadow', 'Roaming');
+      const shadowAgyExe = path.join(localAppData, 'agy', 'bin', 'agy.exe');
+      fs.mkdirSync(shadowAgyExe, { recursive: true });
+      process.env.LOCALAPPDATA = localAppData;
+      process.env.APPDATA = appData;
+      const desc = resolveProviderCommand('antigravity');
+      assert(!desc || desc.file !== shadowAgyExe, 'a directory shadowing agy.exe must never be selected as the runnable executable');
+    }
+  } finally {
+    if (savedLocalAppData === undefined) delete process.env.LOCALAPPDATA; else process.env.LOCALAPPDATA = savedLocalAppData;
+    if (savedAppData === undefined) delete process.env.APPDATA; else process.env.APPDATA = savedAppData;
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+}
+
+{
+  // Discovering/running the CLI is not the same as qualifying the automatic route.
+  // Even with a present, "working" agy.exe, antigravity-prompt must stay UNQUALIFIED.
+  const inventory = built({
+    antigravity: {
+      cliStatus: 'AVAILABLE',
+      version: 'agy 1.1.11',
+      reason: null,
+    },
+  });
+  const route = inventory.routes.find((item) => item.id === 'antigravity-prompt');
+  assert(route.availability === 'UNAVAILABLE', 'antigravity-prompt must remain unqualified for automatic dispatch');
+  assert(inventory.observations.antigravity.cliStatus === 'AVAILABLE', 'CLI discovery evidence (agy.exe found/working) may still be recorded');
+  assert(inventory.observations.antigravity.routeReason === 'prompt_adapter_not_verified', 'discovery alone must not promote the route; adapter/auth/cost/tool boundaries remain unverified');
+}
+
+function runAntigravityNoProbeRegression() {
+  const checks = [];
+  const check = (id, condition) => { assert(condition, id); checks.push(id); };
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-no-probe-'));
+  const marker = path.join(fixtureRoot, 'synthetic-marker.txt');
+  const sentinel = path.join(fixtureRoot, 'synthetic-version.mjs');
+  try {
+    // Trusted local Node fixture only, never an installed provider or user profile.
+    fs.writeFileSync(sentinel, "import fs from 'node:fs'; fs.writeFileSync(process.argv[2], 'synthetic'); console.log('1.2.3');\n");
+    const descriptor = { file: process.execPath, prefix: [sentinel, marker] };
+    const blocked = observeGenericCli('antigravity', 3000, descriptor);
+    check('found-not-authorized', blocked.cliStatus === 'UNAVAILABLE' && blocked.version === null);
+    check('explicit-no-probe-reason', blocked.reason === 'version_probe_not_authorized');
+    check('descriptor-not-executed', !fs.existsSync(marker));
+    // Explicit null avoids default PATH discovery; this is not a no-process claim.
+    const absent = observeGenericCli('antigravity', 3000, null);
+    check('missing-remains-distinct', absent.cliStatus === 'UNAVAILABLE' && absent.reason === 'cli_not_found');
+    const inventory = built({ antigravity: blocked });
+    check('blocked-reason-retained', inventory.observations.antigravity.routeReason === 'version_probe_not_authorized'
+      && inventory.observations.antigravity.cliStatus === 'UNAVAILABLE'
+      && inventory.observations.antigravity.version === null);
+    const route = inventory.routes.find(item => item.id === 'antigravity-prompt');
+    check('qualification-not-promoted', route.availability === 'UNAVAILABLE'
+      && route.safetyStatus === 'UNKNOWN' && route.incrementalCost === 'UNKNOWN'
+      && route.capacity.status === 'UNAVAILABLE');
+    // Positive control proves the sentinel is runnable and other-kind behavior is
+    // unchanged. This starts exactly one synthetic Node child, not Gemini/agy.
+    const control = observeGenericCli('gemini', 3000, descriptor);
+    check('other-provider-path-preserved', control.cliStatus === 'AVAILABLE'
+      && control.version === '1.2.3' && fs.readFileSync(marker, 'utf8') === 'synthetic');
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+  check('synthetic-fixture-cleaned', !fs.existsSync(fixtureRoot));
+  return checks;
+}
+
+runAntigravityNoProbeRegression();
 
 console.log('ai-provider-inventory selftest: PASS');
