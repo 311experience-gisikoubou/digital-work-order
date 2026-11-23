@@ -162,8 +162,15 @@
   //  検証結果は、ローカルでの prepareTransferPackage 委譲を許可するためだけに
   //  使う。送信・受信・ACKの状態を一切生成・representしない。
   // ============================================================
-  const ISSUED_MARKER_STORAGE_KEY = 'dwo_issued_markers_v1';
-  const ISSUED_MARKER_SCHEMA_VERSION = 'dwo-issued-markers-v1';
+  // v2: ダイジェストは snapshotOrderExcludingStatus(order)（statusを除いた
+  // 決定的スナップショット）に対して計算する。v1はJSON.stringify(order)
+  // （statusを含む）に対して計算していたため、発行後に正当に
+  // pending -> accepted へ切り替わっただけで復元が拒否される不具合が
+  // あった。ストレージキー・スキーマ版ともに新しくし、v1のデータは
+  // 一切読まない・移行（アップグレード）もしない（意図的にfail closedの
+  // ままにする。v1マーカーの検証結果を発行済みの根拠として使わない）。
+  const ISSUED_MARKER_STORAGE_KEY = 'dwo_issued_markers_v2';
+  const ISSUED_MARKER_SCHEMA_VERSION = 'dwo-issued-markers-v2';
   const DIGEST_HEX_PATTERN = /^[0-9a-f]{64}$/;
 
   function getIssuedMarkerStorage() {
@@ -235,11 +242,26 @@
     }));
   }
 
+  // マーカーのダイジェストは常にこの1つの経路からだけ計算する
+  // （記録時・復元検証時の両方で必ず同じ関数を使う）。status（pending/
+  // accepted）は snapshotOrderExcludingStatus が除外済みの決定的スナップ
+  // ショットに対してSHA-256を取るだけで、JSON.stringify(order)のように
+  // 運用フィールドの切替で不一致になることはない。スナップショットが
+  // 取得できない場合（循環参照等）は例外を投げ、呼び出し側でfail closed
+  // として扱わせる。
+  async function computeMarkerDigest(order) {
+    const snapshot = snapshotOrderExcludingStatus(order);
+    if (typeof snapshot !== 'string') {
+      throw transferPackageError('ISSUED_MARKER_SNAPSHOT_UNAVAILABLE');
+    }
+    return sha256Hex(snapshot);
+  }
+
   // issuanceCommitted（添付確定＋下書き削除の成功）より後にだけ呼ぶこと。
   // ここで投げた例外は呼び出し側（issueCurrentOrder）が「発行は維持したまま
   // 警告のみ表示する」ために捕捉する。発行自体のロールバックは行わない。
   async function recordIssuedMarker(order) {
-    const digest = await sha256Hex(JSON.stringify(order));
+    const digest = await computeMarkerDigest(order);
     const existing = readIssuedMarkers() || [];
     const next = existing.filter(entry => entry.workOrderRef !== order.workOrderRef);
     next.push({ workOrderRef: order.workOrderRef, digest });
@@ -293,7 +315,9 @@
 
     let digest;
     try {
-      digest = await sha256Hex(JSON.stringify(order));
+      // 記録時（recordIssuedMarker）と同じ computeMarkerDigest を必ず使う
+      // （statusを除いた決定的スナップショットのSHA-256）。
+      digest = await computeMarkerDigest(order);
     } catch (_) {
       restoredMarkerRefs.delete(workOrderRef);
       return false;
@@ -542,11 +566,13 @@
   //  state.orders から該当 workOrderRef を1件だけ特定し、
   //  このタブで発行完了（issuanceCommitted）まで到達した参照以外はfail closedする。
   // ============================================================
-  async function prepareIssuedTransferPackage(workOrderRef) {
-    if (typeof workOrderRef !== 'string' || !WORK_ORDER_REF_PATTERN.test(workOrderRef)) {
-      throw transferPackageError('TRANSFER_PACKAGE_INVALID_REF');
-    }
-
+  // 「このrefは本当に発行済みで、state.orders上の内容も発行時点から
+  // 改変されていないか」をゼロから再検証し、唯一マッチする受注を返す。
+  // prepareIssuedTransferPackage（平文のローカル転送パッケージ準備）と
+  // prepareIssuedEncryptedTransferEnvelope（暗号化後の再検証）の両方が、
+  // 必ずこの同一ルーチンだけを使う。過去にtrueを返したことは一切根拠に
+  // しない（改ざん・削除・受注編集・マーカー失効後の再利用を防ぐ）。
+  async function verifyIssuedRefAuthorization(workOrderRef) {
     // 直近の自動検証を待つ（「マーカーを再確認する」= 署名や外部確認では
     // なく、このタブのsessionStorageに対する再読込・再計算のみ）。
     try {
@@ -555,10 +581,7 @@
 
     // このドキュメントで実際に発行完了まで到達したrefだけは、マーカーを
     // 経由せずメモリ上の事実のみで許可する。それ以外（マーカーで復元され
-    // たref・未確認のref）は、ローカル転送パッケージを準備する直前に必ず
-    // ゼロから再検証する。過去にこの関数やverifyMarkerForRefが真を返した
-    // ことは一切根拠として使わない（改ざん・削除・受注編集後の再利用を
-    // 防ぐ）。
+    // たref・未確認のref）は、ここで必ずゼロから再検証する。
     let authorized = issuedWorkOrderRefs.has(workOrderRef);
     if (!authorized) {
       try {
@@ -570,8 +593,6 @@
 
     if (!authorized) {
       // 復元済みとして表示していたキャッシュがあれば直ちに取り消す。
-      // ここでメディア委譲（mediaManager.prepareTransferPackage）は
-      // 一切呼ばない。
       restoredMarkerRefs.delete(workOrderRef);
       throw transferPackageError('TRANSFER_PACKAGE_NOT_ISSUED');
     }
@@ -597,6 +618,16 @@
       throw transferPackageError('TRANSFER_PACKAGE_NOT_ISSUED');
     }
 
+    return matches[0];
+  }
+
+  async function prepareIssuedTransferPackage(workOrderRef) {
+    if (typeof workOrderRef !== 'string' || !WORK_ORDER_REF_PATTERN.test(workOrderRef)) {
+      throw transferPackageError('TRANSFER_PACKAGE_INVALID_REF');
+    }
+
+    const matchedOrder = await verifyIssuedRefAuthorization(workOrderRef);
+
     const mediaManager = global.ReferenceMediaManager;
     if (!mediaManager || typeof mediaManager.prepareTransferPackage !== 'function') {
       throw transferPackageError('TRANSFER_PACKAGE_MEDIA_UNAVAILABLE');
@@ -611,12 +642,113 @@
 
     transferStatusByRef.set(workOrderRef, 'PREPARING_LOCAL_PACKAGE');
     try {
-      const result = await mediaManager.prepareTransferPackage(matches[0]);
+      const result = await mediaManager.prepareTransferPackage(matchedOrder);
       transferStatusByRef.set(workOrderRef, 'PACKAGE_PREPARED_NOT_SENT');
       return result;
     } catch (error) {
       transferStatusByRef.set(workOrderRef, 'PREPARATION_FAILED_NOT_SENT');
       throw error;
+    }
+  }
+
+  // ============================================================
+  //  ローカル暗号化エンベロープ準備（送信・通信・鍵保存は一切行わない）
+  //
+  //  既存 prepareIssuedTransferPackage（発行実績の検証＋ローカル転送
+  //  パッケージ構築）と、既存 MediaTransferCrypto.encryptPackage（ECDH/
+  //  HKDF/AES-GCM封筒＋ECDSA署名）だけに委譲する。新しい暗号プリミティブ・
+  //  独自パケット整形・鍵生成・鍵保存は一切行わない。呼び出し側が既存の
+  //  ペアリング済み送信者鍵（senderIdentity）・受信者公開情報
+  //  （recipientPublicInfo）をメモリ上で渡してくることを前提とし、ここでは
+  //  鍵の生成・取得・トークン保存は一切行わない。実際の送信・外部認可・
+  //  端末ペアリングの検証は後続のゲートに委ねる（このAPIは「ローカルで
+  //  暗号化封筒を準備した」という事実しか作らない）。
+  // ============================================================
+
+  // 同一refに対する明示的な暗号化呼び出しが重複した場合に拒否するための、
+  // このタブ限定・非永続のガード（in-memory）。
+  const encryptingWorkOrderRefs = new Set();
+
+  function requireEncryptionDependencies() {
+    const cryptoApi = global.crypto;
+    if (!cryptoApi || !cryptoApi.subtle ||
+        typeof cryptoApi.subtle.digest !== 'function' ||
+        typeof cryptoApi.subtle.importKey !== 'function' ||
+        typeof cryptoApi.getRandomValues !== 'function') {
+      throw transferPackageError('TRANSFER_ENVELOPE_CRYPTO_UNAVAILABLE');
+    }
+    const cryptoModule = global.MediaTransferCrypto;
+    if (!cryptoModule || typeof cryptoModule.encryptPackage !== 'function') {
+      throw transferPackageError('TRANSFER_ENVELOPE_CRYPTO_MODULE_UNAVAILABLE');
+    }
+    return cryptoModule;
+  }
+
+  async function prepareIssuedEncryptedTransferEnvelope(workOrderRef, senderIdentity, recipientPublicInfo, options) {
+    // 1) Web Crypto / 既存の暗号モジュールが使えるかを最初に確認する。
+    //    ここで失敗した場合、パッケージ構築（prepareIssuedTransferPackage）
+    //    は一切呼ばない。
+    const cryptoModule = requireEncryptionDependencies();
+
+    // 2) 引数の存在だけを検証する。鍵の形式・一致検証そのものは既存の
+    //    MediaTransferCrypto.encryptPackage に委ねる（重複実装しない）。
+    if (!senderIdentity || typeof senderIdentity !== 'object') {
+      throw transferPackageError('TRANSFER_ENVELOPE_INVALID_SENDER_IDENTITY');
+    }
+    if (!recipientPublicInfo || typeof recipientPublicInfo !== 'object') {
+      throw transferPackageError('TRANSFER_ENVELOPE_INVALID_RECIPIENT_INFO');
+    }
+
+    if (typeof workOrderRef !== 'string' || !WORK_ORDER_REF_PATTERN.test(workOrderRef)) {
+      throw transferPackageError('TRANSFER_PACKAGE_INVALID_REF');
+    }
+
+    // 3) 同一refに対する重複した明示的呼び出しをfail closedで拒否する。
+    if (encryptingWorkOrderRefs.has(workOrderRef)) {
+      throw transferPackageError('TRANSFER_ENVELOPE_PREPARE_IN_PROGRESS');
+    }
+    encryptingWorkOrderRefs.add(workOrderRef);
+
+    try {
+      // 4) 既存の検証済みローカル転送パッケージ構築に委譲する（発行実績・
+      //    マーカー・重複・post-issue改変検知・メディア有無・既存の
+      //    同時実行制御は、すべてこの既存関数がそのまま担う）。
+      const pkg = await prepareIssuedTransferPackage(workOrderRef);
+
+      if (!pkg || !pkg.manifest || pkg.manifest.workOrderRef !== workOrderRef) {
+        throw transferPackageError('TRANSFER_ENVELOPE_PACKAGE_REF_MISMATCH');
+      }
+
+      // 5) 実際の暗号化は既存のMediaTransferCrypto.encryptPackageだけに
+      //    委譲する（ネットワーク呼び出しは一切行わない）。
+      const envelope = await cryptoModule.encryptPackage(
+        pkg,
+        senderIdentity,
+        recipientPublicInfo,
+        options && options.cryptoOptions
+      );
+
+      // 6) 暗号化のawait完了後、返す直前にもう一度ゼロから同じ発行実績・
+      //    改変検知（同一ドキュメント発行）／マーカーSHA＋厳格スキーマ
+      //    （復元ref）を再検証する。暗号化の間（await中）に state.orders
+      //    が改変された場合でも、暗号文を呼び出し元へ返さない。
+      try {
+        await verifyIssuedRefAuthorization(workOrderRef);
+      } catch (_) {
+        throw transferPackageError('TRANSFER_PACKAGE_NOT_ISSUED');
+      }
+
+      if (!envelope || !envelope.descriptor || envelope.descriptor.workOrderRef !== workOrderRef) {
+        throw transferPackageError('TRANSFER_ENVELOPE_PACKAGE_REF_MISMATCH');
+      }
+
+      // 7) 既存の暗号化封筒そのものだけを返す。送信・受信・ACKの状態は
+      //    一切representしない（statusはprepareIssuedTransferPackageが
+      //    管理するPREPARING_LOCAL_PACKAGE/PACKAGE_PREPARED_NOT_SENT/
+      //    PREPARATION_FAILED_NOT_SENTのいずれかのまま）。
+      return envelope;
+    } finally {
+      encryptingWorkOrderRefs.delete(workOrderRef);
     }
   }
 
@@ -655,6 +787,7 @@
   global.DwoFinalIssue = {
     issueCurrentOrder,
     prepareIssuedTransferPackage,
+    prepareIssuedEncryptedTransferEnvelope,
     getIssuedTransferStatus,
     refreshIssuedTransferState
   };

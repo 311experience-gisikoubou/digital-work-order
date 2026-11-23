@@ -11,11 +11,21 @@ const issueSource = fs.readFileSync(path.join(root, 'app', 'final-issue.js'), 'u
 const pdfSource = fs.readFileSync(path.join(root, 'pdf.js'), 'utf8');
 const htmlSource = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 
+// Draft PR #180 ローカル暗号化エンベロープ受け渡しの合成テストの一部
+// （5番、round-trip）だけが使う、既存の暗号モジュールそのもの。新しい
+// 暗号プリミティブ・独自パケット整形は一切追加しない（既存関数をそのまま
+// requireするだけ）。
+const RealMediaTransferPackage = require(path.join(root, 'media-transfer-package.js'));
+const RealMediaTransferCrypto = require(path.join(root, 'media-transfer-crypto.js'));
+
 // app/final-issue.js の発行済みマーカーが実際に使う、唯一の sessionStorage
-// キーとスキーマ版。マーカーの改ざん・破損・重複等をホワイトボックスで注入
-// するテストのためだけに、実装側の定数値をここでも保持する。
-const ISSUED_MARKER_STORAGE_KEY = 'dwo_issued_markers_v1';
-const ISSUED_MARKER_SCHEMA_VERSION = 'dwo-issued-markers-v1';
+// キーとスキーマ版（v2: ダイジェストはstatusを除いたスナップショットに
+// 対して計算する。v1はstatus込みで計算していたため、発行後の正当な
+// pending -> accepted 切替だけで復元が拒否される不具合があった）。
+// マーカーの改ざん・破損・重複・古いv1形式の残存等をホワイトボックスで
+// 注入するテストのためだけに、実装側の定数値をここでも保持する。
+const ISSUED_MARKER_STORAGE_KEY = 'dwo_issued_markers_v2';
+const ISSUED_MARKER_SCHEMA_VERSION = 'dwo-issued-markers-v2';
 
 function visualSnapshot(circular) {
   const snapshot = {
@@ -93,11 +103,80 @@ function microtask() {
   return new Promise(resolve => setImmediate(resolve));
 }
 
-// 実装側の recordIssuedMarker と同じアルゴリズム（SHA-256 / hex）で、
-// テスト側からもマーカーのダイジェストを独立に計算するためのヘルパー。
-// 新しい・弱いハッシュ実装は追加しない。node:crypto の webcrypto のみを使う。
+// prepareIssuedEncryptedTransferEnvelope の合成テスト専用: 既存の
+// ReferenceMediaManager.prepareTransferPackage のfakeが返す、架空・最小限の
+// パッケージ形状。実データは含まない。MediaTransferCrypto.encryptPackage
+// 自体は（実モジュールを使わない限り）fakeへ差し替えるため、ここでの
+// manifest/workOrder/attachmentsは「pkg.manifest.workOrderRefが一致する
+// か」をfinal-issue.js側が確認できる最小限の形で十分とする。
+function fakeTransferPackageFor(workOrderRef) {
+  return {
+    manifest: {
+      workOrderRef,
+      workOrder: { sha256: 'a'.repeat(64) },
+      attachments: []
+    },
+    workOrder: { blob: { arrayBuffer: async () => new ArrayBuffer(0) } },
+    attachments: {}
+  };
+}
+
+// 暗号化の完了タイミングを手動で制御できる、最小限のfake
+// MediaTransferCrypto。実際のECDH/HKDF/AES-GCM/ECDSAは一切実装しない
+// （既存のmedia-transfer-crypto.jsだけがそれを行う）。
+function makeDeferredCrypto(events) {
+  let resolveFn = null;
+  let rejectFn = null;
+  const module_ = {
+    async encryptPackage(pkg) {
+      events.push('crypto-encrypt:' + (pkg && pkg.manifest && pkg.manifest.workOrderRef));
+      return new Promise((resolve, reject) => {
+        resolveFn = resolve;
+        rejectFn = reject;
+      });
+    }
+  };
+  return {
+    module: module_,
+    resolve(value) { resolveFn(value); },
+    reject(error) { rejectFn(error); }
+  };
+}
+
+// 実装側の computeMarkerDigest（snapshotOrderExcludingStatus + SHA-256）と
+// 同じアルゴリズムで、テスト側からもマーカーのダイジェストを独立に計算
+// するためのヘルパー。新しい・弱いハッシュ実装は追加しない。node:crypto の
+// webcrypto のみを使う。statusフィールドは除外し、入れ子オブジェクトの
+// キーは再帰的にソートする（配列順序は維持する）点まで実装と一致させる。
+function stableStringifyForTest(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return '[' + value.map(item => {
+      const encoded = stableStringifyForTest(item);
+      return encoded === undefined ? 'null' : encoded;
+    }).join(',') + ']';
+  }
+  const keys = Object.keys(value).sort();
+  const parts = [];
+  keys.forEach(key => {
+    const encoded = stableStringifyForTest(value[key]);
+    if (encoded === undefined) return;
+    parts.push(JSON.stringify(key) + ':' + encoded);
+  });
+  return '{' + parts.join(',') + '}';
+}
+
+function snapshotExcludingStatusForTest(order) {
+  const clone = {};
+  Object.keys(order).forEach(key => {
+    if (key === 'status') return;
+    clone[key] = order[key];
+  });
+  return stableStringifyForTest(clone);
+}
+
 async function digestOrder(order) {
-  const bytes = new NodeTextEncoder().encode(JSON.stringify(order));
+  const bytes = new NodeTextEncoder().encode(snapshotExcludingStatusForTest(order));
   const buffer = await nodeCrypto.webcrypto.subtle.digest('SHA-256', bytes);
   return Buffer.from(buffer).toString('hex');
 }
@@ -183,7 +262,11 @@ function makeHarness(options = {}) {
           deferredPrepareReject = reject;
         });
       }
-      return { workOrderRef: order && order.workOrderRef, kind: 'transfer-package' };
+      // options.preparedPackageResult: 暗号化アダプタ合成テスト専用の最小限の
+      // 差し替え。既定（未指定）では既存テストと完全に同じ形を返す。
+      return typeof options.preparedPackageResult === 'function'
+        ? options.preparedPackageResult(order)
+        : { workOrderRef: order && order.workOrderRef, kind: 'transfer-package' };
     };
   }
   // sessionStorage: 既定では同期的なfake実装（Map裏付け）を新規に用意する。
@@ -222,6 +305,11 @@ function makeHarness(options = {}) {
     crypto: cryptoImpl,
     TextEncoder: TextEncoderCtor,
     isValidSessionOrder: sessionOrderValidator,
+    // MediaTransferCrypto: 既定（未指定）では一切注入しない（「暗号ヘルパー
+    // が存在しない端末」を模す）。暗号化アダプタ合成テストだけが
+    // options.mediaTransferCrypto 経由で明示的に注入する。新しい暗号
+    // プリミティブや独自パケット整形をこのテストファイル側で実装しない。
+    MediaTransferCrypto: options.mediaTransferCrypto,
     addEventListener(type, handler) {
       if (type === 'pageshow') pageshowHandlers.push(handler);
       events.push('bind:' + type);
@@ -1131,6 +1219,366 @@ test('a circular visualSnapshot reference that defeats snapshot capture right af
   );
   const calls = h.events.filter(e => e.startsWith('prepare-package:'));
   assert.equal(calls.length, 0);
+});
+
+// ============================================================
+//  v2マーカー修正: pending -> accepted 切替後の復元、v1残存マーカーの
+//  fail closed（無移行）
+// ============================================================
+
+test('issued transfer session v2 marker digest excludes status: a pending -> accepted toggle before a simulated reload still allows restoration and local prepare', async () => {
+  const shared = createFakeSessionStorage();
+  const first = makeHarness({ sessionStorage: shared });
+  await first.run();
+  assert.equal(first.state.orders[0].status, 'pending');
+
+  // 発行直後、PDFの戻る/再読込（新しいJSコンテキスト）より前に、同タブ内で
+  // orders.js側の運用上正当な pending -> accepted への切替が起きた状況を
+  // 模す。
+  first.state.orders[0].status = 'accepted';
+  const restoredOrder = JSON.parse(JSON.stringify(first.state.orders[0]));
+  assert.equal(restoredOrder.status, 'accepted');
+
+  const second = makeHarness({ sessionStorage: shared, initialOrders: [restoredOrder], workOrderRef: first.workOrderRef });
+  await second.dwoFinalIssue.refreshIssuedTransferState();
+  assert.equal(second.dwoFinalIssue.getIssuedTransferStatus(second.workOrderRef), 'ISSUED_NOT_SENT');
+
+  const result = await second.dwoFinalIssue.prepareIssuedTransferPackage(second.workOrderRef);
+  assert.deepEqual(result, { workOrderRef: second.workOrderRef, kind: 'transfer-package' });
+});
+
+test('issued transfer session: a marker recorded only under the old v1 storage key/schema is never read by the new v2 restore path (no silent migration, fails closed)', async () => {
+  const shared = createFakeSessionStorage();
+  const first = makeHarness({ sessionStorage: shared });
+  await first.run();
+  const restoredOrder = JSON.parse(JSON.stringify(first.state.orders[0]));
+
+  // first.run() はv2キーへ正当なマーカーを書き込む。古いタブ/古いコードが
+  // 残した残存データのみが存在する状態を模すため、v2マーカーを削除してから
+  // v1マーカーだけを書き込む。v2キーが実際に存在しないことを確認する。
+  shared.removeItem(ISSUED_MARKER_STORAGE_KEY);
+  assert.equal(shared._raw.has(ISSUED_MARKER_STORAGE_KEY), false);
+
+  // production は既にv2キー/スキーマだけを使う。ここでは古いv1形式だけを
+  // sessionStorageへ直接書き込む（古いタブ/古いコードが残した残存データを
+  // 模す）。v2キーには何も書かない。
+  const legacyDigest = await digestOrder(restoredOrder);
+  shared.setItem('dwo_issued_markers_v1', JSON.stringify({
+    schemaVersion: 'dwo-issued-markers-v1',
+    entries: [{ workOrderRef: first.workOrderRef, digest: legacyDigest }]
+  }));
+
+  const second = makeHarness({ sessionStorage: shared, initialOrders: [restoredOrder], workOrderRef: first.workOrderRef });
+  await second.dwoFinalIssue.refreshIssuedTransferState();
+  assert.equal(second.dwoFinalIssue.getIssuedTransferStatus(second.workOrderRef), 'UNVERIFIED');
+  await assert.rejects(
+    () => second.dwoFinalIssue.prepareIssuedTransferPackage(second.workOrderRef),
+    error => error && error.code === 'TRANSFER_PACKAGE_NOT_ISSUED'
+  );
+});
+
+test('issued transfer session marker now uses the v2 storage key and schema version, and never writes under the old v1 key', async () => {
+  const shared = createFakeSessionStorage();
+  const h = makeHarness({ sessionStorage: shared });
+  await h.run();
+  assert.equal(shared._raw.has('dwo_issued_markers_v1'), false);
+  const raw = JSON.parse(shared._raw.get('dwo_issued_markers_v2'));
+  assert.equal(raw.schemaVersion, 'dwo-issued-markers-v2');
+  assert.equal(raw.entries[0].workOrderRef, h.workOrderRef);
+});
+
+// ============================================================
+//  Draft PR #180: prepareIssuedEncryptedTransferEnvelope
+//  （ローカル暗号化エンベロープ準備・送信は一切行わない）
+// ============================================================
+
+test('prepareIssuedEncryptedTransferEnvelope invokes the existing crypto engine exactly once with the exact verified package and opaque identities for a real issued same-tab ref, keeps status NOT_SENT, and makes no remote call', async () => {
+  const cryptoEvents = [];
+  const fake = {
+    async encryptPackage(pkg, senderIdentity, recipientPublicInfo, cryptoOptions) {
+      cryptoEvents.push('crypto-encrypt:' + (pkg && pkg.manifest && pkg.manifest.workOrderRef));
+      return {
+        descriptor: { workOrderRef: pkg.manifest.workOrderRef },
+        __sender: senderIdentity,
+        __recipient: recipientPublicInfo,
+        __opts: cryptoOptions
+      };
+    }
+  };
+  const h = makeHarness({
+    mediaTransferCrypto: fake,
+    preparedPackageResult: order => fakeTransferPackageFor(order.workOrderRef)
+  });
+  await h.run();
+  assert.equal(h.state.orders.length, 1);
+
+  const senderIdentity = { opaque: 'sender-only-in-memory' };
+  const recipientPublicInfo = { opaque: 'recipient-only-in-memory' };
+  const cryptoOptions = { note: 'scoped-crypto-options-only' };
+
+  const envelope = await h.dwoFinalIssue.prepareIssuedEncryptedTransferEnvelope(
+    h.workOrderRef, senderIdentity, recipientPublicInfo, { cryptoOptions }
+  );
+
+  assert.equal(envelope.descriptor.workOrderRef, h.workOrderRef);
+  assert.equal(envelope.__sender, senderIdentity);
+  assert.equal(envelope.__recipient, recipientPublicInfo);
+  assert.equal(envelope.__opts, cryptoOptions);
+
+  assert.equal(cryptoEvents.length, 1);
+  assert.equal(cryptoEvents[0], 'crypto-encrypt:' + h.workOrderRef);
+
+  const prepareCalls = h.events.filter(e => e.startsWith('prepare-package:'));
+  assert.equal(prepareCalls.length, 1);
+
+  const banned = ['sent', 'SENT', 'ACK', 'received', 'ready on remote'];
+  const status = h.dwoFinalIssue.getIssuedTransferStatus(h.workOrderRef);
+  assert.ok(!banned.includes(status));
+  assert.equal(status, 'PACKAGE_PREPARED_NOT_SENT');
+});
+
+test('prepareIssuedEncryptedTransferEnvelope refuses before any encryption for a never-issued ref, a malformed ref, a duplicated ref, and a damaged restored marker', async () => {
+  function countEncrypt(events) { return events.filter(e => e.startsWith('crypto-encrypt:')).length; }
+  function makeFake(events) {
+    return { async encryptPackage(pkg) { events.push('crypto-encrypt:' + pkg.manifest.workOrderRef); return {}; } };
+  }
+
+  // 一度も発行完了に到達しなかった（添付確定失敗でロールバックされた）ref。
+  {
+    const events = [];
+    const h = makeHarness({ mediaFail: true, mediaTransferCrypto: makeFake(events) });
+    await h.run();
+    await assert.rejects(
+      () => h.dwoFinalIssue.prepareIssuedEncryptedTransferEnvelope(h.workOrderRef, {}, {}),
+      error => error && error.code === 'TRANSFER_PACKAGE_NOT_ISSUED'
+    );
+    assert.equal(countEncrypt(events), 0);
+  }
+
+  // 形式が不正なref。
+  {
+    const events = [];
+    const h = makeHarness({ mediaTransferCrypto: makeFake(events) });
+    await h.run();
+    await assert.rejects(
+      () => h.dwoFinalIssue.prepareIssuedEncryptedTransferEnvelope('not-a-valid-ref', {}, {}),
+      error => error && error.code === 'TRANSFER_PACKAGE_INVALID_REF'
+    );
+    assert.equal(countEncrypt(events), 0);
+  }
+
+  // 同一refがstate.orders上で重複している。
+  {
+    const events = [];
+    const h = makeHarness({ mediaTransferCrypto: makeFake(events) });
+    await h.run();
+    h.state.orders.push(Object.assign({}, h.state.orders[0]));
+    await assert.rejects(
+      () => h.dwoFinalIssue.prepareIssuedEncryptedTransferEnvelope(h.workOrderRef, {}, {}),
+      error => error && error.code === 'TRANSFER_PACKAGE_DUPLICATE_ORDER'
+    );
+    assert.equal(countEncrypt(events), 0);
+  }
+
+  // 復元用マーカーが破損している（新JSコンテキストでの復元セッション）。
+  {
+    const events = [];
+    const shared = createFakeSessionStorage();
+    const first = makeHarness({ sessionStorage: shared });
+    await first.run();
+    const restoredOrder = JSON.parse(JSON.stringify(first.state.orders[0]));
+    shared.setItem(ISSUED_MARKER_STORAGE_KEY, '{ not valid json');
+
+    const second = makeHarness({
+      sessionStorage: shared,
+      initialOrders: [restoredOrder],
+      workOrderRef: first.workOrderRef,
+      mediaTransferCrypto: makeFake(events)
+    });
+    await second.dwoFinalIssue.refreshIssuedTransferState();
+    await assert.rejects(
+      () => second.dwoFinalIssue.prepareIssuedEncryptedTransferEnvelope(second.workOrderRef, {}, {}),
+      error => error && error.code === 'TRANSFER_PACKAGE_NOT_ISSUED'
+    );
+    assert.equal(countEncrypt(events), 0);
+  }
+});
+
+test('prepareIssuedEncryptedTransferEnvelope refuses before any encryption when the existing crypto helper module is missing or Web Crypto itself is unavailable/broken, without calling the package builder', async () => {
+  // 暗号モジュール（MediaTransferCrypto）そのものが存在しない。
+  {
+    const h = makeHarness();
+    await h.run();
+    await assert.rejects(
+      () => h.dwoFinalIssue.prepareIssuedEncryptedTransferEnvelope(h.workOrderRef, {}, {}),
+      error => error && error.code === 'TRANSFER_ENVELOPE_CRYPTO_MODULE_UNAVAILABLE'
+    );
+    assert.ok(!h.events.some(e => e.startsWith('prepare-package:')));
+  }
+
+  // Web Crypto自体が存在しない。
+  {
+    const h = makeHarness({
+      cryptoDisabled: true,
+      mediaTransferCrypto: { async encryptPackage() { throw new Error('must not be called'); } }
+    });
+    await h.run();
+    await assert.rejects(
+      () => h.dwoFinalIssue.prepareIssuedEncryptedTransferEnvelope(h.workOrderRef, {}, {}),
+      error => error && error.code === 'TRANSFER_ENVELOPE_CRYPTO_UNAVAILABLE'
+    );
+    assert.ok(!h.events.some(e => e.startsWith('prepare-package:')));
+  }
+
+  // Web Cryptoが壊れている（getRandomValuesが無い）。
+  {
+    const brokenCrypto = { subtle: { digest: async () => new ArrayBuffer(32), importKey: async () => ({}) } };
+    const h = makeHarness({
+      crypto: brokenCrypto,
+      mediaTransferCrypto: { async encryptPackage() { throw new Error('must not be called'); } }
+    });
+    await h.run();
+    await assert.rejects(
+      () => h.dwoFinalIssue.prepareIssuedEncryptedTransferEnvelope(h.workOrderRef, {}, {}),
+      error => error && error.code === 'TRANSFER_ENVELOPE_CRYPTO_UNAVAILABLE'
+    );
+    assert.ok(!h.events.some(e => e.startsWith('prepare-package:')));
+  }
+});
+
+test('prepareIssuedEncryptedTransferEnvelope refuses before any encryption when the underlying local package build itself fails, and rejects missing sender/recipient identities without calling the package builder', async () => {
+  const events = [];
+  const fake = { async encryptPackage(pkg) { events.push('crypto-encrypt:' + pkg.manifest.workOrderRef); return {}; } };
+  const h = makeHarness({ preparePackageFail: true, mediaTransferCrypto: fake });
+  await h.run();
+  await assert.rejects(
+    () => h.dwoFinalIssue.prepareIssuedEncryptedTransferEnvelope(h.workOrderRef, {}, {}),
+    error => error && error.code === 'MEDIA_STORAGE_RESTORE_FAILED'
+  );
+  assert.equal(events.filter(e => e.startsWith('crypto-encrypt:')).length, 0);
+
+  const h2 = makeHarness({ mediaTransferCrypto: fake });
+  await h2.run();
+  await assert.rejects(
+    () => h2.dwoFinalIssue.prepareIssuedEncryptedTransferEnvelope(h2.workOrderRef, null, {}),
+    error => error && error.code === 'TRANSFER_ENVELOPE_INVALID_SENDER_IDENTITY'
+  );
+  await assert.rejects(
+    () => h2.dwoFinalIssue.prepareIssuedEncryptedTransferEnvelope(h2.workOrderRef, {}, null),
+    error => error && error.code === 'TRANSFER_ENVELOPE_INVALID_RECIPIENT_INFO'
+  );
+  assert.ok(!h2.events.some(e => e.startsWith('prepare-package:')));
+});
+
+test('prepareIssuedEncryptedTransferEnvelope fails closed with no envelope returned when the order is mutated during the awaited encryption step itself', async () => {
+  const cryptoEvents = [];
+  const deferred = makeDeferredCrypto(cryptoEvents);
+  const h = makeHarness({
+    mediaTransferCrypto: deferred.module,
+    preparedPackageResult: order => fakeTransferPackageFor(order.workOrderRef)
+  });
+  await h.run();
+
+  const pending = h.dwoFinalIssue.prepareIssuedEncryptedTransferEnvelope(h.workOrderRef, {}, {});
+  await microtask();
+  assert.equal(cryptoEvents.length, 1);
+
+  // 暗号化がまだawait中の間に、同一ドキュメント内で臨床フィールドを改変する。
+  h.state.orders[0].patientName = 'TAMPERED DURING ENCRYPTION';
+
+  deferred.resolve({ descriptor: { workOrderRef: h.workOrderRef } });
+
+  await assert.rejects(
+    () => pending,
+    error => error && error.code === 'TRANSFER_PACKAGE_NOT_ISSUED'
+  );
+});
+
+test('prepareIssuedEncryptedTransferEnvelope rejects an overlapping explicit call for the same ref with an in-memory guard, without invoking the crypto engine a second time', async () => {
+  const cryptoEvents = [];
+  const deferred = makeDeferredCrypto(cryptoEvents);
+  const h = makeHarness({
+    mediaTransferCrypto: deferred.module,
+    preparedPackageResult: order => fakeTransferPackageFor(order.workOrderRef)
+  });
+  await h.run();
+
+  const first = h.dwoFinalIssue.prepareIssuedEncryptedTransferEnvelope(h.workOrderRef, {}, {});
+  await microtask();
+
+  await assert.rejects(
+    () => h.dwoFinalIssue.prepareIssuedEncryptedTransferEnvelope(h.workOrderRef, {}, {}),
+    error => error && error.code === 'TRANSFER_ENVELOPE_PREPARE_IN_PROGRESS'
+  );
+  assert.equal(cryptoEvents.length, 1);
+
+  deferred.resolve({ descriptor: { workOrderRef: h.workOrderRef } });
+  const envelope = await first;
+  assert.equal(envelope.descriptor.workOrderRef, h.workOrderRef);
+});
+
+test('prepareIssuedEncryptedTransferEnvelope allows a fresh explicit retry after a crypto engine failure, without resurrecting the failed attempt', async () => {
+  const cryptoEvents = [];
+  let failNext = true;
+  const fake = {
+    async encryptPackage(pkg) {
+      cryptoEvents.push('crypto-encrypt:' + pkg.manifest.workOrderRef);
+      if (failNext) {
+        failNext = false;
+        throw Object.assign(new Error('simulated crypto engine failure'), { code: 'CRYPTO_SIMULATED_FAILURE' });
+      }
+      return { descriptor: { workOrderRef: pkg.manifest.workOrderRef } };
+    }
+  };
+  const h = makeHarness({
+    mediaTransferCrypto: fake,
+    preparedPackageResult: order => fakeTransferPackageFor(order.workOrderRef)
+  });
+  await h.run();
+
+  await assert.rejects(
+    () => h.dwoFinalIssue.prepareIssuedEncryptedTransferEnvelope(h.workOrderRef, {}, {}),
+    error => error && error.code === 'CRYPTO_SIMULATED_FAILURE'
+  );
+
+  const envelope = await h.dwoFinalIssue.prepareIssuedEncryptedTransferEnvelope(h.workOrderRef, {}, {});
+  assert.equal(envelope.descriptor.workOrderRef, h.workOrderRef);
+  assert.equal(cryptoEvents.length, 2);
+});
+
+test('prepareIssuedEncryptedTransferEnvelope produces a real WebCrypto envelope via the existing crypto module that the same existing module can decrypt back (round trip), without re-testing the crypto algorithms themselves', async () => {
+  const REAL_CRYPTO_OPTS = { crypto: nodeCrypto.webcrypto, transferApi: RealMediaTransferPackage };
+
+  const sender = await RealMediaTransferCrypto.generateSenderIdentity(REAL_CRYPTO_OPTS);
+  const recipient = await RealMediaTransferCrypto.generateRecipientIdentity('sample-roundtrip-passphrase-01', REAL_CRYPTO_OPTS);
+  const offer = await RealMediaTransferCrypto.createPairingOffer(recipient, REAL_CRYPTO_OPTS);
+  const response = await RealMediaTransferCrypto.createPairingResponse(offer, sender, REAL_CRYPTO_OPTS);
+  const registry = await RealMediaTransferCrypto.verifyPairingResponse(offer, response, REAL_CRYPTO_OPTS);
+
+  const h = makeHarness({ mediaTransferCrypto: RealMediaTransferCrypto });
+  await h.run();
+
+  // 架空のサンプルworkOrderだけを使い、実際の患者情報は一切含めない。
+  const realWorkOrder = { workOrderRef: h.workOrderRef, issueDate: '2026-10-02', note: 'synthetic-fixture-only' };
+  const realPkg = await RealMediaTransferPackage.buildPackage(h.workOrderRef, realWorkOrder, [], REAL_CRYPTO_OPTS);
+  h.mediaManager.prepareTransferPackage = async order => {
+    h.events.push('prepare-package:' + order.workOrderRef);
+    return realPkg;
+  };
+
+  const envelope = await h.dwoFinalIssue.prepareIssuedEncryptedTransferEnvelope(
+    h.workOrderRef,
+    sender,
+    recipient,
+    { cryptoOptions: REAL_CRYPTO_OPTS }
+  );
+
+  assert.equal(envelope.version, 'dwo-media-envelope-v1');
+  assert.equal(envelope.descriptor.workOrderRef, h.workOrderRef);
+
+  const decrypted = await RealMediaTransferCrypto.decryptEnvelope(envelope, recipient, registry, REAL_CRYPTO_OPTS);
+  assert.equal(decrypted.workOrderRef, h.workOrderRef);
+  assert.equal(decrypted.package.manifest.workOrderRef, h.workOrderRef);
 });
 
 test('PDF Stage 5 exposes cancellable paper choice and frozen-order blob generation', () => {
