@@ -926,6 +926,60 @@
     }
   }
 
+  // Explicit bounded trial only. The ordinary UI never calls this API.
+  // Resume is read-only; a missing record cannot create another job.
+  const preparingOutboxRefs = new Set();
+  async function prepareIssuedDriveOutboxTrial(workOrderRef, senderIdentity, recipientPublicInfo, mode) {
+    const storage = global.ReferenceMediaStorage;
+    if (!storage || typeof storage.createDriveOutboxTrial !== 'function' ||
+        !['create','resume'].includes(mode)) throw transferPackageError('TRANSFER_DRIVE_OUTBOX_UNAVAILABLE');
+    if (preparingOutboxRefs.has(workOrderRef)) throw transferPackageError('TRANSFER_DRIVE_PREPARE_IN_PROGRESS');
+    function publicIdentity() {
+      const s = senderIdentity, r = recipientPublicInfo;
+      const jwk = j => {
+        if (!j || j.kty !== 'EC' || j.crv !== 'P-256' ||
+            !/^[A-Za-z0-9_-]{43}$/.test(j.x || '') || !/^[A-Za-z0-9_-]{43}$/.test(j.y || '')) {
+          throw transferPackageError('TRANSFER_DRIVE_BINDING_INVALID');
+        }
+        return [j.kty,j.crv,j.x,j.y];
+      };
+      if (!s || !r || !/^dev_[A-Za-z0-9_-]{1,156}$/.test(s.clinicDeviceId || '') ||
+          !/^sk_[A-Za-z0-9_-]{1,157}$/.test(s.signingKeyId || '') ||
+          !/^rk_[A-Za-z0-9_-]{1,157}$/.test(r.recipientKeyId || '')) {
+        throw transferPackageError('TRANSFER_DRIVE_BINDING_INVALID');
+      }
+      return [s.clinicDeviceId,s.signingKeyId,jwk(s.publicJwk),r.recipientKeyId,jwk(r.publicJwk)];
+    }
+    preparingOutboxRefs.add(workOrderRef);
+    try {
+      const snapshot = snapshotOrderExcludingStatus(await verifyIssuedRefAuthorization(workOrderRef));
+      if (typeof snapshot !== 'string') throw transferPackageError('TRANSFER_PACKAGE_NOT_ISSUED');
+      const identity = JSON.stringify(publicIdentity());
+      const recipientKeyId = recipientPublicInfo.recipientKeyId;
+      const binding = await sha256Hex(JSON.stringify([workOrderRef,await sha256Hex(snapshot),identity]));
+      async function assertCurrent() {
+        const current = await verifyIssuedRefAuthorization(workOrderRef);
+        if (snapshotOrderExcludingStatus(current) !== snapshot || JSON.stringify(publicIdentity()) !== identity) {
+          throw transferPackageError('TRANSFER_PACKAGE_NOT_ISSUED');
+        }
+      }
+      await assertCurrent();
+      const outbox = storage.createDriveOutboxTrial(global);
+      let body;
+      if (mode === 'resume') {
+        body = await outbox.resume(workOrderRef,binding,recipientKeyId);
+      } else {
+        const candidate = await prepareIssuedDriveRelayCandidate(workOrderRef,senderIdentity,recipientPublicInfo);
+        await assertCurrent();
+        body = await outbox.claim(workOrderRef,binding,recipientKeyId,candidate);
+      }
+      await assertCurrent();
+      return body;
+    } finally {
+      preparingOutboxRefs.delete(workOrderRef);
+    }
+  }
+
   function getIssuedTransferStatus(workOrderRef) {
     if (typeof workOrderRef !== 'string' || !WORK_ORDER_REF_PATTERN.test(workOrderRef)) {
       return 'UNVERIFIED';
@@ -958,6 +1012,7 @@
     prepareIssuedTransferPackage,
     prepareIssuedEncryptedTransferEnvelope,
     prepareIssuedDriveRelayCandidate,
+    prepareIssuedDriveOutboxTrial,
     getIssuedTransferStatus,
     refreshIssuedTransferState
   };

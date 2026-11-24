@@ -745,3 +745,115 @@ test('media.js: store.add failure activates the block, keeps persisted data, and
   assert.doesNotMatch(restore, /removeAttachment|deleteAttachment/);
   assert.match(src, /hiddenAttachmentBlock: materializationFailureCount > 0/);
 });
+
+function makeOutboxTrialDb({ failAdd = false, strictUnavailable = false } = {}) {
+  const records = new Map();
+  let tail = Promise.resolve();
+  const db = { transaction(names, mode, options) {
+    assert.deepEqual(names, ['settings']);
+    const wait = tail;
+    let release;
+    tail = new Promise(resolve => { release = resolve; });
+    const tx = { durability: strictUnavailable ? 'default' : (options?.durability || 'default'),
+      error: null, oncomplete: null, onerror: null, onabort: null };
+    let pending = 0, done = false;
+    const staged = new Map();
+    const abort = error => {
+      if (done) return;
+      done = true; tx.error = error; tx.onabort?.(); release();
+    };
+    const request = op => {
+      const req = { result: undefined, onsuccess: null };
+      pending++;
+      wait.then(() => queueMicrotask(() => {
+        if (done) return;
+        try {
+          req.result = op();
+          req.onsuccess?.();
+          pending--;
+          if (pending === 0) queueMicrotask(() => {
+            if (done || pending) return;
+            for (const [k,v] of staged) records.set(k, structuredClone(v));
+            done = true; tx.oncomplete?.(); release();
+          });
+        } catch (e) { abort(e); }
+      }));
+      return req;
+    };
+    tx.abort = () => abort(new Error('AbortError'));
+    tx.objectStore = name => {
+      assert.equal(name, 'settings');
+      return {
+        get(key) { return request(() => structuredClone(records.get(key))); },
+        add(record) {
+          assert.equal(mode, 'readwrite');
+          return request(() => {
+            if (failAdd) throw Object.assign(new Error('quota'), {name:'QuotaExceededError'});
+            if (records.has(record.key) || staged.has(record.key)) throw Error('ConstraintError');
+            staged.set(record.key,structuredClone(record)); return record.key;
+          });
+        }
+      };
+    };
+    return tx;
+  }};
+  return { records, indexedDB:{open() {
+    const req={result:db}; queueMicrotask(()=>req.onsuccess?.()); return req;
+  }}};
+}
+async function outboxTrialFixture() {
+  const T=require('../media-transfer-package.js'), C=require('../media-transfer-crypto.js'),
+    R=require('../media-relay.js'), B=require('../media-receiver-bootstrap.js');
+  const opts={crypto:webcrypto,transferApi:T};
+  const sender=await C.generateSenderIdentity(opts);
+  const recipient=await C.generateRecipientIdentity('synthetic-outbox-trial-passphrase',opts);
+  const pkg=await T.buildPackage(WORK_ORDER_REF,{workOrderRef:WORK_ORDER_REF,patientName:'SYNTHETIC-OUTBOX'},[],
+    {...opts,issuedB5Pdf:new Blob(['%PDF-1.7\nsynthetic'],{type:'application/pdf'})});
+  const envelope=await C.encryptPackage(pkg,sender,recipient,opts);
+  const body=await R.buildDriveRelayBody(envelope,sender,recipient,{...opts,bootstrapApi:B});
+  return {R,recipient,body,binding:'b'.repeat(64)};
+}
+test('Drive-outbox-trial exact ciphertext survives new adapter, concurrent claims conflict, no plaintext or credentials', async()=>{
+  const f=await outboxTrialFixture(), db=makeOutboxTrialDb();
+  const env={indexedDB:db.indexedDB,crypto:webcrypto,MediaRelayTransport:f.R};
+  const a=S.createDriveOutboxTrial(env), b=S.createDriveOutboxTrial(env);
+  const args=[WORK_ORDER_REF,f.binding,f.recipient.recipientKeyId,f.body];
+  const results=await Promise.allSettled([a.claim(...args),b.claim(...args)]);
+  assert.equal(results.filter(x=>x.status==='fulfilled').length,1);
+  assert.equal(results.find(x=>x.status==='rejected').reason.code,'DRIVE_OUTBOX_EXISTS');
+  assert.equal(db.records.size,1);
+  assert.deepEqual(await S.createDriveOutboxTrial(env).resume(...args.slice(0,3)),f.body);
+  const [key,record]=[...db.records][0];
+  assert.ok(key.startsWith('dwo-drive-outbox-trial-v1:dwo:'));
+  assert.deepEqual(Object.keys(record).sort(),['bindingSha256','key','planSha256','recordSha256','version','wire','wireSha256']);
+  assert.equal(JSON.stringify(record).includes('SYNTHETIC-OUTBOX'),false);
+  assert.equal(Object.hasOwn(JSON.parse(record.wire),'bearer'),false);
+  await assert.rejects(()=>a.resume(WORK_ORDER_REF,'c'.repeat(64),f.recipient.recipientKeyId),{code:'DRIVE_OUTBOX_BINDING_CONFLICT'});
+});
+test('Drive-outbox-trial malformed records and altered ciphertext reject without overwriting',async()=>{
+  const f=await outboxTrialFixture(), db=makeOutboxTrialDb();
+  const out=S.createDriveOutboxTrial({indexedDB:db.indexedDB,crypto:webcrypto,MediaRelayTransport:f.R});
+  const args=[WORK_ORDER_REF,f.binding,f.recipient.recipientKeyId,f.body];
+  await assert.rejects(()=>out.claim(...args.slice(0,3),{...f.body,bearer:'synthetic-secret'}),{code:'RELAY_DRIVE_BODY_INVALID'});
+  const broken=structuredClone(f.body);
+  broken.objects[0].bytes=(broken.objects[0].bytes[0]==='A'?'B':'A')+broken.objects[0].bytes.slice(1);
+  await assert.rejects(()=>out.claim(...args.slice(0,3),broken),{code:'RELAY_DRIVE_BODY_INVALID'});
+  assert.equal(db.records.size,0);
+  await out.claim(...args);
+  const [key,record]=[...db.records][0];
+  db.records.set(key,{...record,wireSha256:'0'.repeat(64)});
+  const before=structuredClone(db.records.get(key));
+  await assert.rejects(()=>out.resume(...args.slice(0,3)),{code:'DRIVE_OUTBOX_CORRUPT'});
+  await assert.rejects(()=>out.claim(...args),{code:'DRIVE_OUTBOX_CORRUPT'});
+  assert.deepEqual(db.records.get(key),before);
+});
+test('Drive-outbox-trial abort, unavailable strict hint and missing resume never create a record',async()=>{
+  const f=await outboxTrialFixture(), args=[WORK_ORDER_REF,f.binding,f.recipient.recipientKeyId,f.body];
+  for(const config of [{failAdd:true},{strictUnavailable:true},{}]){
+    const db=makeOutboxTrialDb(config),out=S.createDriveOutboxTrial({indexedDB:db.indexedDB,crypto:webcrypto,MediaRelayTransport:f.R});
+    await assert.rejects(()=>out.resume(...args.slice(0,3)),{code:'DRIVE_OUTBOX_MISSING'});
+    if(config.failAdd) await assert.rejects(()=>out.claim(...args),{name:'QuotaExceededError'});
+    if(config.strictUnavailable) await assert.rejects(()=>out.claim(...args),{code:'DRIVE_OUTBOX_STRICT_UNAVAILABLE'});
+    assert.equal(db.records.size,0);
+  }
+});

@@ -360,6 +360,82 @@
     };
   }
 
+  // Verify the closed ciphertext-only D2 body before local outbox storage or
+  // reuse. No bearer, credentials, plaintext descriptor or arbitrary fields.
+  async function verifyDriveRelayBody(input, workOrderRef, recipientKeyId, options) {
+    const cryptoApi = resolveCrypto(options);
+    const invalid = () => relayError('RELAY_DRIVE_BODY_INVALID');
+    const bodyKeys = ['jobId','descriptorSha256','ackProofHash','plan','planSha256','objects'];
+    if (!exactKeys(input, bodyKeys) ||
+        !/^dwo:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(workOrderRef || '') ||
+        !/^rk_[A-Za-z0-9_-]{1,157}$/.test(recipientKeyId || '')) throw invalid();
+    let body;
+    try {
+      const text = JSON.stringify(input);
+      if (text.length > 2 * 1024 * 1024) throw invalid();
+      body = JSON.parse(text);
+    } catch (_) { throw invalid(); }
+    const { plan, objects, descriptorSha256, jobId } = body;
+    if (!exactKeys(body, bodyKeys) || !HEX64.test(descriptorSha256 || '') ||
+        jobId !== 'job_' + descriptorSha256 || !HEX64.test(body.ackProofHash || '') ||
+        !HEX64.test(body.planSha256 || '') || !exactKeys(plan, ['version','totalBytes','entries']) ||
+        plan.version !== PLAN_VERSION || !Number.isSafeInteger(plan.totalBytes) ||
+        plan.totalBytes < 1 || plan.totalBytes > 1024 * 1024 ||
+        !Array.isArray(objects) || objects.length < 4 || objects.length > 16 ||
+        !Array.isArray(plan.entries) || plan.entries.length !== objects.length) throw invalid();
+    let total = 0, hasPdf = false;
+    const seenIv = new Set(), nextIndex = new Map();
+    for (let i = 0; i < objects.length; i++) {
+      const o = objects[i], e = plan.entries[i];
+      const common = ['slot','kind','iv','size','ciphertextSha256'];
+      if (!exactKeys(o, ['ordinal','size','ciphertextSha256','bytes']) ||
+          o.ordinal !== i || !Number.isSafeInteger(o.size) || o.size < 1 ||
+          o.size > 1024 * 1024 || !HEX64.test(o.ciphertextSha256 || '') ||
+          typeof o.bytes !== 'string' || o.bytes.length !== Math.ceil(o.size * 4 / 3) ||
+          !BASE64URL.test(o.bytes) || !e || e.size !== o.size ||
+          e.ciphertextSha256 !== o.ciphertextSha256 || typeof e.iv !== 'string' ||
+          !/^[A-Za-z0-9_-]{16}$/.test(e.iv) || seenIv.has(e.iv)) throw invalid();
+      seenIv.add(e.iv);
+      if (i === 0) {
+        if (!exactKeys(e, [...common,'bootstrapVersion','recipientKeyId','ephemeralPublicJwk','hkdfSalt']) ||
+            e.slot !== 'receiver-bootstrap' || e.kind !== 'receiver-bootstrap' ||
+            e.bootstrapVersion !== 'dwo-receiver-bootstrap-v1' || e.recipientKeyId !== recipientKeyId ||
+            !exactKeys(e.ephemeralPublicJwk, ['kty','crv','x','y']) ||
+            e.ephemeralPublicJwk.kty !== 'EC' || e.ephemeralPublicJwk.crv !== 'P-256' ||
+            !/^[A-Za-z0-9_-]{43}$/.test(e.ephemeralPublicJwk.x || '') ||
+            !/^[A-Za-z0-9_-]{43}$/.test(e.ephemeralPublicJwk.y || '') ||
+            !/^[A-Za-z0-9_-]{22}$/.test(e.hkdfSalt || '')) throw invalid();
+      } else if (i < 3) {
+        const kind = i === 1 ? 'manifest' : 'work-order';
+        if (!exactKeys(e, common) || e.kind !== kind || e.slot !== kind) throw invalid();
+      } else {
+        if (!exactKeys(e, [...common,'attachmentId','index']) || e.kind !== 'attachment' ||
+            !/^att-[A-Za-z0-9_-]{1,120}$/.test(e.attachmentId || '') ||
+            e.index !== (nextIndex.get(e.attachmentId) || 0) ||
+            e.slot !== 'attachment:' + e.attachmentId + ':' + e.index) throw invalid();
+        nextIndex.set(e.attachmentId, e.index + 1);
+        if (e.attachmentId === 'att-issued-b5-pdf') hasPdf = true;
+      }
+      let bytes;
+      try {
+        const s = o.bytes.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - o.bytes.length % 4) % 4);
+        bytes = typeof atob === 'function'
+          ? Uint8Array.from(atob(s), ch => ch.charCodeAt(0))
+          : new Uint8Array(Buffer.from(s, 'base64'));
+      } catch (_) { throw invalid(); }
+      if (bytes.length !== o.size || base64urlEncode(bytes) !== o.bytes ||
+          await sha256Hex(bytes, cryptoApi) !== o.ciphertextSha256) throw invalid();
+      total += o.size;
+      if (total > 1024 * 1024) throw invalid();
+    }
+    const encoder = new TextEncoder();
+    const proof = await sha256Hex(encoder.encode('dwo-receiver-ack-v1|' + jobId + '|' +
+      descriptorSha256 + '|' + workOrderRef), cryptoApi);
+    if (!hasPdf || total !== plan.totalBytes || await sha256Json(plan, cryptoApi) !== body.planSha256 ||
+        await sha256Hex(encoder.encode(proof), cryptoApi) !== body.ackProofHash) throw invalid();
+    return body;
+  }
+
   function normalizeEndpoint(value) {
     if (typeof value !== 'string' || !/^https:\/\/[^\s]+$/.test(value)) throw relayError('RELAY_INVALID_ENDPOINT');
     return value.replace(/\/+$/, '');
@@ -470,6 +546,7 @@
     buildRelayAuthorization,
     buildCreateRequest,
     buildDriveRelayBody,
+    verifyDriveRelayBody,
     uploadEnvelope
   };
 

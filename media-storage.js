@@ -484,18 +484,27 @@
     }
 
     // 1 transaction内の処理を実行し、transaction完了で解決する。
-    async function run(storeNames, mode, work) {
+    async function run(storeNames, mode, work, strictDurability = false) {
       const db = await open();
       return new Promise((resolve, reject) => {
         let tx;
         let result;
         try {
-          tx = db.transaction(storeNames, mode);
+          tx = strictDurability
+            ? db.transaction(storeNames, mode, { durability: 'strict' })
+            : db.transaction(storeNames, mode);
         } catch (error) { reject(error); return; }
         tx.oncomplete = () => resolve(result);
         tx.onerror = () => reject(tx.error || new Error('idb-tx-error'));
         tx.onabort = () => reject(tx.error || new Error('idb-tx-abort'));
         try {
+          // This checks the requested hint, not physical disk persistence.
+          if (strictDurability && tx.durability !== 'strict') {
+            // Reject with the precise reason even if the abort callback fires immediately.
+            reject(makeError('DRIVE_OUTBOX_STRICT_UNAVAILABLE'));
+            try { tx.abort(); } catch (_) { /* already ended */ }
+            return;
+          }
           work(tx, value => { result = value; }, error => { try { tx.abort(); } catch (_) { /* 既に終了 */ } reject(error); });
         } catch (error) {
           try { tx.abort(); } catch (_) { /* 既に終了 */ }
@@ -505,6 +514,27 @@
     }
 
     return {
+      readDriveOutbox(key) {
+        return run([STORE_SETTINGS], 'readonly', (tx, set) => {
+          const req = tx.objectStore(STORE_SETTINGS).get(key);
+          req.onsuccess = () => set(req.result);
+        });
+      },
+      claimDriveOutbox(record) {
+        return run([STORE_SETTINGS], 'readwrite', (tx, set, fail) => {
+          const store = tx.objectStore(STORE_SETTINGS), req = store.get(record.key);
+          req.onsuccess = () => {
+            try {
+              if (req.result !== undefined) {
+                set({ created: false, record: req.result });
+                return;
+              }
+              store.add(record);
+              set({ created: true, record });
+            } catch (error) { fail(error); }
+          };
+        }, true);
+      },
       putAttachment(meta) {
         return run([STORE_ATTACHMENTS], 'readwrite', tx => { tx.objectStore(STORE_ATTACHMENTS).put(meta); });
       },
@@ -540,6 +570,70 @@
     };
   }
 
+  // Bounded synthetic-only outbox trial. Reuses the existing settings store;
+  // no new database, migration, bearer, private key, send, ACK or deletion.
+  // A committed transaction is not proof of survival after browser eviction.
+  function createDriveOutboxTrial(env) {
+    const scope = env || global, transport = scope.MediaRelayTransport;
+    if (!scope.indexedDB || !scope.crypto || !scope.crypto.subtle || !transport ||
+        typeof transport.verifyDriveRelayBody !== 'function' || typeof transport.canonicalJson !== 'function') {
+      throw makeError('DRIVE_OUTBOX_UNAVAILABLE');
+    }
+    const store = createIndexedDbMetaStore(scope);
+    const version = 'dwo-drive-outbox-trial-v1', prefix = version + ':';
+    const hex = /^[0-9a-f]{64}$/;
+    const digest = async value => Array.from(new Uint8Array(await scope.crypto.subtle.digest(
+      'SHA-256', new TextEncoder().encode(value))), b => b.toString(16).padStart(2,'0')).join('');
+    function checkBinding(ref, bindingSha256, recipientKeyId) {
+      if (!isValidWorkOrderRef(ref) || typeof bindingSha256 !== 'string' ||
+          !hex.test(bindingSha256) || typeof recipientKeyId !== 'string' ||
+          !/^rk_[A-Za-z0-9_-]{1,157}$/.test(recipientKeyId)) throw makeError('DRIVE_OUTBOX_BINDING_INVALID');
+      return prefix + ref;
+    }
+    const recordDigest = r => digest(JSON.stringify([r.version,r.key,r.bindingSha256,r.wireSha256,r.planSha256]));
+    async function verifyRecord(record, key, ref, bindingSha256, recipientKeyId) {
+      if (!record || typeof record !== 'object' || Array.isArray(record) ||
+          Object.keys(record).sort().join('|') !== 'bindingSha256|key|planSha256|recordSha256|version|wire|wireSha256' ||
+          record.key !== key || record.version !== version ||
+          !hex.test(record.bindingSha256 || '') || !hex.test(record.wireSha256 || '') ||
+          !hex.test(record.planSha256 || '') || !hex.test(record.recordSha256 || '') ||
+          typeof record.wire !== 'string' || record.wire.length > 2 * 1024 * 1024 ||
+          await digest(record.wire) !== record.wireSha256 ||
+          await recordDigest(record) !== record.recordSha256) throw makeError('DRIVE_OUTBOX_CORRUPT');
+      if (record.bindingSha256 !== bindingSha256) throw makeError('DRIVE_OUTBOX_BINDING_CONFLICT');
+      let body;
+      try {
+        body = await transport.verifyDriveRelayBody(JSON.parse(record.wire), ref, recipientKeyId, { crypto: scope.crypto });
+        if (body.planSha256 !== record.planSha256 || transport.canonicalJson(body) !== record.wire) throw Error('mismatch');
+      } catch (_) { throw makeError('DRIVE_OUTBOX_CORRUPT'); }
+      return body;
+    }
+    return {
+      async claim(ref, bindingSha256, recipientKeyId, body) {
+        const key = checkBinding(ref, bindingSha256, recipientKeyId);
+        const verified = await transport.verifyDriveRelayBody(body, ref, recipientKeyId, { crypto: scope.crypto });
+        const wire = transport.canonicalJson(verified);
+        const record = { key, version, bindingSha256, wire, wireSha256: await digest(wire),
+          planSha256: verified.planSha256 };
+        record.recordSha256 = await recordDigest(record);
+        const result = await store.claimDriveOutbox(record);
+        const existing = await verifyRecord(result.record, key, ref, bindingSha256, recipientKeyId);
+        if (!result.created) throw makeError('DRIVE_OUTBOX_EXISTS');
+        // Re-read committed bytes. Never fall back to a newly generated job.
+        const persisted = await store.readDriveOutbox(key);
+        const restored = await verifyRecord(persisted, key, ref, bindingSha256, recipientKeyId);
+        if (transport.canonicalJson(restored) !== transport.canonicalJson(existing)) throw makeError('DRIVE_OUTBOX_CORRUPT');
+        return restored;
+      },
+      async resume(ref, bindingSha256, recipientKeyId) {
+        const key = checkBinding(ref, bindingSha256, recipientKeyId);
+        const record = await store.readDriveOutbox(key);
+        if (record === undefined) throw makeError('DRIVE_OUTBOX_MISSING');
+        return verifyRecord(record, key, ref, bindingSha256, recipientKeyId);
+      }
+    };
+  }
+
   function createBrowserPersistence(env) {
     const scope = env || global;
     if (!scope.indexedDB) return createUnavailablePersistence('indexeddb-unsupported');
@@ -563,7 +657,7 @@
     isValidMetadata, metadataProblem, buildMetadata, rebindMetadata, rebindMetadataToDraft,
     newAttachmentId, newDraftRef, opfsPathFor,
     createMemoryBlobStore, createMemoryMetaStore, createPersistence, createUnavailablePersistence,
-    supportsOpfs, createBrowserPersistence
+    supportsOpfs, createBrowserPersistence, createDriveOutboxTrial
   };
   global.ReferenceMediaStorage = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

@@ -1791,3 +1791,30 @@ test('B5-drive-candidate prepares opaque encrypted Drive body directly from issu
   await assert.rejects(() => h.dwoFinalIssue.prepareIssuedDriveRelayCandidate(h.workOrderRef, sender, recipient),
     { code: 'TRANSFER_PACKAGE_NOT_ISSUED' });
 });
+
+test('Drive-outbox-trial issued create and resume reuse exact ciphertext without regeneration',async()=>{
+  const R=require('../media-relay.js'),B=require('../media-receiver-bootstrap.js');
+  const opts={crypto:nodeCrypto.webcrypto};
+  const sender=await RealMediaTransferCrypto.generateSenderIdentity(opts);
+  const recipient=await RealMediaTransferCrypto.generateRecipientIdentity('synthetic-issued-outbox-passphrase',opts);
+  const h=makeHarness({mediaTransferCrypto:RealMediaTransferCrypto});
+  await h.run();
+  h.context.MediaRelayTransport=R;h.context.MediaReceiverBootstrap=B;
+  let renders=0,claims=0,resumes=0,saved;
+  h.context.createIssuePdfBlob=async()=>{renders++;return new Blob(['%PDF-1.7\nsynthetic'],{type:'application/pdf'});};
+  h.mediaManager.prepareTransferPackage=(order,options)=>RealMediaTransferPackage.buildPackage(order.workOrderRef,order,[],{...opts,...options});
+  h.context.ReferenceMediaStorage={createDriveOutboxTrial:()=>({
+    async claim(ref,binding,rid,body){claims++;saved={ref,binding,rid,body};return body;},
+    async resume(ref,binding,rid){resumes++;if(!saved)throw Object.assign(Error('missing'),{code:'DRIVE_OUTBOX_MISSING'});
+      assert.equal(ref,saved.ref);assert.equal(binding,saved.binding);assert.equal(rid,saved.rid);return saved.body;}
+  })};
+  await assert.rejects(()=>h.dwoFinalIssue.prepareIssuedDriveOutboxTrial(h.workOrderRef,sender,recipient,'resume'),{code:'DRIVE_OUTBOX_MISSING'});
+  assert.equal(renders,0);assert.equal(claims,0);
+  const body=await h.dwoFinalIssue.prepareIssuedDriveOutboxTrial(h.workOrderRef,sender,recipient,'create');
+  const resumed=await h.dwoFinalIssue.prepareIssuedDriveOutboxTrial(h.workOrderRef,sender,recipient,'resume');
+  assert.equal(body.jobId,resumed.jobId);assert.deepEqual(body,resumed);
+  assert.equal(renders,1);assert.equal(claims,1);assert.equal(resumes,2);
+  h.state.orders[0].remarks='synthetic changed';
+  await assert.rejects(()=>h.dwoFinalIssue.prepareIssuedDriveOutboxTrial(h.workOrderRef,sender,recipient,'resume'),{code:'TRANSFER_PACKAGE_NOT_ISSUED'});
+  assert.equal(renders,1);assert.equal(resumes,2);
+});
