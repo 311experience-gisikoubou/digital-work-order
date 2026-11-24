@@ -1990,3 +1990,67 @@ test('Drive-batch-candidate receives two independent encrypted PDF jobs despite 
     assert.equal((await fs.readdir(inbox)).filter(x=>x.startsWith('job_')).length,2);
   } finally {await fs.rm(root,{recursive:true,force:true});}
 });
+
+test('Drive-outbox-retry-wire connects real B5 ciphertext to D2 sender and gateway after a partial upload and lost reply', async () => {
+  const opts = {crypto:webcrypto, transferApi:T};
+  const sender = await C.generateSenderIdentity(opts);
+  const recipient = await C.generateRecipientIdentity('synthetic-outbox-wire-passphrase',opts);
+  const pkg = await T.buildPackage(REF,{workOrderRef:REF,trial:'SYNTHETIC_OUTBOX_WIRE'},[],
+    {...opts,issuedB5Pdf:new Blob(['%PDF-1.7\nsynthetic'],{type:'application/pdf'})});
+  const wire = await R.buildDriveRelayBody(await C.encryptPackage(pkg,sender,recipient,opts),sender,recipient,{...opts,bootstrapApi:B});
+  const e = await fakeGateway();
+  const bearer='A'.repeat(43);
+  e.props.set('D2_RECIPIENT_PUBLIC_JSON',JSON.stringify({recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk}));
+  e.g.d2Pair_({bearerSha256:e.sha(bearer),clinicDeviceId:sender.clinicDeviceId,signingKeyId:sender.signingKeyId,
+    signingPublicJwk:sender.publicJwk,recipientKeyId:recipient.recipientKeyId});
+  const stored=R.canonicalJson(wire);
+  const restored=await R.verifyDriveRelayBody(JSON.parse(stored),REF,recipient.recipientKeyId,opts);
+  const status=b=>e.g.d2Status_({bearer,jobId:b.jobId,ackProofHash:b.ackProofHash,planSha256:b.planSha256});
+  assert.equal(status(restored).status,'not-started');
+  const interrupted={...restored,bearer,objects:restored.objects.map(o=>({...o}))};
+  interrupted.objects[2].bytes=Buffer.from('synthetic-corrupt-part').toString('base64url');
+  assert.throws(()=>e.g.d2Put_(interrupted),/D2_OBJECT_HASH_INVALID/);
+  assert.equal(status(restored).status,'partial');
+  // Connect the existing browser's actual status-first sender to the existing gateway VM.
+  // All keys and jobs are fictional; no browser, external request or deployed endpoint.
+  const db=makeFakeIndexedDB();
+  db.seed(await makeSenderState({clinicDeviceId:sender.clinicDeviceId,signingKeyId:sender.signingKeyId,
+    signingPrivateKey:sender.privateKey,signingPublicJwk:sender.publicJwk,uploadBearer:bearer,
+    recipientKeyId:recipient.recipientKeyId,recipientPublicJwk:recipient.publicJwk,
+    pendingJob:{status:'pending',body:{...restored,bearer}}}));
+  const ctx=buildSenderSandbox({indexedDB:db});
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  vm.runInNewContext(testHookSource(source),ctx.sandbox);
+  const actions=[];
+  async function round(previous,expected,loseReply=false) {
+    const src=await waitForSrcChange(ctx,previous),channel=readChannel(ctx.nodes);
+    let observed;
+    const peer={postMessage(message){observed=message;}};
+    ctx.getOnMessage()({origin:SANDBOX_ORIGIN,source:peer,data:{version:'dwo-d2-bridge-v1',channel,type:'ready'}});
+    assert.equal(observed.action,expected);
+    actions.push(observed.action);
+    if(expected==='putSyntheticJob'){
+      const {bearer:sentBearer,...body}=observed.body;
+      assert.equal(sentBearer,bearer);
+      assert.equal(R.canonicalJson(body),stored);
+    }
+    const value=e.g.d2Bridge(channel,observed.action,observed.body);
+    ctx.getOnMessage()({origin:SANDBOX_ORIGIN,source:peer,data:{version:'dwo-d2-bridge-v1',channel,type:'result',ok:!loseReply,value:loseReply?undefined:value}});
+    return src;
+  }
+  const retry=ctx.sandbox.D2TrialTestHooks.send();
+  const first=await round('','getSyntheticJobStatus');
+  const second=await round(first,'putSyntheticJob',true);
+  await round(second,'getSyntheticJobStatus');
+  await retry;
+  assert.equal(db.peek('sender').pendingJob.status,'accepted');
+  assert.equal(db.peek('sender').pendingJob.body.jobId,wire.jobId);
+  assert.deepEqual(actions,['getSyntheticJobStatus','putSyntheticJob','getSyntheticJobStatus']);
+  assert.equal(status(restored).status,'ready');
+  const job=e.file(e.root,wire.jobId);
+  assert.ok(job);
+  assert.equal([...e.rows.values()].filter(x=>x.name===wire.jobId).length,1);
+  assert.equal([...e.rows.values()].filter(x=>x.parent===job.id&&x.name==='ready.json').length,1);
+  assert.equal(stored.includes(bearer),false);
+  assert.equal(stored.includes('SYNTHETIC_OUTBOX_WIRE'),false);
+});
