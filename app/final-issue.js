@@ -893,6 +893,39 @@
   //  state.ordersから該当refが一意に特定できない場合（未発行・削除済み・
   //  重複）は常に 'UNVERIFIED' を返し、過去の状態値を漏らさない。
   // ============================================================
+  // Local, bounded Drive-format candidate. This does not send or save a
+  // transfer job and must not be mistaken for a production transfer API.
+  const preparingDriveRefs = new Set();
+  async function prepareIssuedDriveRelayCandidate(workOrderRef, senderIdentity, recipientPublicInfo) {
+    const transport = global.MediaRelayTransport;
+    if (!transport || typeof transport.buildDriveRelayBody !== 'function' ||
+        !global.MediaReceiverBootstrap) {
+      throw transferPackageError('TRANSFER_DRIVE_UNAVAILABLE');
+    }
+    if (preparingDriveRefs.has(workOrderRef)) {
+      throw transferPackageError('TRANSFER_DRIVE_PREPARE_IN_PROGRESS');
+    }
+    preparingDriveRefs.add(workOrderRef);
+    try {
+      const authorized = await verifyIssuedRefAuthorization(workOrderRef);
+      const snapshot = snapshotOrderExcludingStatus(authorized);
+      if (typeof snapshot !== 'string') throw transferPackageError('TRANSFER_PACKAGE_NOT_ISSUED');
+      const envelope = await prepareIssuedEncryptedTransferEnvelope(workOrderRef, senderIdentity, recipientPublicInfo, {
+        includeB5Pdf: true
+      });
+      const body = await transport.buildDriveRelayBody(envelope, senderIdentity, recipientPublicInfo, {
+        crypto: global.crypto, bootstrapApi: global.MediaReceiverBootstrap
+      });
+      const current = await verifyIssuedRefAuthorization(workOrderRef);
+      if (snapshotOrderExcludingStatus(current) !== snapshot) {
+        throw transferPackageError('TRANSFER_PACKAGE_NOT_ISSUED');
+      }
+      return body;
+    } finally {
+      preparingDriveRefs.delete(workOrderRef);
+    }
+  }
+
   function getIssuedTransferStatus(workOrderRef) {
     if (typeof workOrderRef !== 'string' || !WORK_ORDER_REF_PATTERN.test(workOrderRef)) {
       return 'UNVERIFIED';
@@ -924,6 +957,7 @@
     issueCurrentOrder,
     prepareIssuedTransferPackage,
     prepareIssuedEncryptedTransferEnvelope,
+    prepareIssuedDriveRelayCandidate,
     getIssuedTransferStatus,
     refreshIssuedTransferState
   };

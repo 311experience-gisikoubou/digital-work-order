@@ -312,6 +312,54 @@
     };
   }
 
+  // Local candidate for the existing bounded Drive D2 wire format.
+  // No credentials, persistence, network request or production enablement.
+  // The trial limits are intentionally not relaxed here.
+  async function buildDriveRelayBody(envelope, senderIdentity, recipientPublicInfo, options) {
+    const cryptoApi = resolveCrypto(options);
+    validateEnvelope(envelope);
+    if (!recipientPublicInfo || recipientPublicInfo.recipientKeyId !== envelope.descriptor.recipientKeyId ||
+        !/^dwo:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(envelope.descriptor.workOrderRef)) {
+      throw relayError('RELAY_DRIVE_BINDING_INVALID');
+    }
+    const maxBytes = 1024 * 1024, maxObjects = 16;
+    const baseParts = enumerateCipherParts(envelope, null);
+    if (baseParts.length + 1 > maxObjects ||
+        baseParts.reduce((n, part) => n + part.blob.size, 0) >= maxBytes) {
+      throw relayError('RELAY_DRIVE_TRIAL_LIMIT');
+    }
+    const built = await buildCreateRequest(envelope, senderIdentity, {
+      crypto: cryptoApi,
+      recipientPublicInfo,
+      bootstrapApi: options && options.bootstrapApi
+    });
+    const { plan, envelopeHeader } = built.request;
+    if (plan.totalBytes > maxBytes || built.parts.length > maxObjects ||
+        built.parts.length !== plan.entries.length || plan.entries[0].kind !== 'receiver-bootstrap') {
+      throw relayError('RELAY_DRIVE_TRIAL_LIMIT');
+    }
+    const objects = [];
+    for (const [ordinal, part] of built.parts.entries()) {
+      const bytes = new Uint8Array(await part.blob.arrayBuffer());
+      const ciphertextSha256 = await sha256Hex(bytes, cryptoApi);
+      const entry = plan.entries[ordinal];
+      if (entry.size !== bytes.byteLength || entry.ciphertextSha256 !== ciphertextSha256) {
+        throw relayError('RELAY_DRIVE_OBJECT_MISMATCH');
+      }
+      objects.push({ ordinal, size: bytes.byteLength, ciphertextSha256, bytes: base64urlEncode(bytes) });
+    }
+    const descriptorSha256 = envelopeHeader.descriptorSha256;
+    const jobId = 'job_' + descriptorSha256;
+    const encoder = new TextEncoder();
+    const proof = await sha256Hex(encoder.encode('dwo-receiver-ack-v1|' + jobId + '|' +
+      descriptorSha256 + '|' + envelope.descriptor.workOrderRef), cryptoApi);
+    return {
+      jobId, descriptorSha256,
+      ackProofHash: await sha256Hex(encoder.encode(proof), cryptoApi),
+      plan, planSha256: await sha256Json(plan, cryptoApi), objects
+    };
+  }
+
   function normalizeEndpoint(value) {
     if (typeof value !== 'string' || !/^https:\/\/[^\s]+$/.test(value)) throw relayError('RELAY_INVALID_ENDPOINT');
     return value.replace(/\/+$/, '');
@@ -421,6 +469,7 @@
     buildTransportPlan,
     buildRelayAuthorization,
     buildCreateRequest,
+    buildDriveRelayBody,
     uploadEnvelope
   };
 

@@ -1760,3 +1760,34 @@ test('B5-transfer-copy encrypted opt-in forwards PDF and preserves opt-out', asy
   assert.equal(encrypted.manifest.attachments.length, 0);
   assert.equal(renders, 1);
 });
+
+test('B5-drive-candidate prepares opaque encrypted Drive body directly from issued B5 copy', async () => {
+  const R = require('../media-relay.js');
+  const B = require('../media-receiver-bootstrap.js');
+  const opts = { crypto: nodeCrypto.webcrypto };
+  const sender = await RealMediaTransferCrypto.generateSenderIdentity(opts);
+  const recipient = await RealMediaTransferCrypto.generateRecipientIdentity('sample-drive-candidate-passphrase', opts);
+  const h = makeHarness({ mediaTransferCrypto: RealMediaTransferCrypto });
+  await h.run();
+  h.context.MediaRelayTransport = R;
+  h.context.MediaReceiverBootstrap = B;
+  h.context.createIssuePdfBlob = async () => new Blob(['%PDF-1.7\nsynthetic'], { type: 'application/pdf' });
+  h.mediaManager.prepareTransferPackage = (order, options) =>
+    RealMediaTransferPackage.buildPackage(order.workOrderRef, order, [], { ...opts, ...options });
+  const body = await h.dwoFinalIssue.prepareIssuedDriveRelayCandidate(h.workOrderRef, sender, recipient);
+  assert.deepEqual(Object.keys(body).sort(), ['ackProofHash','descriptorSha256','jobId','objects','plan','planSha256'].sort());
+  assert.equal(body.jobId, 'job_' + body.descriptorSha256);
+  assert.ok(body.plan.entries.some(e => e.attachmentId === 'att-issued-b5-pdf'));
+  assert.equal(JSON.stringify(body).includes(h.workOrderRef), false);
+  assert.equal(JSON.stringify(body).includes('SAMPLE PATIENT'), false);
+  assert.equal(h.dwoFinalIssue.getIssuedTransferStatus(h.workOrderRef), 'PACKAGE_PREPARED_NOT_SENT');
+  h.context.MediaRelayTransport = {
+    async buildDriveRelayBody(...args) {
+      const result = await R.buildDriveRelayBody(...args);
+      h.state.orders[0].remarks = 'synthetic mutation';
+      return result;
+    }
+  };
+  await assert.rejects(() => h.dwoFinalIssue.prepareIssuedDriveRelayCandidate(h.workOrderRef, sender, recipient),
+    { code: 'TRANSFER_PACKAGE_NOT_ISSUED' });
+});

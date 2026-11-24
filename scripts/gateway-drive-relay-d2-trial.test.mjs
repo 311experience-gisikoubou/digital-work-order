@@ -1834,3 +1834,69 @@ test('D2 retained Windows PowerShell script: real executable regression with a f
     }
   } finally { await fs.rm(base, { recursive: true, force: true }); }
 });
+test('B5-drive-candidate crosses actual D2 mock wire, delayed sync, verified Windows save and interrupted ACK', async () => {
+  const { PDFDocument } = require('../vendor/pdf/pdf-lib-1.17.1.min.js');
+  const opts = { crypto: webcrypto, transferApi: T };
+  const sender = await C.generateSenderIdentity(opts);
+  const recipient = await C.generateRecipientIdentity('synthetic-B5-wire-passphrase', opts);
+  const offer = await C.createPairingOffer(recipient, opts);
+  const pairing = await C.createPairingResponse(offer, sender, opts);
+  const registry = await C.verifyPairingResponse(offer, pairing, opts);
+  const pdf = await PDFDocument.create();
+  pdf.addPage([182 * 72 / 25.4, 257 * 72 / 25.4]);
+  const bytes = Buffer.from(await pdf.save());
+  const pkg = await T.buildPackage(REF, { workOrderRef: REF, patientName: 'SYNTHETIC_B5_WIRE' }, [],
+    { ...opts, issuedB5Pdf: new Blob([bytes], { type: 'application/pdf' }) });
+  const envelope = await C.encryptPackage(pkg, sender, recipient, opts);
+  const wire = await R.buildDriveRelayBody(envelope, sender, recipient, { ...opts, bootstrapApi: B });
+  assert.equal(wire.ackProofHash, h(h('dwo-receiver-ack-v1|' + wire.jobId + '|' + wire.descriptorSha256 + '|' + REF)));
+  assert.equal(JSON.stringify(wire).includes(REF), false);
+  assert.equal(JSON.stringify(wire).includes('SYNTHETIC_B5_WIRE'), false);
+  const e = await fakeGateway();
+  e.props.set('D2_RECIPIENT_PUBLIC_JSON', JSON.stringify({recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk}));
+  e.g.d2Pair_({bearerSha256:e.sha(e.upload),clinicDeviceId:sender.clinicDeviceId,signingKeyId:sender.signingKeyId,
+    signingPublicJwk:sender.publicJwk,recipientKeyId:recipient.recipientKeyId});
+  const request = {...wire,bearer:e.upload};
+  assert.equal(e.g.d2Put_(request).status,'ready');
+  assert.equal(e.g.d2Put_(request).status,'ready');
+  const job=e.file(e.root,wire.jobId), unrelated=e.add(e.root,'keep.txt');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(),'dwo-b5-wire-'));
+  try {
+    const sync=path.join(root,wire.jobId), inbox=path.join(root,'inbox');
+    await fs.mkdir(sync);
+    const entries=[...e.rows.values()].filter(row=>row.parent===job.id && row.kind==='file');
+    const missing=entries.find(row=>row.name==='obj_0001.bin');
+    assert.ok(missing);
+    for (const row of entries) if(row!==missing) await fs.writeFile(path.join(sync,row.name),row.bytes);
+    let calls=0;
+    const call=(action,body)=>{calls++;return e.g.d2Control_({receiverBearer:e.receiver,action,...body});};
+    const receiveOpts={recipientKeyRingOrIdentity:recipient,senderRegistries:{senders:[registry]},inboxRoot:inbox,
+      control:{issueAckCapability:async jobId=>call('issueAckCapability',{jobId}),
+        ack:async value=>{assert.deepEqual(await fs.readFile(path.join(inbox,wire.jobId,'media','att-issued-b5-pdf.bin')),bytes);return call('ack',value);},
+        resumeAck:async value=>call('resumeAck',value)}};
+    await assert.rejects(()=>receiveD2Job(sync,receiveOpts),{code:'D2_SYNC_OBJECT_MISSING'});
+    assert.equal(calls,0);
+    await fs.writeFile(path.join(sync,missing.name),missing.bytes);
+    e.setFailName('obj_0001.bin');
+    await assert.rejects(()=>receiveD2Job(sync,receiveOpts),/D2_DELETE_FAILED/);
+    assert.deepEqual(await fs.readFile(path.join(inbox,wire.jobId,'media','att-issued-b5-pdf.bin')),bytes);
+    assert.ok(e.file(e.root,'control_'+wire.jobId+'.json'));
+    const completed=await receiveD2Job(sync,receiveOpts);
+    assert.equal(completed.status,'already-stored');
+    assert.equal(completed.cloudStatus,'deleted');
+    assert.equal(e.file(e.root,wire.jobId),undefined);
+    assert.ok(e.rows.has(unrelated.id));
+    assert.deepEqual(await fs.readFile(path.join(inbox,wire.jobId,'media','att-issued-b5-pdf.bin')),bytes);
+  } finally { await fs.rm(root,{recursive:true,force:true}); }
+});
+
+test('B5-drive-candidate refuses wrong recipient and oversize instead of dropping data', async () => {
+  const opts = {crypto:webcrypto,transferApi:T};
+  const sender=await C.generateSenderIdentity(opts);
+  const recipient=await C.generateRecipientIdentity('synthetic-drive-limit-passphrase',opts);
+  const large = new Blob(['%PDF-',new Uint8Array(1024*1024)],{type:'application/pdf'});
+  const pkg=await T.buildPackage(REF,{workOrderRef:REF},[],{...opts,issuedB5Pdf:large});
+  const envelope=await C.encryptPackage(pkg,sender,recipient,opts);
+  await assert.rejects(()=>R.buildDriveRelayBody(envelope,sender,{...recipient,recipientKeyId:'rk_other'},{...opts,bootstrapApi:B}),{code:'RELAY_DRIVE_BINDING_INVALID'});
+  await assert.rejects(()=>R.buildDriveRelayBody(envelope,sender,recipient,{...opts,bootstrapApi:B}),{code:'RELAY_DRIVE_TRIAL_LIMIT'});
+});
