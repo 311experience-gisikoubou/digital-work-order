@@ -869,3 +869,100 @@ test('PHASE8-SEC-02: forces safe download headers (never inline) for HTML/SVG/JS
     }
   });
 });
+
+test('B5-receiver decrypts, stores and downloads the PDF with original bytes and forced safety headers', async () => {
+  const { createRequire } = await import('node:module');
+  const { webcrypto } = await import('node:crypto');
+  const require = createRequire(import.meta.url);
+  const T = require('../media-transfer-package.js');
+  const C = require('../media-transfer-crypto.js');
+  const { PDFDocument } = require('../vendor/pdf/pdf-lib-1.17.1.min.js');
+  const { persistVerifiedPackage } = await import('../gateway/local-store.mjs');
+  const opts = { crypto: webcrypto, transferApi: T };
+  const doc = await PDFDocument.create();
+  doc.addPage([182 * 72 / 25.4, 257 * 72 / 25.4]);
+  const bytes = Buffer.from(await doc.save());
+  const pdf = new Blob([bytes], { type: 'application/pdf' });
+  const sender = await C.generateSenderIdentity(opts);
+  const recipient = await C.generateRecipientIdentity('synthetic-B5-receiver-passphrase', opts);
+  const offer = await C.createPairingOffer(recipient, opts);
+  const pairing = await C.createPairingResponse(offer, sender, opts);
+  const registry = await C.verifyPairingResponse(offer, pairing, opts);
+  const image = new Blob([Buffer.from([1,2,3,4])], { type: 'image/jpeg' });
+  const items = [{ meta: { attachmentId: ATT, kind: 'image', mime: image.type, size: image.size }, blob: image }];
+  const pkg = await T.buildPackage(REF, makeOrder(), items, { ...opts, issuedB5Pdf: pdf });
+  const envelope = await C.encryptPackage(pkg, sender, recipient, opts);
+  const decrypted = await C.decryptEnvelope(envelope, recipient, registry, opts);
+  await withTempRoot(async root => {
+    const jobId = 'job_' + 'P'.repeat(43);
+    const stored = await persistVerifiedPackage({ jobId, workOrderRef: REF, pkg: decrypted.package,
+      descriptorSha256: 'd'.repeat(64) }, { root });
+    assert.equal(stored.status, 'stored');
+    assert.equal(stored.receipt.attachmentCount, 2);
+    const disk = path.join(stored.directory, 'media', 'att-issued-b5-pdf.bin');
+    assert.deepEqual(await fs.readFile(disk), bytes);
+    const server = await startViewer({ inboxRoot: root, port: 0 });
+    try {
+      const base = 'http://127.0.0.1:' + server.address().port;
+      const detail = await (await fetch(base + '/api/jobs/' + jobId)).json();
+      const item = detail.attachments.find(a => a.attachmentId === 'att-issued-b5-pdf');
+      assert.ok(item);
+      const url = base + item.url;
+      for (const request of [{}, {method:'HEAD'}, {headers:{Range:'bytes=0-4'}}]) {
+        const response = await fetch(url, request);
+        const partial = !!request.headers;
+        assert.equal(response.status, partial ? 206 : 200);
+        assert.equal(response.headers.get('content-disposition'), 'attachment; filename="att-issued-b5-pdf.pdf"');
+        assert.equal(response.headers.get('content-type'), 'application/octet-stream');
+        assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+        assert.equal(response.headers.get('content-security-policy'), "default-src 'none'; sandbox");
+        assert.equal(response.headers.get('cache-control'), 'no-store');
+        if (request.method !== 'HEAD') assert.deepEqual(Buffer.from(await response.arrayBuffer()),
+          partial ? bytes.subarray(0,5) : bytes);
+      }
+      const other = detail.attachments.find(a => a.attachmentId === ATT);
+      const imageResponse = await fetch(base + other.url);
+      assert.equal(imageResponse.headers.get('content-type'), 'image/jpeg');
+      assert.deepEqual(Buffer.from(await imageResponse.arrayBuffer()), Buffer.from([1,2,3,4]));
+      const again = await persistVerifiedPackage({ jobId, workOrderRef: REF, pkg: decrypted.package,
+        descriptorSha256: 'd'.repeat(64) }, { root });
+      assert.equal(again.status, 'already-stored');
+      assert.deepEqual(await fs.readFile(disk), bytes);
+      const corrupt = Buffer.from(bytes);
+      corrupt[0] ^= 1;
+      await fs.writeFile(disk, corrupt);
+      const rejected = await fetch(url);
+      assert.ok(rejected.status >= 400);
+      await rejected.arrayBuffer();
+    } finally { await new Promise(resolve => server.close(resolve)); }
+  });
+});
+
+test('B5-receiver leaves non-PDF and unrelated PDF attachments on forced bin download', async () => {
+  await withTempRoot(async root => {
+    const cases = [
+      { jobId:'job_'+'Q'.repeat(43), attachmentMime:'application/pdf', attachmentKind:'file', mediaBytes:Buffer.from('%PDF-ordinary'), reserved:false },
+      { jobId:'job_'+'R'.repeat(43), attachmentMime:'application/pdf', attachmentKind:'file', mediaBytes:Buffer.from('<html>not a PDF</html>'), reserved:true },
+      { jobId:'job_'+'S'.repeat(43), attachmentMime:'text/html', attachmentKind:'file', mediaBytes:Buffer.from('%PDF-not-pdf-mime'), reserved:true }
+    ];
+    for (const spec of cases) {
+      const fixture = await writeSyntheticJob(root, { ...spec,
+        manifestMutator: spec.reserved ? m => {m.attachments[0].attachmentId = 'att-issued-b5-pdf';} : null });
+      if (spec.reserved) await fs.rename(path.join(fixture.dir, 'media', fixture.mediaFilename),
+        path.join(fixture.dir, 'media', 'att-issued-b5-pdf.bin'));
+    }
+    const server = await startViewer({ inboxRoot:root, port:0 });
+    try {
+      const base = 'http://127.0.0.1:' + server.address().port;
+      for (const spec of cases) {
+        const id = spec.reserved ? 'att-issued-b5-pdf' : ATT;
+        const response = await fetch(base + '/media/' + spec.jobId + '/' + id);
+        assert.equal(response.status, 200);
+        assert.equal(response.headers.get('content-disposition'), 'attachment; filename="' + id + '.bin"');
+        assert.equal(response.headers.get('content-type'), 'application/octet-stream');
+        assert.equal(response.headers.get('content-security-policy'), "default-src 'none'; sandbox");
+        assert.deepEqual(Buffer.from(await response.arrayBuffer()), spec.mediaBytes);
+      }
+    } finally { await new Promise(resolve => server.close(resolve)); }
+  });
+});

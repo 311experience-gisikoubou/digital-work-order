@@ -188,11 +188,12 @@ function buildMediaHeaders(attachment) {
       'Accept-Ranges': 'bytes'
     };
   }
-  // filename built only from the opaque attachmentId + fixed ".bin", never
-  // from request input or any patient/clinic field.
+  // The verified issued B5 copy gets a usable PDF filename, but the
+  // existing forced-download security policy stays identical.
+  const extension = attachment.issuedPdfDownload === true ? '.pdf' : '.bin';
   return {
     'Content-Type': 'application/octet-stream',
-    'Content-Disposition': 'attachment; filename="' + attachment.attachmentId + '.bin"',
+    'Content-Disposition': 'attachment; filename="' + attachment.attachmentId + extension + '"',
     'X-Content-Type-Options': 'nosniff',
     'Content-Security-Policy': FORCED_DOWNLOAD_CSP,
     'Cache-Control': 'no-store',
