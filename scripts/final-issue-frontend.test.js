@@ -1868,3 +1868,17 @@ test('Drive-retry-plan-trial uses only the durable same job and never advances r
   await assert.rejects(() => plan({jobId:body.jobId,status:'partial'}), {code:'TRANSFER_PACKAGE_NOT_ISSUED'});
   assert.equal(renders,1); assert.equal(claims,1);
 });
+
+test('local issue feedback distinguishes local issuance from lab transfer in every committed outcome', async () => {
+  for (const options of [{}, {sessionStorage:createThrowingSessionStorage()},
+    {circularVisualSnapshot:true}, {openFail:true},
+    {draftRemove:false,mediaCount:1,rollbackFail:true}]) {
+    const h=makeHarness(options);
+    await h.run();
+    assert.equal(h.state.orders.length,1);
+    const messages=h.events.filter(e=>e.startsWith('toast:') && e.includes('発行'));
+    assert.ok(messages.length>0,JSON.stringify(options));
+    assert.ok(messages.every(e=>e.includes('技工所へは未送信')),messages.join('\n'));
+    assert.ok(!h.events.some(e=>e.includes('送信しました')));
+  }
+});
