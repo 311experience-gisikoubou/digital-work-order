@@ -1818,3 +1818,53 @@ test('Drive-outbox-trial issued create and resume reuse exact ciphertext without
   await assert.rejects(()=>h.dwoFinalIssue.prepareIssuedDriveOutboxTrial(h.workOrderRef,sender,recipient,'resume'),{code:'TRANSFER_PACKAGE_NOT_ISSUED'});
   assert.equal(renders,1);assert.equal(resumes,2);
 });
+
+test('Drive-retry-plan-trial uses only the durable same job and never advances receipt status', async () => {
+  const R = require('../media-relay.js'), B = require('../media-receiver-bootstrap.js');
+  const opts = { crypto: nodeCrypto.webcrypto };
+  const sender = await RealMediaTransferCrypto.generateSenderIdentity(opts);
+  const recipient = await RealMediaTransferCrypto.generateRecipientIdentity('synthetic-retry-plan-passphrase', opts);
+  const h = makeHarness({ mediaTransferCrypto: RealMediaTransferCrypto });
+  await h.run();
+  h.context.MediaRelayTransport = R; h.context.MediaReceiverBootstrap = B;
+  let renders = 0, claims = 0, resumes = 0, saved;
+  h.context.createIssuePdfBlob = async () => { renders++; return new Blob(['%PDF-1.7\nsynthetic'], { type: 'application/pdf' }); };
+  h.mediaManager.prepareTransferPackage = (order, options) =>
+    RealMediaTransferPackage.buildPackage(order.workOrderRef, order, [], { ...opts, ...options });
+  h.context.ReferenceMediaStorage = { createDriveOutboxTrial: () => ({
+    async claim(ref, binding, rid, body) { claims++; saved = {ref, binding, rid, body}; return body; },
+    async resume(ref, binding, rid) {
+      resumes++;
+      if (!saved) throw Object.assign(Error('missing'), { code: 'DRIVE_OUTBOX_MISSING' });
+      assert.equal(ref, saved.ref); assert.equal(binding, saved.binding); assert.equal(rid, saved.rid);
+      return saved.body;
+    }
+  }) };
+  const api = h.dwoFinalIssue;
+  const plan = reply => api.planIssuedDriveRetryTrial(h.workOrderRef, sender, recipient, reply);
+  await assert.rejects(() => plan(null), { code: 'DRIVE_OUTBOX_MISSING' });
+  assert.equal(renders, 0); assert.equal(claims, 0);
+  const body = await api.prepareIssuedDriveOutboxTrial(h.workOrderRef, sender, recipient, 'create');
+  const before = api.getIssuedTransferStatus(h.workOrderRef);
+  for (const status of ['not-started', 'partial']) {
+    const result = await plan({jobId: body.jobId, status});
+    assert.equal(result.decision, 'RETRY_SAME_CIPHERTEXT');
+    assert.equal(R.canonicalJson(result.body), R.canonicalJson(body));
+  }
+  for (const status of ['ready', 'deleted']) {
+    const result = await plan({jobId: body.jobId, status});
+    assert.equal(result.decision, 'RELAY_REPORTED_ACCEPTED');
+    assert.equal(Object.hasOwn(result, 'body'), false);
+  }
+  for (const reply of [null, {jobId:body.jobId,status:'deleting'}, {jobId:body.jobId,status:'unknown'},
+    {jobId:'job_'+'0'.repeat(64),status:'partial'}, {jobId:body.jobId,status:'ready',extra:true}]) {
+    const result = await plan(reply);
+    assert.equal(result.decision, 'KEEP_PENDING');
+    assert.equal(Object.hasOwn(result,'body'), false);
+  }
+  assert.equal(renders, 1); assert.equal(claims, 1); assert.equal(resumes, 10);
+  assert.equal(api.getIssuedTransferStatus(h.workOrderRef), before);
+  h.state.orders[0].remarks = 'synthetic edit';
+  await assert.rejects(() => plan({jobId:body.jobId,status:'partial'}), {code:'TRANSFER_PACKAGE_NOT_ISSUED'});
+  assert.equal(renders,1); assert.equal(claims,1);
+});

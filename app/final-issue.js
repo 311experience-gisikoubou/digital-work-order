@@ -980,6 +980,24 @@
     }
   }
 
+  // Bounded trial decision only: no transport, credentials, state advancement,
+  // deletion or UI wiring. A caller-provided status is not a verified receipt.
+  // Re-read the existing exact ciphertext; never create a new job on retry.
+  async function planIssuedDriveRetryTrial(workOrderRef, senderIdentity, recipientPublicInfo, statusReply) {
+    const body = await prepareIssuedDriveOutboxTrial(workOrderRef, senderIdentity, recipientPublicInfo, 'resume');
+    const pending = { decision: 'KEEP_PENDING', jobId: body.jobId };
+    if (!statusReply || typeof statusReply !== 'object' || Array.isArray(statusReply) ||
+        Object.keys(statusReply).sort().join('|') !== 'jobId|status' ||
+        statusReply.jobId !== body.jobId || typeof statusReply.status !== 'string') return pending;
+    if (statusReply.status === 'ready' || statusReply.status === 'deleted') {
+      return { decision: 'RELAY_REPORTED_ACCEPTED', jobId: body.jobId };
+    }
+    if (statusReply.status === 'not-started' || statusReply.status === 'partial') {
+      return { decision: 'RETRY_SAME_CIPHERTEXT', jobId: body.jobId, body };
+    }
+    return pending;
+  }
+
   function getIssuedTransferStatus(workOrderRef) {
     if (typeof workOrderRef !== 'string' || !WORK_ORDER_REF_PATTERN.test(workOrderRef)) {
       return 'UNVERIFIED';
@@ -1013,6 +1031,7 @@
     prepareIssuedEncryptedTransferEnvelope,
     prepareIssuedDriveRelayCandidate,
     prepareIssuedDriveOutboxTrial,
+    planIssuedDriveRetryTrial,
     getIssuedTransferStatus,
     refreshIssuedTransferState
   };
