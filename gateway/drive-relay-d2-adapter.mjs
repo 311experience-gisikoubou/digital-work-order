@@ -99,6 +99,46 @@ export async function processD2SyncedJob(dir,options={}){
   const ack=validateAckResponse(await options.control.ack({jobId:meta.jobId,ackCapability:issued.ackCapability,ackProof:computeAckProof(meta.jobId,envelope.header.descriptorSha256,decrypted.workOrderRef)}),meta.jobId);
   return{jobId:meta.jobId,status:stored.status,cloudStatus:ack.status,workOrderRef:decrypted.workOrderRef};
 }
+// Source-only candidate for a future bounded Drive receive cycle. The
+// caller supplies directory-entry metadata and the existing receive function.
+// This selector neither verifies nor opens a job, and never grants ACK access.
+export function selectD2ReceiveCandidates(entries) {
+  if (!Array.isArray(entries)) throw fail('D2_BATCH_ENTRIES_INVALID');
+  const ids=new Set();
+  for (const entry of entries) {
+    if (!entry || typeof entry.name!=='string' ||
+        typeof entry.isSymbolicLink!=='function' || entry.isSymbolicLink()) continue;
+    if (typeof entry.isDirectory==='function' && entry.isDirectory() &&
+        /^job_[0-9a-f]{64}$/.test(entry.name)) ids.add(entry.name);
+    else if (typeof entry.isFile==='function' && entry.isFile()) {
+      const match=/^control_(job_[0-9a-f]{64})\.json$/.exec(entry.name);
+      if (match) ids.add(match[1]);
+    }
+  }
+  return [...ids].sort();
+}
+
+// Sequential dispatch follows the existing receiver's per-job isolation.
+// Do not connect to a live root or schedule this candidate before approval.
+export async function receiveD2BatchCandidate(entries, receiveOne) {
+  if (typeof receiveOne!=='function') throw fail('D2_BATCH_RECEIVER_INVALID');
+  const ids=selectD2ReceiveCandidates(entries), results=[];
+  for (const jobId of ids) {
+    try {
+      const result=await receiveOne(jobId);
+      if (!result || result.jobId!==jobId ||
+          !['stored','already-stored'].includes(result.status) ||
+          result.cloudStatus!=='deleted') throw fail('D2_BATCH_RESULT_UNCONFIRMED');
+      results.push({jobId,status:result.status,cloudStatus:result.cloudStatus});
+    } catch(error) {
+      const code=error&&typeof error.code==='string'&&/^[A-Z][A-Z0-9_]{0,79}$/.test(error.code)
+        ? error.code : 'D2_BATCH_RECEIVE_FAILED';
+      results.push({jobId,status:'failed',errorCode:code});
+    }
+  }
+  return {checked:ids.length,results};
+}
+
 export const constants=Object.freeze({META_VERSION,RETAIN_SYNTHETIC_WORK_ORDER_REF:'dwo:223e4567-e89b-42d3-a456-426614174001',RETAIN_SYNTHETIC_ATTACHMENT_BYTES:[68,50,0,1],RETAIN_DEFAULT_TIMEOUT_MS:180000});
 export function createAppsScriptControl(endpoint,receiverBearer,fetchApi=globalThis.fetch){
   if(!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(endpoint||'')||!/^[A-Za-z0-9_-]{43}$/.test(receiverBearer||'')||typeof fetchApi!=='function')throw fail('D2_CONTROL_CONFIG_INVALID');

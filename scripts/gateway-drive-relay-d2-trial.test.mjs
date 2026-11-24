@@ -1900,3 +1900,93 @@ test('B5-drive-candidate refuses wrong recipient and oversize instead of droppin
   await assert.rejects(()=>R.buildDriveRelayBody(envelope,sender,{...recipient,recipientKeyId:'rk_other'},{...opts,bootstrapApi:B}),{code:'RELAY_DRIVE_BINDING_INVALID'});
   await assert.rejects(()=>R.buildDriveRelayBody(envelope,sender,recipient,{...opts,bootstrapApi:B}),{code:'RELAY_DRIVE_TRIAL_LIMIT'});
 });
+
+test('Drive-batch-candidate selects opaque directories and control-only retries once, excluding aliases and unrelated names', async () => {
+  const {selectD2ReceiveCandidates,receiveD2BatchCandidate}=await import('../gateway/drive-relay-d2-adapter.mjs');
+  const a='job_'+'a'.repeat(64), b='job_'+'b'.repeat(64), c='job_'+'c'.repeat(64);
+  const entry=(name,kind)=>({name,isDirectory:()=>kind==='dir',isFile:()=>kind==='file',isSymbolicLink:()=>kind==='link'});
+  const entries=[entry(b,'dir'),entry(a,'dir'),entry('control_'+a+'.json','file'),entry('control_'+c+'.json','file'),
+    entry('control_'+b+'.json','dir'),entry('job_'+'d'.repeat(64),'link'),entry('job_'+'e'.repeat(64),'file'),
+    entry('../'+a,'dir'),entry('pairing.json','file'),entry('control_'+c+'.json.bak','file')];
+  assert.deepEqual(selectD2ReceiveCandidates(entries),[a,b,c]);
+  const seen=[];
+  const batch=await receiveD2BatchCandidate(entries,async id=>{
+    seen.push(id);
+    if(id===a)throw Object.assign(Error('synthetic sensitive detail'),{code:'D2_SYNC_OBJECT_MISSING'});
+    if(id===b)return {jobId:b,status:'stored',cloudStatus:'deleted',workOrderRef:REF};
+    return {jobId:a,status:'stored',cloudStatus:'deleted'};
+  });
+  assert.deepEqual(seen,[a,b,c]);
+  assert.deepEqual(batch,{checked:3,results:[
+    {jobId:a,status:'failed',errorCode:'D2_SYNC_OBJECT_MISSING'},
+    {jobId:b,status:'stored',cloudStatus:'deleted'},
+    {jobId:c,status:'failed',errorCode:'D2_BATCH_RESULT_UNCONFIRMED'}
+  ]});
+  assert.equal(JSON.stringify(batch).includes(REF),false);
+});
+
+test('Drive-batch-candidate receives two independent encrypted PDF jobs despite partial sync and resumes only verified saved job', async()=>{
+  const {receiveD2BatchCandidate}=await import('../gateway/drive-relay-d2-adapter.mjs');
+  const {PDFDocument}=require('../vendor/pdf/pdf-lib-1.17.1.min.js');
+  const opts={crypto:webcrypto,transferApi:T};
+  const sender=await C.generateSenderIdentity(opts);
+  const recipient=await C.generateRecipientIdentity('synthetic-batch-receiver-passphrase',opts);
+  const offer=await C.createPairingOffer(recipient,opts);
+  const registry=await C.verifyPairingResponse(offer,await C.createPairingResponse(offer,sender,opts),opts);
+  const e=await fakeGateway();
+  e.props.set('D2_RECIPIENT_PUBLIC_JSON',JSON.stringify({recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk}));
+  e.g.d2Pair_({bearerSha256:e.sha(e.upload),clinicDeviceId:sender.clinicDeviceId,signingKeyId:sender.signingKeyId,signingPublicJwk:sender.publicJwk,recipientKeyId:recipient.recipientKeyId});
+  const refs=[REF,'dwo:323e4567-e89b-42d3-a456-426614174002'];
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'dwo-batch-candidate-'));
+  try {
+    const sync=path.join(root,'sync'),inbox=path.join(root,'inbox');
+    await fs.mkdir(sync);
+    const jobs=[];
+    for(const ref of refs){
+      const doc=await PDFDocument.create();doc.addPage([182*72/25.4,257*72/25.4]);
+      const bytes=Buffer.from(await doc.save());
+      const pkg=await T.buildPackage(ref,{workOrderRef:ref,patientName:'SYNTHETIC ONLY'},[],
+        {...opts,issuedB5Pdf:new Blob([bytes],{type:'application/pdf'})});
+      const env=await C.encryptPackage(pkg,sender,recipient,opts);
+      const wire=await R.buildDriveRelayBody(env,sender,recipient,{...opts,bootstrapApi:B});
+      e.g.d2Put_({...wire,bearer:e.upload});
+      const job=e.file(e.root,wire.jobId),dir=path.join(sync,wire.jobId);
+      await fs.mkdir(dir);
+      const rows=[...e.rows.values()].filter(row=>row.parent===job.id&&row.kind==='file');
+      for(const row of rows)await fs.writeFile(path.join(dir,row.name),row.bytes);
+      jobs.push({wire,dir,bytes,rows});
+    }
+    jobs.sort((a,b)=>a.wire.jobId.localeCompare(b.wire.jobId));
+    const [delayed,ready]=jobs;
+    const missing=delayed.rows.find(row=>row.name==='obj_0001.bin');
+    await fs.rm(path.join(delayed.dir,missing.name));
+    const acked=[];
+    const control=(action,body)=>e.g.d2Control_({receiverBearer:e.receiver,action,...body});
+    const run=id=>receiveD2Job(path.join(sync,id),{
+      recipientKeyRingOrIdentity:recipient,senderRegistries:{senders:[registry]},inboxRoot:inbox,
+      control:{issueAckCapability:async jobId=>control('issueAckCapability',{jobId}),
+        ack:async value=>{acked.push(value.jobId);return control('ack',value);},
+        resumeAck:async value=>control('resumeAck',value)}
+    });
+    const first=await receiveD2BatchCandidate(await fs.readdir(sync,{withFileTypes:true}),run);
+    assert.equal(first.checked,2);
+    assert.equal(first.results[0].errorCode,'D2_SYNC_OBJECT_MISSING');
+    assert.equal(first.results[1].status,'stored');
+    assert.deepEqual(acked,[ready.wire.jobId]);
+    await fs.writeFile(path.join(delayed.dir,missing.name),missing.bytes);
+    e.setFailName('obj_0001.bin');
+    const second=await receiveD2BatchCandidate(await fs.readdir(sync,{withFileTypes:true}),run);
+    assert.equal(second.results[0].status,'failed');
+    assert.equal(second.results[1].status,'already-stored');
+    assert.ok(e.file(e.root,'control_'+delayed.wire.jobId+'.json'));
+    // Cloud directory no longer needs to be locally present for ACK resume.
+    await fs.rm(delayed.dir,{recursive:true,force:true});
+    await fs.writeFile(path.join(sync,'control_'+delayed.wire.jobId+'.json'),'synthetic marker');
+    const third=await receiveD2BatchCandidate(await fs.readdir(sync,{withFileTypes:true}),run);
+    assert.equal(third.checked,2);
+    assert.ok(third.results.every(x=>x.status==='already-stored'&&x.cloudStatus==='deleted'));
+    assert.deepEqual(acked,[ready.wire.jobId,delayed.wire.jobId]);
+    for(const j of jobs)assert.deepEqual(await fs.readFile(path.join(inbox,j.wire.jobId,'media','att-issued-b5-pdf.bin')),j.bytes);
+    assert.equal((await fs.readdir(inbox)).filter(x=>x.startsWith('job_')).length,2);
+  } finally {await fs.rm(root,{recursive:true,force:true});}
+});
