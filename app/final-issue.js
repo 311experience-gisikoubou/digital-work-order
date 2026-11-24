@@ -313,6 +313,7 @@
       return false;
     }
 
+    const initialSnapshot = snapshotOrderExcludingStatus(order);
     let digest;
     try {
       // 記録時（recordIssuedMarker）と同じ computeMarkerDigest を必ず使う
@@ -322,7 +323,15 @@
       restoredMarkerRefs.delete(workOrderRef);
       return false;
     }
-    if (digest !== entry.digest) {
+    const latestMarkers = readIssuedMarkers();
+    const latestEntry = latestMarkers && latestMarkers.find(item => item.workOrderRef === workOrderRef);
+    const latestMatches = Array.isArray(state.orders)
+      ? state.orders.filter(item => item && item.workOrderRef === workOrderRef)
+      : [];
+    if (digest !== entry.digest || !latestEntry || latestEntry.digest !== entry.digest ||
+        latestMatches.length !== 1 || typeof initialSnapshot !== 'string' ||
+        snapshotOrderExcludingStatus(latestMatches[0]) !== initialSnapshot ||
+        !isValidSessionOrder(latestMatches[0])) {
       restoredMarkerRefs.delete(workOrderRef);
       return false;
     }

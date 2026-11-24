@@ -1581,6 +1581,46 @@ test('prepareIssuedEncryptedTransferEnvelope produces a real WebCrypto envelope 
   assert.equal(decrypted.package.manifest.workOrderRef, h.workOrderRef);
 });
 
+// Synthetic regression tests for changes during asynchronous verification.
+async function checkIssuanceConsistencyDuringDigest(change, shouldAllow) {
+  const shared = createFakeSessionStorage();
+  const first = makeHarness({ sessionStorage: shared });
+  await first.run();
+  const restored = JSON.parse(JSON.stringify(first.state.orders[0]));
+  let hold = false, enter, release;
+  const entered = new Promise(resolve => { enter = resolve; });
+  const crypto = { subtle: { async digest(alg, bytes) {
+    if (hold) {
+      hold = false;
+      await new Promise(resolve => { release = resolve; enter(); });
+    }
+    return nodeCrypto.webcrypto.subtle.digest(alg, bytes);
+  } } };
+  const h = makeHarness({
+    sessionStorage: shared, initialOrders: [restored],
+    workOrderRef: first.workOrderRef, crypto
+  });
+  await h.dwoFinalIssue.refreshIssuedTransferState();
+  hold = true;
+  const pending = h.dwoFinalIssue.prepareIssuedTransferPackage(h.workOrderRef);
+  const settled = pending.then(() => true, () => false);
+  await entered;
+  change(h, shared);
+  release();
+  assert.equal(await settled, shouldAllow);
+  assert.equal(h.events.filter(e => e.startsWith('prepare-package:')).length, shouldAllow ? 1 : 0);
+}
+test('async issuance check refuses changed order', () => checkIssuanceConsistencyDuringDigest(h => {
+  h.state.orders[0].remarks = 'SAMPLE CHANGE';
+}, false));
+test('async issuance check refuses missing issuance record', () => checkIssuanceConsistencyDuringDigest((h, s) => {
+  s.removeItem(ISSUED_MARKER_STORAGE_KEY);
+}, false));
+test('async issuance check accepts unchanged order', () => checkIssuanceConsistencyDuringDigest(() => {}, true));
+test('async issuance check accepts status-only change', () => checkIssuanceConsistencyDuringDigest(h => {
+  h.state.orders[0].status = 'accepted';
+}, true));
+
 test('PDF Stage 5 exposes cancellable paper choice and frozen-order blob generation', () => {
   assert.match(pdfSource, /function requestIssuePdfPaperSize\(\)/);
   assert.match(pdfSource, /pendingIssuePaperResolve/);
