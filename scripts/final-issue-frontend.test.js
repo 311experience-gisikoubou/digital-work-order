@@ -121,6 +121,29 @@ function fakeTransferPackageFor(workOrderRef) {
   };
 }
 
+// Draft PR #180 (B5 transfer copy) 合成テスト専用: createIssuePdfBlob が
+// 返す、既存の Blob 契約（type/size/slice/arrayBuffer）だけを満たす最小限
+// のfixture。実際のPDFレンダリング・既存pdf.jsの描画は一切再実装しない。
+// %PDF- ヘッダも含める（media-transfer-package.js側の検証とも整合する
+// 合成バイト列。実際の患者・医院情報は一切含まない）。
+function validB5PdfBlobFixture(size) {
+  const total = typeof size === 'number' && size > 5 ? size : 32;
+  const bytes = new Uint8Array(total);
+  bytes.set([0x25, 0x50, 0x44, 0x46, 0x2d]); // '%PDF-'
+  function toArrayBuffer(view) {
+    return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+  }
+  return {
+    type: 'application/pdf',
+    size: total,
+    slice(start, end) {
+      const sliced = bytes.slice(start, end);
+      return { arrayBuffer: async () => toArrayBuffer(sliced) };
+    },
+    arrayBuffer: async () => toArrayBuffer(bytes)
+  };
+}
+
 // 暗号化の完了タイミングを手動で制御できる、最小限のfake
 // MediaTransferCrypto。実際のECDH/HKDF/AES-GCM/ECDSAは一切実装しない
 // （既存のmedia-transfer-crypto.jsだけがそれを行う）。
@@ -249,9 +272,15 @@ function makeHarness(options = {}) {
   let deferredPrepareResolve = null;
   let deferredPrepareReject = null;
   let prepareFailOnceRemaining = options.preparePackageFailOnce ? 1 : 0;
+  // Draft PR #180 (B5 transfer copy) 合成テスト専用: mediaManager.
+  // prepareTransferPackage へ実際に渡された第2引数（options）を観察する
+  // ためだけの非侵襲的な記録。既存の挙動・戻り値・eventsへの記録は
+  // 一切変更しない（既存テストに影響しない）。
+  const prepareCallArgs = [];
   if (!options.noPreparePackage) {
-    mediaManager.prepareTransferPackage = async order => {
+    mediaManager.prepareTransferPackage = async (order, pkgOptions) => {
       events.push('prepare-package:' + (order && order.workOrderRef));
+      prepareCallArgs.push({ order, pkgOptions });
       if (options.preparePackageFail || prepareFailOnceRemaining > 0) {
         prepareFailOnceRemaining = Math.max(0, prepareFailOnceRemaining - 1);
         throw Object.assign(new Error('package failed'), { code: 'MEDIA_STORAGE_RESTORE_FAILED' });
@@ -382,6 +411,7 @@ function makeHarness(options = {}) {
     workOrderRef,
     mediaManager,
     sessionStorage,
+    prepareCallArgs,
     run: () => boundHandler(),
     firePageshow: () => pageshowHandlers.forEach(handler => handler()),
     get dwoFinalIssue() { return context.DwoFinalIssue; },
@@ -1636,4 +1666,97 @@ test('issue module detaches the legacy handler and preserves calendar-owned init
   assert.ok(mediaAt > 0 && issueAt > mediaAt);
   assert.match(issueSource, /removeEventListener\('click', submitOrder\)/);
   assert.match(issueSource, /初期のdisabled解除はcalendar\.jsに任せる/);
+});
+
+test('B5-transfer-copy includes generated B5 PDF using existing package builder', async () => {
+  const T = require('../media-transfer-package.js');
+  const h = makeHarness();
+  await h.run();
+  const issued = h.state.orders[0];
+  const pdf = new Blob(['%PDF-1.7\nsynthetic'], { type: 'application/pdf' });
+  let rendered;
+  h.context.createIssuePdfBlob = async (order, paper) => {
+    assert.equal(paper, 'b5');
+    assert.notEqual(order, issued);
+    assert.notEqual(order.visualSnapshot, issued.visualSnapshot);
+    rendered = order;
+    return pdf;
+  };
+  h.mediaManager.prepareTransferPackage = async (order, opts) => {
+    assert.equal(order, rendered);
+    assert.equal(opts.issuedB5Pdf, pdf);
+    return T.buildPackage(order.workOrderRef, order, [], { ...opts, crypto: nodeCrypto.webcrypto });
+  };
+  const pkg = await h.dwoFinalIssue.prepareIssuedTransferPackage(h.workOrderRef, { includeB5Pdf: true });
+  assert.equal((await T.verifyPackage(pkg, { crypto: nodeCrypto.webcrypto })).ok, true);
+  assert.equal(pkg.manifest.attachments[0].attachmentId, 'att-issued-b5-pdf');
+  assert.equal(await new Blob(pkg.attachments['att-issued-b5-pdf'].chunks).text(), await pdf.text());
+});
+
+test('B5-transfer-copy rejects package without requested PDF', async () => {
+  const h = makeHarness({ preparedPackageResult: order => fakeTransferPackageFor(order.workOrderRef) });
+  await h.run();
+  h.context.createIssuePdfBlob = async () => validB5PdfBlobFixture();
+  await assert.rejects(() => h.dwoFinalIssue.prepareIssuedTransferPackage(h.workOrderRef, { includeB5Pdf: true }),
+    { code: 'TRANSFER_PACKAGE_B5_PDF_INVALID' });
+});
+
+test('B5-transfer-copy rejects invalid or failed renderer before packaging', async () => {
+  const h = makeHarness();
+  await h.run();
+  h.context.createIssuePdfBlob = async () => { throw new Error('synthetic'); };
+  await assert.rejects(() => h.dwoFinalIssue.prepareIssuedTransferPackage(h.workOrderRef, { includeB5Pdf: true }),
+    { code: 'TRANSFER_PACKAGE_B5_PDF_GENERATION_FAILED' });
+  h.context.createIssuePdfBlob = async () => new Blob([], { type: 'application/pdf' });
+  await assert.rejects(() => h.dwoFinalIssue.prepareIssuedTransferPackage(h.workOrderRef, { includeB5Pdf: true }),
+    { code: 'TRANSFER_PACKAGE_B5_PDF_INVALID' });
+  assert.equal(h.prepareCallArgs.length, 0);
+});
+
+test('B5-transfer-copy rejects issued or detached content changes during rendering', async () => {
+  for (const mutateDetached of [false, true]) {
+    const h = makeHarness();
+    await h.run();
+    h.context.createIssuePdfBlob = async order => {
+      (mutateDetached ? order : h.state.orders[0]).remarks = 'synthetic change';
+      return validB5PdfBlobFixture();
+    };
+    await assert.rejects(() => h.dwoFinalIssue.prepareIssuedTransferPackage(h.workOrderRef, { includeB5Pdf: true }),
+      { code: 'TRANSFER_PACKAGE_NOT_ISSUED' });
+    assert.equal(h.prepareCallArgs.length, 0);
+  }
+});
+
+test('B5-transfer-copy rejects changed issued content during packaging', async () => {
+  const h = makeHarness();
+  await h.run();
+  h.context.createIssuePdfBlob = async () => validB5PdfBlobFixture();
+  h.mediaManager.prepareTransferPackage = async () => {
+    h.state.orders[0].remarks = 'synthetic change';
+    return fakeTransferPackageFor(h.workOrderRef);
+  };
+  await assert.rejects(() => h.dwoFinalIssue.prepareIssuedTransferPackage(h.workOrderRef, { includeB5Pdf: true }),
+    { code: 'TRANSFER_PACKAGE_NOT_ISSUED' });
+});
+
+test('B5-transfer-copy encrypted opt-in forwards PDF and preserves opt-out', async () => {
+  const T = require('../media-transfer-package.js');
+  let encrypted;
+  const h = makeHarness({ mediaTransferCrypto: { async encryptPackage(pkg) {
+    encrypted = pkg;
+    return { descriptor: { workOrderRef: pkg.manifest.workOrderRef } };
+  } } });
+  await h.run();
+  let renders = 0;
+  h.context.createIssuePdfBlob = async () => {
+    renders++;
+    return new Blob(['%PDF-1.7\nsynthetic'], { type: 'application/pdf' });
+  };
+  h.mediaManager.prepareTransferPackage = async (order, opts) =>
+    T.buildPackage(order.workOrderRef, order, [], { ...opts, crypto: nodeCrypto.webcrypto });
+  await h.dwoFinalIssue.prepareIssuedEncryptedTransferEnvelope(h.workOrderRef, {}, {}, { includeB5Pdf: true });
+  assert.equal(encrypted.manifest.attachments[0].attachmentId, 'att-issued-b5-pdf');
+  await h.dwoFinalIssue.prepareIssuedEncryptedTransferEnvelope(h.workOrderRef, {}, {});
+  assert.equal(encrypted.manifest.attachments.length, 0);
+  assert.equal(renders, 1);
 });

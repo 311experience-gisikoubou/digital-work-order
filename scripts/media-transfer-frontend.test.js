@@ -192,3 +192,30 @@ test('buildPackage rejects an invalid workOrderRef', async () => {
     { code: 'TRANSFER_INVALID_WORK_ORDER_REF' }
   );
 });
+
+test('B5-transfer-copy verifies original attachment and PDF without mutating input', async () => {
+  const pdf = new Blob(['%PDF-1.7\nsynthetic'], { type: 'application/pdf' });
+  const items = [attachment(ATT_1, 'image', 'image/jpeg', 3, 1)];
+  const pkg = await T.buildPackage(WORK_ORDER_REF, sampleWorkOrder(), items,
+    { ...CRYPTO_OPTS, issuedB5Pdf: pdf, chunkSize: 4 });
+  assert.equal(items.length, 1);
+  assert.equal(pkg.manifest.attachments.length, 2);
+  const entry = pkg.manifest.attachments.find(a => a.attachmentId === T.RESERVED_B5_PDF_ATTACHMENT_ID);
+  assert.equal(entry.kind, 'file');
+  assert.equal(entry.mime, 'application/pdf');
+  assert.equal(entry.size, pdf.size);
+  assert.equal(await new Blob(pkg.attachments[entry.attachmentId].chunks).text(), await pdf.text());
+  assert.equal((await T.verifyPackage(pkg, CRYPTO_OPTS)).attachmentCount, 2);
+});
+
+test('B5-transfer-copy rejects invalid PDF and reserved collision', async () => {
+  const good = new Blob(['%PDF-1.7\nsynthetic'], { type: 'application/pdf' });
+  for (const pdf of [new Blob(['%PDF-1.7']), new Blob(['wrong'], { type: 'application/pdf' }),
+      new Blob([], { type: 'application/pdf' }), null]) {
+    await assert.rejects(() => T.buildPackage(WORK_ORDER_REF, sampleWorkOrder(), [], { ...CRYPTO_OPTS, issuedB5Pdf: pdf }),
+      { code: 'TRANSFER_INVALID_ISSUED_B5_PDF' });
+  }
+  const collision = attachment(T.RESERVED_B5_PDF_ATTACHMENT_ID, 'file', 'application/pdf', 8, 1);
+  await assert.rejects(() => T.buildPackage(WORK_ORDER_REF, sampleWorkOrder(), [collision], { ...CRYPTO_OPTS, issuedB5Pdf: good }),
+    { code: 'TRANSFER_DUPLICATE_ATTACHMENT' });
+});

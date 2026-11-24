@@ -14,6 +14,17 @@
   const WORK_ORDER_REF_RE = /^dwo:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
   const HEX64_RE = /^[0-9a-f]{64}$/;
 
+  // Draft PR #180 (B5 transfer copy): 発行済み受注から新たに描画されたB5
+  // 二面PDFだけを、既存buildPackageへ明示的なoptions経由で任意追加する
+  // ための、固定の予約attachmentId・MIME。元の発行時原本印刷（A4の場合も
+  // ある）のバイト列と同一であることは一切保証しない（新たに描画した
+  // 「転送用コピー」）。既存の generic な attachments 配列・呼び出しは
+  // 一切変更しない（このIDはoptions.issuedB5Pdfが明示された場合のみ追加
+  // される、常にopt-inの1件）。
+  const RESERVED_B5_PDF_ATTACHMENT_ID = 'att-issued-b5-pdf';
+  const ISSUED_B5_PDF_MIME = 'application/pdf';
+  const PDF_HEADER_BYTES = [0x25, 0x50, 0x44, 0x46, 0x2d]; // '%PDF-'
+
   const MANIFEST_KEYS = ['schemaVersion', 'workOrderRef', 'createdAt', 'workOrder', 'attachments'];
   const WORK_ORDER_FILE_KEYS = ['size', 'sha256'];
   const ATTACHMENT_KEYS = ['attachmentId', 'kind', 'mime', 'size', 'sha256', 'chunks'];
@@ -75,6 +86,31 @@
     return chunks;
   }
 
+  // options.issuedB5Pdf として渡されたBlobだけを対象とする、合成テスト専用の
+  // 最小限の検証（Blob型・MIME・サイズ・%PDF-ヘッダ）。既存のチャンク分割・
+  // ハッシュ・manifest構築ロジックは一切重複実装しない（検証のみ）。
+  async function validateIssuedB5PdfBlob(blob) {
+    if (!blob || typeof blob.size !== 'number' || typeof blob.slice !== 'function' ||
+        typeof blob.arrayBuffer !== 'function' || typeof blob.type !== 'string') {
+      throw transferError('TRANSFER_INVALID_ISSUED_B5_PDF');
+    }
+    if (blob.type !== ISSUED_B5_PDF_MIME) throw transferError('TRANSFER_INVALID_ISSUED_B5_PDF');
+    if (!Number.isSafeInteger(blob.size) || blob.size < PDF_HEADER_BYTES.length) {
+      throw transferError('TRANSFER_INVALID_ISSUED_B5_PDF');
+    }
+    let headerBuffer;
+    try {
+      headerBuffer = await blob.slice(0, PDF_HEADER_BYTES.length).arrayBuffer();
+    } catch (_) {
+      throw transferError('TRANSFER_INVALID_ISSUED_B5_PDF');
+    }
+    const headerBytes = new Uint8Array(headerBuffer);
+    if (headerBytes.length !== PDF_HEADER_BYTES.length ||
+        !PDF_HEADER_BYTES.every((byte, index) => headerBytes[index] === byte)) {
+      throw transferError('TRANSFER_INVALID_ISSUED_B5_PDF');
+    }
+  }
+
   async function buildAttachmentEntry(attachmentId, kind, mime, blob, chunkSize, cryptoApi) {
     const chunkBlobs = sliceChunks(blob, chunkSize);
     const chunkMeta = [];
@@ -122,6 +158,26 @@
       const mime = typeof meta.mime === 'string' ? meta.mime : '';
       if (!Number.isSafeInteger(meta.size) || meta.size !== blob.size) throw transferError('TRANSFER_INVALID_ATTACHMENT');
       normalized.push({ attachmentId, kind: meta.kind, mime, blob });
+    }
+
+    // Draft PR #180 (B5 transfer copy): options.issuedB5Pdf が明示された場合
+    // だけ、予約attachmentId（att-issued-b5-pdf）で1件だけ追加する。呼び出し
+    // 側が渡した attachments 配列（list/normalizedの元）そのものは一切変更
+    // しない（normalizedへpushするだけ）。既存のkind/mime集合・重複検出
+    // ロジックをそのまま再利用する（collisionは既存のTRANSFER_DUPLICATE_
+    // ATTACHMENTで拒否する）。
+    if (opts.issuedB5Pdf !== undefined) {
+      if (seenIds.has(RESERVED_B5_PDF_ATTACHMENT_ID)) {
+        throw transferError('TRANSFER_DUPLICATE_ATTACHMENT', RESERVED_B5_PDF_ATTACHMENT_ID);
+      }
+      await validateIssuedB5PdfBlob(opts.issuedB5Pdf);
+      seenIds.add(RESERVED_B5_PDF_ATTACHMENT_ID);
+      normalized.push({
+        attachmentId: RESERVED_B5_PDF_ATTACHMENT_ID,
+        kind: 'file',
+        mime: ISSUED_B5_PDF_MIME,
+        blob: opts.issuedB5Pdf
+      });
     }
 
     const workOrderBytes = encodeJson(workOrder);
@@ -303,6 +359,7 @@
   const api = {
     SCHEMA_VERSION,
     DEFAULT_CHUNK_SIZE,
+    RESERVED_B5_PDF_ATTACHMENT_ID,
     isValidWorkOrderRef,
     buildPackage,
     verifyPackage,

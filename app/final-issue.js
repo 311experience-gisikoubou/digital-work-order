@@ -630,16 +630,85 @@
     return matches[0];
   }
 
-  async function prepareIssuedTransferPackage(workOrderRef) {
+  // ============================================================
+  //  Draft PR #180 (B5 transfer copy) opt-in: options.includeB5Pdf === true
+  //
+  //  既存の非opt-in呼び出し（options省略／includeB5Pdfを渡さない／false）
+  //  は一切変更しない（従来どおり mediaManager.prepareTransferPackage(order)
+  //  を1引数だけで呼ぶ）。opt-inした場合のみ、既存 createIssuePdfBlob(order,
+  //  'b5') で新たに描画したB5二面PDF（検証済み発行スナップショットからの
+  //  「転送用コピー」。元の発行時原本印刷（A4の場合もある）のバイト列と
+  //  同一であることは一切保証しない）を、既存 media.js の
+  //  prepareTransferPackage(order, options) → MediaTransferPackage.
+  //  buildPackage(..., options) へ options.issuedB5Pdf として明示的に渡す
+  //  だけで、新しい永続化・送信・ACK representationは一切追加しない。
+  // ============================================================
+
+  // 検証済みの発行済みstate.orders上の受注から、B5 PDF生成とパッケージ
+  // 委譲の両方で全く同一の内容を使うための、detached（state.ordersから
+  // 切り離された）ディープコピー。以降 state.orders 側が非同期処理中に
+  // 改変されても、ここで作った detached snapshot 自体は変化しない
+  // （改変の検知は、別途 verifyIssuedRefAuthorization の再実行で行う）。
+  // visualSnapshot を含むディープコピーが安全に取得できない場合
+  // （循環参照等）は fail closed とする。
+  function detachValidatedOrderSnapshotForB5Pdf(matchedOrder) {
+    let detached;
+    try {
+      detached = JSON.parse(JSON.stringify(matchedOrder));
+    } catch (_) {
+      throw transferPackageError('TRANSFER_PACKAGE_NOT_ISSUED');
+    }
+    if (!detached || typeof detached !== 'object' || Array.isArray(detached) ||
+        typeof detached.workOrderRef !== 'string' ||
+        !detached.visualSnapshot || typeof detached.visualSnapshot !== 'object') {
+      throw transferPackageError('TRANSFER_PACKAGE_NOT_ISSUED');
+    }
+    return detached;
+  }
+
+  function isValidIssuedB5PdfBlob(pdfBlob) {
+    return !!pdfBlob &&
+      typeof pdfBlob === 'object' &&
+      typeof pdfBlob.size === 'number' && pdfBlob.size > 0 &&
+      typeof pdfBlob.type === 'string' && pdfBlob.type === 'application/pdf' &&
+      typeof pdfBlob.slice === 'function' &&
+      typeof pdfBlob.arrayBuffer === 'function';
+  }
+
+  // 暗号化・パッケージ構築（いずれも非同期)の前後で、同じ発行実績再検証
+  // ルーチン（verifyIssuedRefAuthorization）を再実行する。どこかの
+  // await中に state.orders が改変・削除・重複された場合、ここで直ちに
+  // 例外として伝播させる（呼び出し元はそのまま fail closed として扱う）。
+  async function reverifyIssuedRefForB5Pdf(workOrderRef, detachedOrder, expectedSnapshot) {
+    const reverified = await verifyIssuedRefAuthorization(workOrderRef);
+    if (!reverified || reverified.workOrderRef !== workOrderRef ||
+        typeof expectedSnapshot !== 'string' ||
+        snapshotOrderExcludingStatus(reverified) !== expectedSnapshot ||
+        snapshotOrderExcludingStatus(detachedOrder) !== expectedSnapshot) {
+      throw transferPackageError('TRANSFER_PACKAGE_NOT_ISSUED');
+    }
+  }
+
+  async function prepareIssuedTransferPackage(workOrderRef, options) {
     if (typeof workOrderRef !== 'string' || !WORK_ORDER_REF_PATTERN.test(workOrderRef)) {
       throw transferPackageError('TRANSFER_PACKAGE_INVALID_REF');
     }
+
+    // includeB5Pdf は明示的に true のときだけopt-inする。既存の呼び出し
+    // （options省略／false／他のプロパティのみ）は、これまでと完全に同じ
+    // 経路（PDFを一切生成せず、mediaManager.prepareTransferPackage(order)
+    // だけを呼ぶ）のままにする。
+    const opts = options && typeof options === 'object' ? options : {};
+    const includeB5Pdf = opts.includeB5Pdf === true;
 
     const matchedOrder = await verifyIssuedRefAuthorization(workOrderRef);
 
     const mediaManager = global.ReferenceMediaManager;
     if (!mediaManager || typeof mediaManager.prepareTransferPackage !== 'function') {
       throw transferPackageError('TRANSFER_PACKAGE_MEDIA_UNAVAILABLE');
+    }
+    if (includeB5Pdf && typeof createIssuePdfBlob !== 'function') {
+      throw transferPackageError('TRANSFER_PACKAGE_B5_PDF_GENERATOR_UNAVAILABLE');
     }
 
     // 同一refに対する準備が既に進行中の場合は、二重の委譲を防ぐため拒否する。
@@ -651,7 +720,58 @@
 
     transferStatusByRef.set(workOrderRef, 'PREPARING_LOCAL_PACKAGE');
     try {
-      const result = await mediaManager.prepareTransferPackage(matchedOrder);
+      if (!includeB5Pdf) {
+        const result = await mediaManager.prepareTransferPackage(matchedOrder);
+        transferStatusByRef.set(workOrderRef, 'PACKAGE_PREPARED_NOT_SENT');
+        return result;
+      }
+
+      // ---- opt-in: B5 transfer copy -------------------------------
+      // B5 PDF生成とパッケージ委譲の両方に、同一のdetachedスナップショット
+      // （visualSnapshotを含む）を使う。
+      const detachedOrder = detachValidatedOrderSnapshotForB5Pdf(matchedOrder);
+      const expectedSnapshot = snapshotOrderExcludingStatus(matchedOrder);
+      if (typeof expectedSnapshot !== 'string' ||
+          snapshotOrderExcludingStatus(detachedOrder) !== expectedSnapshot) {
+        throw transferPackageError('TRANSFER_PACKAGE_NOT_ISSUED');
+      }
+
+      let pdfBlob;
+      try {
+        pdfBlob = await createIssuePdfBlob(detachedOrder, 'b5');
+      } catch (_) {
+        throw transferPackageError('TRANSFER_PACKAGE_B5_PDF_GENERATION_FAILED');
+      }
+      // opt-inした以上、無効・空のPDFを黒塗りのまま静かに省略してパッケージ
+      // だけを返すことは絶対にしない（opt-inがPDFを無言で欠落させないこと
+      // を保証する）。
+      if (!isValidIssuedB5PdfBlob(pdfBlob)) {
+        throw transferPackageError('TRANSFER_PACKAGE_B5_PDF_INVALID');
+      }
+
+      // PDF生成（非同期）の完了後、パッケージ委譲の直前にもう一度ゼロから
+      // 同じ発行実績・改変検知を再検証する。
+      await reverifyIssuedRefForB5Pdf(workOrderRef, detachedOrder, expectedSnapshot);
+
+      const result = await mediaManager.prepareTransferPackage(
+        detachedOrder,
+        { issuedB5Pdf: pdfBlob }
+      );
+
+      // パッケージ構築（非同期）の完了後にも、返す直前に同じ検証をもう一度
+      // 行う。await中の改変・削除・重複を見逃さない。
+      await reverifyIssuedRefForB5Pdf(workOrderRef, detachedOrder, expectedSnapshot);
+
+      const entries = result && result.manifest && result.manifest.attachments;
+      const pdfEntries = Array.isArray(entries)
+        ? entries.filter(entry => entry && entry.attachmentId === 'att-issued-b5-pdf')
+        : [];
+      if (!result || !result.manifest || result.manifest.workOrderRef !== workOrderRef ||
+          pdfEntries.length !== 1 || pdfEntries[0].kind !== 'file' ||
+          pdfEntries[0].mime !== 'application/pdf' || pdfEntries[0].size !== pdfBlob.size) {
+        throw transferPackageError('TRANSFER_PACKAGE_B5_PDF_INVALID');
+      }
+
       transferStatusByRef.set(workOrderRef, 'PACKAGE_PREPARED_NOT_SENT');
       return result;
     } catch (error) {
@@ -722,7 +842,14 @@
       // 4) 既存の検証済みローカル転送パッケージ構築に委譲する（発行実績・
       //    マーカー・重複・post-issue改変検知・メディア有無・既存の
       //    同時実行制御は、すべてこの既存関数がそのまま担う）。
-      const pkg = await prepareIssuedTransferPackage(workOrderRef);
+      //    Draft PR #180 (B5 transfer copy): options.includeB5Pdf === true
+      //    のときだけ、明示的にそのままprepareIssuedTransferPackageへ転送
+      //    する。既存の非opt-in呼び出し（options省略／false）はこれまでと
+      //    完全に同じ経路のまま変更しない。
+      const forwardedOptions = {
+        includeB5Pdf: !!(options && options.includeB5Pdf === true)
+      };
+      const pkg = await prepareIssuedTransferPackage(workOrderRef, forwardedOptions);
 
       if (!pkg || !pkg.manifest || pkg.manifest.workOrderRef !== workOrderRef) {
         throw transferPackageError('TRANSFER_ENVELOPE_PACKAGE_REF_MISMATCH');
