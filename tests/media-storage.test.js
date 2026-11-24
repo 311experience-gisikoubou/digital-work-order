@@ -621,7 +621,10 @@ test('modules load without DOM, expose globals, and media-storage stays local-on
   assert.equal(globalThis.ReferenceMediaStorage, S);
   assert.equal(globalThis.ReferenceMediaManager, M);
   const src = fs.readFileSync(path.join(root, 'media-storage.js'), 'utf8');
-  assert.doesNotMatch(src, /localStorage|sessionStorage|fetch\(|XMLHttpRequest|WebSocket|sendBeacon|subtle|createObjectURL|collectFormData|getOrCreateActiveDraft/);
+  assert.doesNotMatch(src, /localStorage|sessionStorage|fetch\(|XMLHttpRequest|WebSocket|sendBeacon|createObjectURL|collectFormData|getOrCreateActiveDraft/);
+  // Outbox integrity uses local SHA-256 only; other WebCrypto operations remain forbidden here.
+  assert.doesNotMatch(src, /\bsubtle\.(?!digest\b)/);
+  assert.match(src, /scope\.crypto\.subtle\.digest\(\s*'SHA-256'/);
   const ui = fs.readFileSync(path.join(root, 'media.js'), 'utf8');
   assert.doesNotMatch(ui, /indexedDB|getDirectory|FileSystemFileHandle/);
 });
