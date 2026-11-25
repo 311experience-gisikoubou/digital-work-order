@@ -1915,3 +1915,22 @@ test('Signed recovery trial issued opt-in uses verified package, inspection is o
   await assert.rejects(()=>h.dwoFinalIssue.prepareIssuedDriveOutboxTrial(h.workOrderRef,sender,recipient,'create-signed-recovery'),{code:'TRANSFER_PACKAGE_ORDER_NOT_FOUND'});
   assert.equal(claims,1);
 });
+
+test('Pending discovery trial after session loss returns opaque inventory and never creates a job',async()=>{
+  const h=makeHarness();
+  const ref='dwo:223e4567-e89b-42d3-a456-426614174099';
+  const trusted={sender:{},recipient:{}};
+  const expected={status:'RECOVERY_PENDING_LIST',entries:[{workOrderRef:ref,status:'RECOVERY_PENDING_ONLY',jobId:'job_'+'b'.repeat(64),wireSha256:'a'.repeat(64)}],unverifiedCount:0};
+  let lists=0;
+  h.context.ReferenceMediaStorage={createDriveOutboxTrial:()=>({
+    async listSignedRecovery(pairing){assert.equal(pairing,trusted);lists++;return expected;},
+    async claimSignedRecovery(){throw Error('UNEXPECTED_CREATE');}
+  })};
+  h.state.orders.length=0;
+  const result=await h.dwoFinalIssue.listIssuedDriveRecoveryTrial(trusted);
+  assert.deepEqual(result,expected);
+  assert.equal(lists,1);
+  assert.equal(h.dwoFinalIssue.getIssuedTransferStatus(ref),'UNVERIFIED');
+  h.context.ReferenceMediaStorage={createDriveOutboxTrial:()=>({})};
+  await assert.rejects(()=>h.dwoFinalIssue.listIssuedDriveRecoveryTrial(trusted),{code:'TRANSFER_DRIVE_OUTBOX_UNAVAILABLE'});
+});

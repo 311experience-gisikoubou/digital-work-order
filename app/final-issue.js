@@ -996,6 +996,15 @@
     return outbox.inspectSignedRecovery(workOrderRef,trustedPairing);
   }
 
+  // Read-only trial inventory: ref discovery must not depend on sessionStorage.
+  async function listIssuedDriveRecoveryTrial(trustedPairing) {
+    const storage = global.ReferenceMediaStorage;
+    if (!storage || typeof storage.createDriveOutboxTrial !== 'function') throw transferPackageError('TRANSFER_DRIVE_OUTBOX_UNAVAILABLE');
+    const outbox = storage.createDriveOutboxTrial(global);
+    if (typeof outbox.listSignedRecovery !== 'function') throw transferPackageError('TRANSFER_DRIVE_OUTBOX_UNAVAILABLE');
+    return outbox.listSignedRecovery(trustedPairing);
+  }
+
   // Bounded trial decision only: no transport, credentials, state advancement,
   // deletion or UI wiring. A caller-provided status is not a verified receipt.
   // Re-read the existing exact ciphertext; never create a new job on retry.
@@ -1049,6 +1058,7 @@
     prepareIssuedDriveOutboxTrial,
     planIssuedDriveRetryTrial,
     inspectIssuedDriveRecoveryTrial,
+    listIssuedDriveRecoveryTrial,
     getIssuedTransferStatus,
     refreshIssuedTransferState
   };

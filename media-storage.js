@@ -520,6 +520,16 @@
           req.onsuccess = () => set(req.result);
         });
       },
+      listDriveOutboxKeys(prefix, count) {
+        if (!env.IDBKeyRange || typeof env.IDBKeyRange.bound !== 'function') {
+          return Promise.reject(makeError('DRIVE_OUTBOX_LIST_UNAVAILABLE'));
+        }
+        return run([STORE_SETTINGS], 'readonly', (tx, set) => {
+          const range = env.IDBKeyRange.bound(prefix, prefix + '\uffff');
+          const req = tx.objectStore(STORE_SETTINGS).getAllKeys(range, count);
+          req.onsuccess = () => set(req.result);
+        });
+      },
       claimDriveOutbox(record) {
         return run([STORE_SETTINGS], 'readwrite', (tx, set, fail) => {
           const store = tx.objectStore(STORE_SETTINGS), req = store.get(record.key);
@@ -676,6 +686,31 @@
         const record = await store.readDriveOutbox(key);
         if (record === undefined) throw makeError('DRIVE_OUTBOX_MISSING');
         return verifySignedRecord(record,key,ref,pairing);
+      },
+      // Bounded synthetic discovery: no sessionStorage, plaintext, mutation or send.
+      // Never truncate silently or present an unverified entry as recoverable.
+      async listSignedRecovery(trustedPairing) {
+        const pairing = capturePairing(trustedPairing);
+        recoveryCrypto();
+        const max = 32;
+        const keys = await store.listDriveOutboxKeys(prefix, max + 1);
+        if (!Array.isArray(keys) || keys.length > max) throw makeError('DRIVE_OUTBOX_LIST_LIMIT');
+        const entries = [];
+        let unverifiedCount = 0;
+        for (const key of keys) {
+          if (typeof key !== 'string' || !key.startsWith(prefix) || !isValidWorkOrderRef(key.slice(prefix.length))) {
+            unverifiedCount++;
+            continue;
+          }
+          const ref = key.slice(prefix.length);
+          const record = await store.readDriveOutbox(key);
+          try {
+            const verified = await verifySignedRecord(record, key, ref, pairing);
+            entries.push({workOrderRef:ref, ...verified});
+          } catch (_) { unverifiedCount++; }
+        }
+        return {status:unverifiedCount ? 'RECOVERY_LIST_INCOMPLETE' : 'RECOVERY_PENDING_LIST',
+          entries, unverifiedCount};
       },
       async claim(ref, bindingSha256, recipientKeyId, body) {
         const key = checkBinding(ref, bindingSha256, recipientKeyId);

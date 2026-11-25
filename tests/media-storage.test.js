@@ -788,6 +788,11 @@ function makeOutboxTrialDb({ failAdd = false, strictUnavailable = false } = {}) 
       assert.equal(name, 'settings');
       return {
         get(key) { return request(() => structuredClone(records.get(key))); },
+        getAllKeys(range, count) {
+          assert.equal(mode, 'readonly');
+          return request(() => [...records.keys()].filter(k => typeof k === 'string' &&
+            k >= range.lower && k <= range.upper).sort().slice(0, count));
+        },
         add(record) {
           assert.equal(mode, 'readwrite');
           return request(() => {
@@ -916,4 +921,38 @@ test('Signed recovery trial rejects missing and unsigned records, abort does not
     }
     assert.equal(db.records.size,0);
   }
+});
+
+test('Pending discovery trial enumerates only bounded verified signed entries without a remembered ref or mutation',async()=>{
+  const f=await outboxTrialFixture(), db=makeOutboxTrialDb();
+  const env={indexedDB:db.indexedDB,IDBKeyRange:{bound:(lower,upper)=>({lower,upper})},
+    crypto:webcrypto,MediaRelayTransport:f.R,MediaTransferCrypto:f.C};
+  const pairing={sender:{clinicDeviceId:f.sender.clinicDeviceId,signingKeyId:f.sender.signingKeyId,publicJwk:f.sender.publicJwk},
+    recipient:{recipientKeyId:f.recipient.recipientKeyId,publicJwk:f.recipient.publicJwk}};
+  const prefix='dwo-drive-outbox-trial-v1:';
+  const out=S.createDriveOutboxTrial(env);
+  db.records.set('unrelated-settings',{private:'SYNTHETIC-UNRELATED'});
+  assert.deepEqual(await out.listSignedRecovery(pairing),{status:'RECOVERY_PENDING_LIST',entries:[],unverifiedCount:0});
+  const proof=await out.claimSignedRecovery(WORK_ORDER_REF,f.binding,f.sender,f.recipient,f.body);
+  const fresh=S.createDriveOutboxTrial(env);
+  const expected={workOrderRef:WORK_ORDER_REF,...proof};
+  const snapshot=structuredClone(db.records);
+  assert.deepEqual(await fresh.listSignedRecovery(pairing),{status:'RECOVERY_PENDING_LIST',entries:[expected],unverifiedCount:0});
+  assert.deepEqual(db.records,snapshot);
+  assert.deepEqual(Object.keys(expected).sort(),['jobId','status','wireSha256','workOrderRef']);
+  const badRef='dwo:223e4567-e89b-42d3-a456-426614174099';
+  db.records.set(prefix+badRef,{key:prefix+badRef,version:'dwo-drive-outbox-trial-v1'});
+  db.records.set(prefix+'invalid-key',{key:prefix+'invalid-key'});
+  const mixed=structuredClone(db.records);
+  assert.deepEqual(await fresh.listSignedRecovery(pairing),{status:'RECOVERY_LIST_INCOMPLETE',entries:[expected],unverifiedCount:2});
+  const alternate=await f.C.generateSenderIdentity({crypto:webcrypto});
+  assert.deepEqual(await fresh.listSignedRecovery({...pairing,sender:alternate}),
+    {status:'RECOVERY_LIST_INCOMPLETE',entries:[],unverifiedCount:3});
+  assert.deepEqual(db.records,mixed);
+  for(let i=0;i<32;i++)db.records.set(prefix+'overflow-'+String(i).padStart(2,'0'),{});
+  const overflow=structuredClone(db.records);
+  await assert.rejects(()=>fresh.listSignedRecovery(pairing),{code:'DRIVE_OUTBOX_LIST_LIMIT'});
+  assert.deepEqual(db.records,overflow);
+  await assert.rejects(()=>S.createDriveOutboxTrial({...env,IDBKeyRange:undefined}).listSignedRecovery(pairing),
+    {code:'DRIVE_OUTBOX_LIST_UNAVAILABLE'});
 });
