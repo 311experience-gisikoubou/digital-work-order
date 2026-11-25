@@ -608,7 +608,75 @@
       } catch (_) { throw makeError('DRIVE_OUTBOX_CORRUPT'); }
       return body;
     }
+
+    // Same ref key as v1: signed and unsigned records cannot coexist.
+    // The caller must supply independently restored current trusted public pairing.
+    // This synthetic trial detects corruption; it grants no send authority.
+    const signedVersion = 'dwo-signed-recovery-trial-v1';
+    function recoveryCrypto() {
+      const api = scope.MediaTransferCrypto;
+      if (!api || typeof api.signDriveRecoveryTrial !== 'function' ||
+          typeof api.verifyDriveRecoveryTrial !== 'function') throw makeError('DRIVE_OUTBOX_UNAVAILABLE');
+      return api;
+    }
+    function capturePairing(pairing) {
+      if (!pairing || !pairing.sender || !pairing.recipient) throw makeError('DRIVE_OUTBOX_BINDING_INVALID');
+      const s = pairing.sender, r = pairing.recipient;
+      // Explicit public-only projection, never store key material in the outbox.
+      const pub = j => {
+        if (!j || Object.keys(j).sort().join('|') !== 'crv|kty|x|y') throw makeError('DRIVE_OUTBOX_BINDING_INVALID');
+        return { kty:j.kty, crv:j.crv, x:j.x, y:j.y };
+      };
+      return { sender:{clinicDeviceId:s.clinicDeviceId, signingKeyId:s.signingKeyId, publicJwk:pub(s.publicJwk)},
+        recipient:{recipientKeyId:r.recipientKeyId, publicJwk:pub(r.publicJwk)} };
+    }
+    async function verifySignedRecord(record, key, ref, pairing) {
+      const invalid = () => makeError('DRIVE_OUTBOX_SIGNED_RECOVERY_INVALID');
+      if (!record || typeof record !== 'object' || Array.isArray(record) ||
+          Object.keys(record).sort().join('|') !== 'bindingSha256|key|planSha256|signature|version|wire|wireSha256' ||
+          record.key !== key || record.version !== signedVersion ||
+          typeof record.bindingSha256 !== 'string' || !hex.test(record.bindingSha256) ||
+          typeof record.wireSha256 !== 'string' || !hex.test(record.wireSha256) ||
+          typeof record.planSha256 !== 'string' || !hex.test(record.planSha256) ||
+          typeof record.wire !== 'string' || record.wire.length > 2 * 1024 * 1024 ||
+          await digest(record.wire) !== record.wireSha256) throw invalid();
+      try {
+        if (!await recoveryCrypto().verifyDriveRecoveryTrial(ref,record.bindingSha256,record.wireSha256,
+          pairing,record.signature,{crypto:scope.crypto})) throw invalid();
+        const body = await transport.verifyDriveRelayBody(JSON.parse(record.wire),ref,pairing.recipient.recipientKeyId,{crypto:scope.crypto});
+        if (body.planSha256 !== record.planSha256 || transport.canonicalJson(body) !== record.wire) throw invalid();
+        return { status:'RECOVERY_PENDING_ONLY',jobId:body.jobId,wireSha256:record.wireSha256 };
+      } catch (_) { throw invalid(); }
+    }
+
     return {
+
+      // Complete the signature BEFORE opening the strict add transaction.
+      // No second write, no legacy promotion, no retry generation or send.
+      async claimSignedRecovery(ref,bindingSha256,senderIdentity,recipientPublicInfo,body) {
+        const pairing = capturePairing({sender:senderIdentity,recipient:recipientPublicInfo});
+        const key = checkBinding(ref,bindingSha256,pairing.recipient.recipientKeyId);
+        const verified = await transport.verifyDriveRelayBody(body,ref,pairing.recipient.recipientKeyId,{crypto:scope.crypto});
+        const wire = transport.canonicalJson(verified);
+        const record = {key,version:signedVersion,bindingSha256,wire,wireSha256:await digest(wire),planSha256:verified.planSha256};
+        record.signature = await recoveryCrypto().signDriveRecoveryTrial(ref,bindingSha256,record.wireSha256,
+          pairing,senderIdentity.privateKey,{crypto:scope.crypto});
+        const expected = await verifySignedRecord(record,key,ref,pairing);
+        const result = await store.claimDriveOutbox(record);
+        if (!result.created) throw makeError('DRIVE_OUTBOX_EXISTS');
+        const persisted = await store.readDriveOutbox(key);
+        const restored = await verifySignedRecord(persisted,key,ref,pairing);
+        if (transport.canonicalJson(persisted) !== transport.canonicalJson(record) ||
+            restored.wireSha256 !== expected.wireSha256) throw makeError('DRIVE_OUTBOX_SIGNED_RECOVERY_INVALID');
+        return restored;
+      },
+      async inspectSignedRecovery(ref,trustedPairing) {
+        const pairing = capturePairing(trustedPairing);
+        const key = checkBinding(ref,'0'.repeat(64),pairing.recipient.recipientKeyId);
+        const record = await store.readDriveOutbox(key);
+        if (record === undefined) throw makeError('DRIVE_OUTBOX_MISSING');
+        return verifySignedRecord(record,key,ref,pairing);
+      },
       async claim(ref, bindingSha256, recipientKeyId, body) {
         const key = checkBinding(ref, bindingSha256, recipientKeyId);
         const verified = await transport.verifyDriveRelayBody(body, ref, recipientKeyId, { crypto: scope.crypto });

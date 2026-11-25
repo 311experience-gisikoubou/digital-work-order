@@ -1882,3 +1882,36 @@ test('local issue feedback distinguishes local issuance from lab transfer in eve
     assert.ok(!h.events.some(e=>e.includes('送信しました')));
   }
 });
+
+test('Signed recovery trial issued opt-in uses verified package, inspection is opaque and independent of session',async()=>{
+  const R=require('../media-relay.js'), B=require('../media-receiver-bootstrap.js');
+  const opts={crypto:nodeCrypto.webcrypto};
+  const sender=await RealMediaTransferCrypto.generateSenderIdentity(opts);
+  const recipient=await RealMediaTransferCrypto.generateRecipientIdentity('synthetic-signed-issue',opts);
+  const h=makeHarness({mediaTransferCrypto:RealMediaTransferCrypto});
+  await h.run();
+  h.context.MediaRelayTransport=R; h.context.MediaReceiverBootstrap=B;
+  let claims=0,inspects=0,saved;
+  h.context.createIssuePdfBlob=async()=>new Blob(['%PDF-1.7\nsynthetic'],{type:'application/pdf'});
+  h.mediaManager.prepareTransferPackage=(order,options)=>RealMediaTransferPackage.buildPackage(order.workOrderRef,order,[],{...opts,...options});
+  const storage={createDriveOutboxTrial:()=>({
+    async claimSignedRecovery(ref,binding,s,r,body){
+      assert.equal(ref,h.workOrderRef);assert.match(binding,/^[0-9a-f]{64}$/);
+      assert.equal(s,sender);assert.equal(r,recipient);
+      assert.equal((await R.verifyDriveRelayBody(body,ref,r.recipientKeyId,opts)).jobId,body.jobId);
+      claims++;saved={status:'RECOVERY_PENDING_ONLY',jobId:body.jobId,wireSha256:'a'.repeat(64)};return saved;
+    },
+    async inspectSignedRecovery(ref,pairing){assert.equal(ref,h.workOrderRef);assert.equal(pairing, trusted);inspects++;return saved;}
+  })};
+  const trusted={sender:{clinicDeviceId:sender.clinicDeviceId,signingKeyId:sender.signingKeyId,publicJwk:sender.publicJwk},recipient:{recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk}};
+  h.context.ReferenceMediaStorage=storage;
+  const result=await h.dwoFinalIssue.prepareIssuedDriveOutboxTrial(h.workOrderRef,sender,recipient,'create-signed-recovery');
+  assert.equal(claims,1);assert.equal(result.status,'RECOVERY_PENDING_ONLY');
+  assert.equal(Object.hasOwn(result,'body'),false);
+  h.state.orders.length=0;
+  const inspected=await h.dwoFinalIssue.inspectIssuedDriveRecoveryTrial(h.workOrderRef,trusted);
+  assert.deepEqual(inspected,result);assert.equal(inspects,1);assert.equal(claims,1);
+  assert.equal(h.dwoFinalIssue.getIssuedTransferStatus(h.workOrderRef),'UNVERIFIED');
+  await assert.rejects(()=>h.dwoFinalIssue.prepareIssuedDriveOutboxTrial(h.workOrderRef,sender,recipient,'create-signed-recovery'),{code:'TRANSFER_PACKAGE_ORDER_NOT_FOUND'});
+  assert.equal(claims,1);
+});

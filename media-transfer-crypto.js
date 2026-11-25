@@ -1035,6 +1035,57 @@
   // ============================================================
   //  公開API
   // ============================================================
+
+  // Signed pending-outbox trial only. This domain is not a send authorization.
+  const DRIVE_RECOVERY_DOMAIN = 'dwo-signed-recovery-trial-v1';
+  async function driveRecoveryPayload(ref, bindingSha256, wireSha256, pairing, cryptoApi) {
+    const hex = /^[0-9a-f]{64}$/;
+    if (!/^dwo:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(ref || '') ||
+        typeof bindingSha256 !== 'string' || !hex.test(bindingSha256) ||
+        typeof wireSha256 !== 'string' || !hex.test(wireSha256) ||
+        !sameKeySet(pairing, ['sender', 'recipient']) ||
+        !sameKeySet(pairing.sender, ['clinicDeviceId', 'signingKeyId', 'publicJwk']) ||
+        !sameKeySet(pairing.recipient, ['recipientKeyId', 'publicJwk'])) {
+      throw cryptoError('CRYPTO_DRIVE_RECOVERY_INVALID');
+    }
+    const s = pairing.sender, r = pairing.recipient;
+    const senderJwk = normalizePublicJwk(s.publicJwk);
+    const recipientJwk = normalizePublicJwk(r.publicJwk);
+    const clinicDeviceId = s.clinicDeviceId, signingKeyId = s.signingKeyId, recipientKeyId = r.recipientKeyId;
+    if (typeof clinicDeviceId !== 'string' || !/^dev_[A-Za-z0-9_-]{1,156}$/.test(clinicDeviceId) ||
+        signingKeyId !== await publicJwkFingerprint(senderJwk, 'sk_', cryptoApi) ||
+        recipientKeyId !== await publicJwkFingerprint(recipientJwk, 'rk_', cryptoApi)) {
+      throw cryptoError('CRYPTO_DRIVE_RECOVERY_INVALID');
+    }
+    return { senderJwk, body: { domain: DRIVE_RECOVERY_DOMAIN, ref, bindingSha256, wireSha256,
+      clinicDeviceId, signingKeyId, recipientKeyId } };
+  }
+
+  async function signDriveRecoveryTrial(ref, bindingSha256, wireSha256, pairing, privateKey, options) {
+    const cryptoApi = resolveCrypto(options);
+    if (!privateKey || privateKey.extractable !== false || privateKey.type !== 'private' ||
+        privateKey.algorithm?.name !== 'ECDSA' || privateKey.algorithm?.namedCurve !== 'P-256') {
+      throw cryptoError('CRYPTO_DRIVE_RECOVERY_INVALID');
+    }
+    const { body, senderJwk } = await driveRecoveryPayload(ref, bindingSha256, wireSha256, pairing, cryptoApi);
+    const signature = await signCanonical(body, privateKey, cryptoApi);
+    if (!await verifyCanonicalSignature(body, signature, senderJwk, cryptoApi)) {
+      throw cryptoError('CRYPTO_DRIVE_RECOVERY_INVALID');
+    }
+    return signature;
+  }
+
+  async function verifyDriveRecoveryTrial(ref, bindingSha256, wireSha256, pairing, signature, options) {
+    try {
+      if (typeof signature !== 'string' || !/^[A-Za-z0-9_-]{86}$/.test(signature)) return false;
+      const bytes = base64urlDecode(signature);
+      if (bytes.length !== 64 || base64urlEncode(bytes) !== signature) return false;
+      const cryptoApi = resolveCrypto(options);
+      const { body, senderJwk } = await driveRecoveryPayload(ref, bindingSha256, wireSha256, pairing, cryptoApi);
+      return await verifyCanonicalSignature(body, signature, senderJwk, cryptoApi);
+    } catch (_) { return false; }
+  }
+
   const api = {
     ALGORITHMS,
     SCHEMA_VERSIONS,
@@ -1047,6 +1098,8 @@
 
     // 鍵の抽出可否
     isKeyExtractable,
+    signDriveRecoveryTrial,
+    verifyDriveRecoveryTrial,
 
     // 技工所（受信側）識別
     generateRecipientIdentity,

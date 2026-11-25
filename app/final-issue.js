@@ -932,7 +932,7 @@
   async function prepareIssuedDriveOutboxTrial(workOrderRef, senderIdentity, recipientPublicInfo, mode) {
     const storage = global.ReferenceMediaStorage;
     if (!storage || typeof storage.createDriveOutboxTrial !== 'function' ||
-        !['create','resume'].includes(mode)) throw transferPackageError('TRANSFER_DRIVE_OUTBOX_UNAVAILABLE');
+        !['create','resume','create-signed-recovery'].includes(mode)) throw transferPackageError('TRANSFER_DRIVE_OUTBOX_UNAVAILABLE');
     if (preparingOutboxRefs.has(workOrderRef)) throw transferPackageError('TRANSFER_DRIVE_PREPARE_IN_PROGRESS');
     function publicIdentity() {
       const s = senderIdentity, r = recipientPublicInfo;
@@ -971,13 +971,29 @@
       } else {
         const candidate = await prepareIssuedDriveRelayCandidate(workOrderRef,senderIdentity,recipientPublicInfo);
         await assertCurrent();
-        body = await outbox.claim(workOrderRef,binding,recipientKeyId,candidate);
+        if (mode === 'create-signed-recovery') {
+          if (typeof outbox.claimSignedRecovery !== 'function') throw transferPackageError('TRANSFER_DRIVE_OUTBOX_UNAVAILABLE');
+          body = await outbox.claimSignedRecovery(workOrderRef,binding,senderIdentity,recipientPublicInfo,candidate);
+        } else {
+          body = await outbox.claim(workOrderRef,binding,recipientKeyId,candidate);
+        }
       }
       await assertCurrent();
       return body;
     } finally {
       preparingOutboxRefs.delete(workOrderRef);
     }
+  }
+
+  // Read-only pending inspection after a document restart. The trusted public pairing
+  // must come from an independent current pairing authority; no session, send or ACK authority.
+  async function inspectIssuedDriveRecoveryTrial(workOrderRef, trustedPairing) {
+    if (!WORK_ORDER_REF_PATTERN.test(workOrderRef || '')) throw transferPackageError('TRANSFER_PACKAGE_NOT_ISSUED');
+    const storage = global.ReferenceMediaStorage;
+    if (!storage || typeof storage.createDriveOutboxTrial !== 'function') throw transferPackageError('TRANSFER_DRIVE_OUTBOX_UNAVAILABLE');
+    const outbox = storage.createDriveOutboxTrial(global);
+    if (typeof outbox.inspectSignedRecovery !== 'function') throw transferPackageError('TRANSFER_DRIVE_OUTBOX_UNAVAILABLE');
+    return outbox.inspectSignedRecovery(workOrderRef,trustedPairing);
   }
 
   // Bounded trial decision only: no transport, credentials, state advancement,
@@ -1032,6 +1048,7 @@
     prepareIssuedDriveRelayCandidate,
     prepareIssuedDriveOutboxTrial,
     planIssuedDriveRetryTrial,
+    inspectIssuedDriveRecoveryTrial,
     getIssuedTransferStatus,
     refreshIssuedTransferState
   };
