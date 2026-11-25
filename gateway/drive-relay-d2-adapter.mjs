@@ -11,6 +11,8 @@ import { isDeepStrictEqual } from 'node:util';
 
 const require=createRequire(import.meta.url),Crypto=require('../media-transfer-crypto.js'),Transfer=require('../media-transfer-package.js');
 const META_VERSION='dwo-drive-relay-d2-v1',HEX64=/^[0-9a-f]{64}$/,OBJ=/^obj_([0-9]{4})\.bin$/;
+// Match the existing D2 Apps Script synthetic wire limits (not production limits).
+const D2_MAX_BYTES=1024*1024,D2_MAX_OBJECTS=16;
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const fail=code=>Object.assign(new Error(code),{code});
 const RETAIN_SAFE_PHASES=Object.freeze(['BACKUP_RESTORE','SYNC_VALIDATE','ENVELOPE_VERIFY','SIGNATURE_DECRYPT','SYNTHETIC_CHECK','SAVE_VERIFY']);
@@ -19,7 +21,7 @@ const plain=value=>!!value&&typeof value==='object'&&!Array.isArray(value);
 function exact(value,keys){return plain(value)&&Object.keys(value).length===keys.length&&keys.every(key=>Object.hasOwn(value,key));}
 function validJwk(value){return plain(value)&&value.kty==='EC'&&value.crv==='P-256'&&/^[A-Za-z0-9_-]{40,50}$/.test(value.x||'')&&/^[A-Za-z0-9_-]{40,50}$/.test(value.y||'');}
 function validMeta(meta){
-  if(!plain(meta)||meta.version!==META_VERSION||meta.state!=='ready'||!/^job_[0-9a-f]{64}$/.test(meta.jobId||'')||meta.jobId!=='job_'+meta.descriptorSha256||!HEX64.test(meta.descriptorSha256||'')||!HEX64.test(meta.ackProofHash||'')||!HEX64.test(meta.planSha256||'')||!Number.isSafeInteger(meta.totalBytes)||meta.totalBytes<1||!Array.isArray(meta.objects)||meta.objects.length<3||!plain(meta.bootstrap))return false;
+  if(!plain(meta)||meta.version!==META_VERSION||meta.state!=='ready'||!/^job_[0-9a-f]{64}$/.test(meta.jobId||'')||meta.jobId!=='job_'+meta.descriptorSha256||!HEX64.test(meta.descriptorSha256||'')||!HEX64.test(meta.ackProofHash||'')||!HEX64.test(meta.planSha256||'')||!Number.isSafeInteger(meta.totalBytes)||meta.totalBytes<1||meta.totalBytes>D2_MAX_BYTES||!Array.isArray(meta.objects)||meta.objects.length<3||meta.objects.length>D2_MAX_OBJECTS||!plain(meta.bootstrap))return false;
   let sum=0;
   for(let i=0;i<meta.objects.length;i++){
     const object=meta.objects[i],match=OBJ.exec(object&&object.name||'');
@@ -37,10 +39,37 @@ async function senderRegistryFromPairing(dir){
   if(!exact(pairing,['clinicDeviceId','signingKeyId','signingPublicJwk','recipientKeyId'])||!/^dev_[A-Za-z0-9_-]+$/.test(pairing.clinicDeviceId)||!/^sk_[A-Za-z0-9_-]+$/.test(pairing.signingKeyId)||!/^rk_[A-Za-z0-9_-]+$/.test(pairing.recipientKeyId)||!validJwk(pairing.signingPublicJwk))throw fail('D2_PAIRING_REGISTRY_INVALID');
   return{version:'dwo-sender-registry-v1',clinicDeviceId:pairing.clinicDeviceId,status:'active',pairedRecipientKeyId:pairing.recipientKeyId,activeSigningKey:{signingKeyId:pairing.signingKeyId,publicJwk:pairing.signingPublicJwk,activatedAt:0},retiredSigningKeys:[],pairingId:'pr_d2_synthetic_trial',createdAt:0,updatedAt:0};
 }
+// Bounded read even if the file grows between stat and read. Same trusted local
+// filesystem assumption as the retained-only trial; not a hostile-race guarantee.
+async function readD2SyncedFile(file,limit,missingCode,invalidCode){
+  let handle;
+  try{
+    const before=await fs.lstat(file);
+    if(!before.isFile()||before.isSymbolicLink()||before.size>limit)throw fail(invalidCode);
+    handle=await fs.open(file,'r');
+    const current=await handle.stat();
+    if(!current.isFile()||current.size>limit)throw fail(invalidCode);
+    const bytes=Buffer.alloc(current.size+1);
+    let offset=0;
+    while(offset<bytes.length){
+      const {bytesRead}=await handle.read(bytes,offset,bytes.length-offset,null);
+      if(bytesRead===0)break;
+      offset+=bytesRead;
+    }
+    if(offset!==current.size)throw fail(invalidCode);
+    return bytes.subarray(0,offset);
+  }catch(error){
+    if(error&&error.code===invalidCode)throw error;
+    throw fail(missingCode);
+  }finally{if(handle)await handle.close();}
+}
 export async function readVerifiedSyncedJob(dir){
-  let marker,meta,metaBytes;try{metaBytes=await fs.readFile(path.join(dir,'meta.json'));meta=JSON.parse(metaBytes.toString('utf8'));marker=JSON.parse(await fs.readFile(path.join(dir,'ready.json'),'utf8'));}catch{throw fail('D2_READY_MARKER_MISSING');}
+  let marker,meta,metaBytes;
+  metaBytes=await readD2SyncedFile(path.join(dir,'meta.json'),D2_MAX_BYTES,'D2_READY_MARKER_MISSING','D2_METADATA_INVALID');
+  const readyBytes=await readD2SyncedFile(path.join(dir,'ready.json'),D2_MAX_BYTES,'D2_READY_MARKER_MISSING','D2_METADATA_INVALID');
+  try{meta=JSON.parse(metaBytes.toString('utf8'));marker=JSON.parse(readyBytes.toString('utf8'));}catch{throw fail('D2_READY_MARKER_MISSING');}
   if(!validMeta(meta)||!plain(marker)||marker.version!==META_VERSION||marker.jobId!==meta.jobId||marker.state!=='ready'||marker.planSha256!==meta.planSha256||marker.metaSha256!==hash(metaBytes)||!HEX64.test(marker.metaSha256||''))throw fail('D2_METADATA_INVALID');
-  const blobs=[];for(const object of meta.objects){let bytes;try{bytes=await fs.readFile(path.join(dir,object.name));}catch{throw fail('D2_SYNC_OBJECT_MISSING');}if(bytes.length!==object.size)throw fail('D2_SYNC_OBJECT_SIZE_MISMATCH');if(hash(bytes)!==object.ciphertextSha256)throw fail('D2_SYNC_OBJECT_HASH_MISMATCH');blobs.push(new Blob([bytes]));}
+  const blobs=[];for(const object of meta.objects){const bytes=await readD2SyncedFile(path.join(dir,object.name),object.size,'D2_SYNC_OBJECT_MISSING','D2_SYNC_OBJECT_SIZE_MISMATCH');if(bytes.length!==object.size)throw fail('D2_SYNC_OBJECT_SIZE_MISMATCH');if(hash(bytes)!==object.ciphertextSha256)throw fail('D2_SYNC_OBJECT_HASH_MISMATCH');blobs.push(new Blob([bytes]));}
   return{meta,blobs};
 }
 // Reuse the existing inbox verifier; a receipt alone is not proof of durable content.
