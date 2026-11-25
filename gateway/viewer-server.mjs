@@ -16,7 +16,7 @@ import {
   mediaFilePath,
   summarizeJob
 } from './viewer-core.mjs';
-import { buildDigitalWorkOrderIntake, buildDeliveryIntakeFilename } from './delivery-intake-reuse.mjs';
+import { buildDigitalWorkOrderIntake, buildDeliveryIntakeFilename, DELIVERY_INTAKE_MAX_PAYLOAD_BYTES } from './delivery-intake-reuse.mjs';
 import { createRelatedMediaService } from './related-media-core.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -305,6 +305,9 @@ async function handleDeliveryIntake(res, inboxRoot, rawJobId) {
     const payload = buildDigitalWorkOrderIntake(job.workOrder);
     const filename = buildDeliveryIntakeFilename(payload.workOrderRef);
     const body = JSON.stringify(payload, null, 2);
+    if (Buffer.byteLength(body, 'utf8') > DELIVERY_INTAKE_MAX_PAYLOAD_BYTES) {
+      throw viewerServerError('DELIVERY_INTAKE_EXPORT_TOO_LARGE');
+    }
     res.writeHead(200, {
       'Content-Type': 'application/json; charset=utf-8',
       'Content-Disposition': 'attachment; filename="' + filename + '"',

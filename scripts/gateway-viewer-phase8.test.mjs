@@ -495,6 +495,50 @@ test('Phase 8 localhost server exposes verified detail/media and reuses digital-
   });
 });
 
+test('Delivery intake viewer enforces the shared UTF-8 byte limit before download', async () => {
+  await withTempRoot(async root => {
+    const limit = 256 * 1024; // Receiver's existing Rust intake-v1 limit.
+    const value = '\u754c'.repeat(2000);
+    const order = makeOrder({
+      orderTypes: Array(32).fill(value),
+      devices: Array(11).fill(value),
+      remarks: ['x', 'x', 'x']
+    });
+    const size = order => Buffer.byteLength(
+      JSON.stringify(globalThis.buildDigitalWorkOrderIntake(order), null, 2), 'utf8');
+    let remaining = limit - size(order);
+    assert.ok(remaining > 0 && remaining <= 3 * 1999);
+    order.remarks = order.remarks.map(text => {
+      const n = Math.min(1999, remaining);
+      remaining -= n;
+      return text + 'x'.repeat(n);
+    });
+    assert.equal(size(order), limit);
+    const over = { ...order, remarks: order.remarks.slice() };
+    over.remarks[over.remarks.length - 1] += 'x';
+    assert.equal(size(over), limit + 1);
+    await writeSyntheticJob(root, { jobId: JOB_NEW, order });
+    await writeSyntheticJob(root, { jobId: JOB_OLD, order: over });
+    const before = await snapshotTree(root);
+    const server = await startViewer({ inboxRoot: root, port: 0 });
+    try {
+      const base = 'http://127.0.0.1:' + server.address().port;
+      const endpoint = jobId => base + '/api/jobs/' + encodeURIComponent(jobId) + '/delivery-intake.json';
+      const ok = await fetch(endpoint(JOB_NEW));
+      assert.equal(ok.status, 200);
+      assert.equal((await ok.arrayBuffer()).byteLength, limit);
+      assert.match(ok.headers.get('content-disposition') || '', /^attachment;/);
+      const rejected = await fetch(endpoint(JOB_OLD));
+      assert.equal(rejected.status, 422);
+      assert.equal(rejected.headers.get('content-disposition'), null);
+      assert.deepEqual(await rejected.json(), { error: 'DELIVERY_INTAKE_EXPORT_TOO_LARGE' });
+      assert.deepEqual(await snapshotTree(root), before);
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
+  });
+});
+
 test('PHASE8-SEC-01: rejects foreign/missing/malformed/duplicate/wrong-port Host and a foreign absolute-form request target', async () => {
   await withTempRoot(async root => {
     await writeSyntheticJob(root, { jobId: JOB_NEW, receivedAt: 3000 });
