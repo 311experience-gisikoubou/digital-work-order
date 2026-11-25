@@ -2054,3 +2054,156 @@ test('Drive-outbox-retry-wire connects real B5 ciphertext to D2 sender and gatew
   assert.equal(stored.includes(bearer),false);
   assert.equal(stored.includes('SYNTHETIC_OUTBOX_WIRE'),false);
 });
+
+// Test-only bridge between the actual signed outbox and existing Apps Script VM.
+// Never imported by the app, never opens a real DB/endpoint, never accepts external
+// pairing/bearer/wire or status. The synthetic operator intent is one-shot.
+async function makeSignedD2ConnectorTrial(){
+  const S=require('../media-storage.js'), opts={crypto:webcrypto,transferApi:T};
+  const sender=await C.generateSenderIdentity(opts);
+  const recipient=await C.generateRecipientIdentity('signed-d2-connector-synthetic',opts);
+  const pairing={sender:{clinicDeviceId:sender.clinicDeviceId,signingKeyId:sender.signingKeyId,publicJwk:sender.publicJwk},
+    recipient:{recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk}};
+  let currentPairing=structuredClone(pairing);
+  const bearer='A'.repeat(43);
+  const storage=makeFakeIndexedDB();
+  const indexedDB={open(name,version){
+    assert.equal(name,S.DB_NAME);assert.equal(version,S.DB_VERSION);
+    const req=storage.open(),db=req.result;
+    // Adapt the existing isolated FIFO DB double to the real settings key path;
+    // unwrap records on reads, keep the stored signed record itself unmodified.
+    req.result={transaction(names,mode,options){
+      assert.deepEqual(names,[S.STORE_SETTINGS]);
+      const tx=db.transaction();
+      tx.durability=options?.durability||'default';
+      const store=tx.objectStore();
+      tx.objectStore=name=>{
+        assert.equal(name,S.STORE_SETTINGS);
+        return {
+          get(key){
+            const inner=store.get(key);
+            return {get result(){return structuredClone(inner.result?.value);},
+              set onsuccess(fn){inner.onsuccess=fn;}};
+          },
+          add(record){
+            assert.equal(mode,'readwrite');assert.equal(tx.durability,'strict');
+            return store.add({id:record.key,value:structuredClone(record)});
+          }
+        };
+      };
+      return tx;
+    }};
+    return req;
+  }};
+  const env={indexedDB,crypto:webcrypto,MediaTransferCrypto:C,MediaRelayTransport:R};
+  const pkg=await T.buildPackage(REF,{workOrderRef:REF,trial:'SYNTHETIC_SIGNED_D2_CONNECTOR'},[],
+    {...opts,issuedB5Pdf:new Blob(['%PDF-1.7\nsynthetic connector'],{type:'application/pdf'})});
+  const candidate=await R.buildDriveRelayBody(await C.encryptPackage(pkg,sender,recipient,opts),
+    sender,recipient,{...opts,bootstrapApi:B});
+  const proof=await S.createDriveOutboxTrial(env).claimSignedRecovery(REF,'b'.repeat(64),sender,recipient,candidate);
+  const selection=Object.freeze({workOrderRef:REF,jobId:proof.jobId,wireSha256:proof.wireSha256});
+  const key='dwo-drive-outbox-trial-v1:'+REF;
+  const original=structuredClone(storage.peek(key).value);
+  const gateway=await fakeGateway();
+  gateway.props.set('D2_RECIPIENT_PUBLIC_JSON',JSON.stringify(pairing.recipient));
+  gateway.g.d2Pair_({bearerSha256:gateway.sha(bearer),clinicDeviceId:sender.clinicDeviceId,
+    signingKeyId:sender.signingKeyId,signingPublicJwk:sender.publicJwk,recipientKeyId:recipient.recipientKeyId});
+  const calls=[];
+  let nextIntent=null, afterStatus=null, loseReply=false;
+  const reject=()=>Error('SIGNED_D2_CONNECTOR_REJECTED');
+  const sameSelection=s=>s&&Object.keys(s).sort().join('|')==='jobId|wireSha256|workOrderRef'&&
+    s.workOrderRef===REF&&s.jobId===selection.jobId&&s.wireSha256===selection.wireSha256;
+  // Only an explicit synthetic operator action can mint this in-memory token.
+  // It is never persisted, never available to application code, and is consumed once.
+  function confirmSyntheticOperatorIntent(s){
+    if(!sameSelection(s))throw reject();
+    nextIntent=Object.freeze({});
+    return nextIntent;
+  }
+  async function readCurrent(s){
+    if(!sameSelection(s))throw reject();
+    const trusted=structuredClone(currentPairing);
+    // Use the production trial adapter's signature verifier with an independently
+    // restored pairing, not data from the outbox or arguments of send().
+    const verified=await S.createDriveOutboxTrial(env).inspectSignedRecovery(REF,trusted);
+    const record=structuredClone(storage.peek(key)?.value);
+    if(!record||verified.jobId!==s.jobId||verified.wireSha256!==s.wireSha256||
+       h(record.wire)!==s.wireSha256||record.wireSha256!==s.wireSha256||
+       R.canonicalJson(trusted)!==R.canonicalJson(currentPairing))throw reject();
+    const body=await R.verifyDriveRelayBody(JSON.parse(record.wire),REF,trusted.recipient.recipientKeyId,opts);
+    if(R.canonicalJson(body)!==record.wire||body.jobId!==s.jobId||
+       R.canonicalJson(trusted)!==R.canonicalJson(currentPairing))throw reject();
+    return {body,wire:record.wire,trust: R.canonicalJson(trusted)};
+  }
+  async function send(s,intent){
+    if(!nextIntent||intent!==nextIntent)throw reject();
+    nextIntent=null;
+    const first=await readCurrent(s);
+    const body=first.body;
+    // This is the existing actual Apps Script status logic in its memory-only VM.
+    calls.push('getSyntheticJobStatus');
+    let reply;
+    try{reply=gateway.g.d2Status_({bearer,jobId:body.jobId,ackProofHash:body.ackProofHash,planSha256:body.planSha256});}
+    catch{return {status:'KEEP_PENDING',jobId:body.jobId};}
+    if(!reply||Object.keys(reply).sort().join('|')!=='jobId|status'||reply.jobId!==body.jobId)
+      return {status:'KEEP_PENDING',jobId:body.jobId};
+    if(afterStatus){const fn=afterStatus;afterStatus=null;fn();}
+    const current=await readCurrent(s);
+    if(current.wire!==first.wire||current.trust!==first.trust)throw reject();
+    if(reply.status==='ready'||reply.status==='deleted')return {status:'RELAY_REPORTED_ACCEPTED',jobId:body.jobId};
+    if(reply.status!=='partial'&&reply.status!=='not-started')return {status:'KEEP_PENDING',jobId:body.jobId};
+    calls.push('putSyntheticJob');
+    try{
+      const sent=gateway.g.d2Put_({...current.body,bearer});
+      if(loseReply){loseReply=false;return {status:'KEEP_PENDING',jobId:body.jobId};}
+      if(sent&&Object.keys(sent).sort().join('|')==='jobId|status'&&sent.status==='ready'&&sent.jobId===body.jobId)
+        return {status:'RELAY_REPORTED_ACCEPTED',jobId:body.jobId};
+    }catch{/* preserve the signed record; never auto-upload again */}
+    return {status:'KEEP_PENDING',jobId:body.jobId};
+  }
+  return {selection,confirmSyntheticOperatorIntent,send,calls,
+    assertOutboxUnchanged(){assert.deepEqual(storage.peek(key).value,original);},
+    assertExactMockBytes(){
+      const job=gateway.file(gateway.root,selection.jobId);assert.ok(job);
+      for(const obj of candidate.objects){
+        const name='obj_'+String(obj.ordinal).padStart(4,'0')+'.bin';
+        const file=gateway.file(job,name);assert.ok(file);assert.equal(h(file.bytes),obj.ciphertextSha256);
+      }
+      assert.equal([...gateway.rows.values()].filter(x=>x.name===selection.jobId).length,1);
+    },
+    simulateLostReply(){loseReply=true;},
+    changePairingAfterStatus(){afterStatus=()=>{currentPairing={...currentPairing,sender:{...currentPairing.sender,clinicDeviceId:'dev_revoked_synthetic'}};};},
+    tamperAfterStatus(){afterStatus=()=>{storage.seed({id:key,value:{...original,wireSha256:'0'.repeat(64)}});};},
+    interruptAfterStatus(){afterStatus=()=>{throw Error('SYNTHETIC_INTERRUPTED');};},
+    assertTamperPreserved(){assert.equal(storage.peek(key).value.wireSha256,'0'.repeat(64));}
+  };
+}
+test('Signed outbox D2 connector trial sends exact signed bytes only after explicit intent, lost reply and duplicate action are safe',async()=>{
+  const f=await makeSignedD2ConnectorTrial(),s=f.selection;
+  await assert.rejects(()=>f.send(s,{}),/SIGNED_D2_CONNECTOR_REJECTED/);
+  assert.deepEqual(f.calls,[]);
+  f.simulateLostReply();
+  const intent=f.confirmSyntheticOperatorIntent(s);
+  assert.deepEqual(await f.send(s,intent),{status:'KEEP_PENDING',jobId:s.jobId});
+  f.assertOutboxUnchanged();f.assertExactMockBytes();
+  await assert.rejects(()=>f.send(s,intent),/SIGNED_D2_CONNECTOR_REJECTED/);
+  assert.deepEqual(await f.send(s,f.confirmSyntheticOperatorIntent(s)),{status:'RELAY_REPORTED_ACCEPTED',jobId:s.jobId});
+  assert.deepEqual(f.calls,['getSyntheticJobStatus','putSyntheticJob','getSyntheticJobStatus']);
+  f.assertOutboxUnchanged();f.assertExactMockBytes();
+});
+test('Signed outbox D2 connector trial rejects mismatched selection and revalidates pairing or tampered record after status',async()=>{
+  const a=await makeSignedD2ConnectorTrial(),s=a.selection;
+  await assert.rejects(()=>a.send({...s,wireSha256:'0'.repeat(64)},a.confirmSyntheticOperatorIntent(s)),/SIGNED_D2_CONNECTOR_REJECTED/);
+  assert.deepEqual(a.calls,[]);
+  a.changePairingAfterStatus();
+  await assert.rejects(()=>a.send(s,a.confirmSyntheticOperatorIntent(s)));
+  assert.deepEqual(a.calls,['getSyntheticJobStatus']);a.assertOutboxUnchanged();
+  const b=await makeSignedD2ConnectorTrial();
+  b.tamperAfterStatus();
+  await assert.rejects(()=>b.send(b.selection,b.confirmSyntheticOperatorIntent(b.selection)));
+  assert.deepEqual(b.calls,['getSyntheticJobStatus']);b.assertTamperPreserved();
+  const c=await makeSignedD2ConnectorTrial();
+  c.interruptAfterStatus();
+  await assert.rejects(()=>c.send(c.selection,c.confirmSyntheticOperatorIntent(c.selection)),/SYNTHETIC_INTERRUPTED/);
+  assert.deepEqual(c.calls,['getSyntheticJobStatus']);c.assertOutboxUnchanged();
+});
