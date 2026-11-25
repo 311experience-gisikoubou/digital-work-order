@@ -285,11 +285,11 @@
     }
   }
 
-  // DWO_OUTBOX_DEVICE_PROBE_V1: only the existing unlinked, no-network
-  // synthetic probe page may use this separate database. Never open dwo_media_v1.
-  const OUTBOX_DB = 'dwo_synthetic_outbox_device_probe_v1';
-  const OUTBOX_META = 'synthetic-outbox-metadata-v1';
-  const OUTBOX_REF = 'dwo:123e4567-e89b-42d3-a456-426614174009';
+  // DWO_SIGNED_OUTBOX_DEVICE_PROBE_V2: existing unlinked, no-network
+  // synthetic page. Keep prior v1 evidence intact; never open dwo_media_v1.
+  const OUTBOX_DB = 'dwo_synthetic_signed_outbox_device_probe_v2';
+  const OUTBOX_META = 'synthetic-signed-outbox-metadata-v2';
+  const OUTBOX_REF = 'dwo:123e4567-e89b-42d3-a456-426614174010';
   let documentToken;
   let outboxBusy = false;
   function outboxStorage() {
@@ -299,6 +299,7 @@
     }
     return api.createDriveOutboxTrial({
       crypto: window.crypto, MediaRelayTransport: window.MediaRelayTransport,
+      MediaTransferCrypto: window.MediaTransferCrypto, IDBKeyRange: window.IDBKeyRange,
       indexedDB: { open(name, version) {
         if (name !== api.DB_NAME) throw new Error('OUTBOX_PROBE_DB_INVALID');
         return indexedDB.open(OUTBOX_DB, version);
@@ -316,27 +317,41 @@
     const envelope = await window.MediaTransferCrypto.encryptPackage(pkg, sender, recipient, opts);
     const body = await window.MediaRelayTransport.buildDriveRelayBody(envelope, sender, recipient,
       {...opts, bootstrapApi: window.MediaReceiverBootstrap});
-    const binding = await sha256Hex('synthetic-outbox-device-probe-v1');
+    const binding = await sha256Hex('synthetic-signed-outbox-device-probe-v2');
     const digest = await sha256Hex(window.MediaRelayTransport.canonicalJson(body));
-    // Atomic add of metadata before claiming. Never silently replace a prior test.
-    await putRecord({id:OUTBOX_META, binding, digest, recipientKeyId:recipient.recipientKeyId,
-      documentToken}, true);
-    const saved = await outboxStorage().claim(OUTBOX_REF, binding, recipient.recipientKeyId, body);
-    if (await sha256Hex(window.MediaRelayTransport.canonicalJson(saved)) !== digest) throw new Error('OUTBOX_PROBE_MISMATCH');
+    const pairing = {
+      sender:{clinicDeviceId:sender.clinicDeviceId,signingKeyId:sender.signingKeyId,publicJwk:sender.publicJwk},
+      recipient:{recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk}
+    };
+    // Independently stored synthetic public pairing, not extracted from the outbox.
+    // A failed claim leaves an incomplete fixture and cannot produce a false PASS.
+    await putRecord({id:OUTBOX_META,digest,jobId:body.jobId,pairing,documentToken}, true);
+    const saved = await outboxStorage().claimSignedRecovery(OUTBOX_REF,binding,sender,recipient,body);
+    if (saved.status !== 'RECOVERY_PENDING_ONLY' || saved.jobId !== body.jobId ||
+        saved.wireSha256 !== digest) throw new Error('OUTBOX_PROBE_MISMATCH');
     return '保存成功。Safariを閉じ、同じURLを開いて②を押してください。';
   }
   async function verifyOutbox() {
     const record = await getRecord(OUTBOX_META);
     if (!record || record.id !== OUTBOX_META ||
-        !/^[0-9a-f]{64}$/.test(record.binding || '') ||
+        Object.keys(record).sort().join('|') !== 'digest|documentToken|id|jobId|pairing' ||
         !/^[0-9a-f]{64}$/.test(record.digest || '') ||
-        !/^rk_[A-Za-z0-9_-]{1,157}$/.test(record.recipientKeyId || '') ||
+        !/^job_[0-9a-f]{64}$/.test(record.jobId || '') ||
+        !record.pairing ||
         !/^[A-Za-z0-9_-]{22}$/.test(record.documentToken || '')) throw new Error('OUTBOX_PROBE_MISSING');
-    const body = await outboxStorage().resume(OUTBOX_REF, record.binding, record.recipientKeyId);
-    if (await sha256Hex(window.MediaRelayTransport.canonicalJson(body)) !== record.digest) throw new Error('OUTBOX_PROBE_MISMATCH');
+    // Discover without providing the previous work-order reference or a session.
+    const list = await outboxStorage().listSignedRecovery(record.pairing);
+    const entry = list.entries?.[0];
+    if (list.status !== 'RECOVERY_PENDING_LIST' || list.unverifiedCount !== 0 ||
+        list.entries?.length !== 1 || !entry ||
+        entry.status !== 'RECOVERY_PENDING_ONLY' || entry.workOrderRef !== OUTBOX_REF ||
+        entry.jobId !== record.jobId || entry.wireSha256 !== record.digest ||
+        Object.keys(entry).sort().join('|') !== 'jobId|status|wireSha256|workOrderRef') {
+      throw new Error('OUTBOX_PROBE_MISMATCH');
+    }
     return record.documentToken === documentToken
       ? '保存内容は一致。Safariを閉じてから②を押してください。'
-      : 'PASS：新しいページで暗号化データが完全一致しました。';
+      : 'PASS：新しいページで署名付き暗号化データを再発見し、完全一致しました。';
   }
   async function outboxAction(action) {
     if (outboxBusy) return;
