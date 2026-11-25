@@ -18,6 +18,67 @@ import {
 } from '../gateway/viewer-config.mjs';
 import { caseIdForFilename, scanManualRoot } from '../gateway/related-media-core.mjs';
 
+test('Viewer selection ignores late details and stale download actions', async () => {
+  const vm = await import('node:vm');
+  const source = await fs.readFile(new URL('../gateway/viewer-client.js', import.meta.url), 'utf8');
+  const ids = ['job-list','detail-panel','related-media-section','related-pdf-list'];
+  const downloads = [];
+  function node(tag) {
+    return {tag,children:[],attrs:{},events:{},style:{},
+      set textContent(value) { this.value=value; this.children=[]; },
+      get textContent() { return (this.value||'')+this.children.map(c=>c.textContent).join(''); },
+      appendChild(c){this.children.push(c);},
+      setAttribute(k,v){this.attrs[k]=v;},
+      addEventListener(k,fn){this.events[k]=fn;},
+      click(){if(tag==='a')downloads.push(this.attrs.href);else this.events.click?.();},
+      remove(){}
+    };
+  }
+  const nodes=Object.fromEntries(ids.map(id=>[id,node('div')]));
+  const pending=[];
+  const response=data=>({ok:true,json:async()=>data});
+  const flush=()=>new Promise(resolve=>setImmediate(resolve));
+  const detail=(id,text)=>({jobId:id,fields:[{key:'patient',value:text}],attachments:[]});
+  const a='job_'+'A'.repeat(43), b='job_'+'B'.repeat(43);
+  vm.runInNewContext(source,{
+    document:{createElement:node,getElementById:id=>nodes[id],body:node('body')},
+    fetch:async url=>{
+      if(url==='/api/jobs')return response({jobs:[{jobId:a,receivedAt:0},{jobId:b,receivedAt:0}]});
+      if(url==='/api/related-media/pdfs')return response({pdfs:[]});
+      return new Promise((resolve,reject)=>pending.push({url,resolve,reject}));
+    }
+  });
+  await flush();
+  const [first,second]=nodes['job-list'].children;
+  const panel=nodes['detail-panel'];
+  first.click(); second.click();
+  assert.equal(pending.length,2);
+  pending[1].resolve(response(detail(b,'SYNTHETIC_B')));
+  await flush();
+  const button=panel.children.find(x=>x.tag==='button');
+  assert.ok(button);assert.match(panel.textContent,/SYNTHETIC_B/);
+  pending[0].resolve(response(detail(a,'SYNTHETIC_A')));
+  await flush();
+  assert.doesNotMatch(panel.textContent,/SYNTHETIC_A/);
+  assert.equal(panel.children.filter(x=>x.tag==='button').length,1);
+  button.click();
+  assert.deepEqual(downloads,['/api/jobs/'+b+'/delivery-intake.json']);
+  first.click();
+  button.click();
+  assert.equal(downloads.length,1);
+  pending[2].resolve(response(detail(b,'WRONG_JOB')));
+  await flush();
+  assert.doesNotMatch(panel.textContent,/WRONG_JOB/);
+  assert.match(panel.textContent,/VIEWER_JOB_MISMATCH/);
+  assert.equal(panel.children.filter(x=>x.tag==='button').length,0);
+  first.click();second.click();
+  pending[4].resolve(response(detail(b,'CURRENT_B')));
+  await flush();
+  pending[3].reject(new Error('STALE_FAILURE'));
+  await flush();
+  assert.match(panel.textContent,/CURRENT_B/);
+  assert.doesNotMatch(panel.textContent,/STALE_FAILURE/);
+});
 const REF = 'dwo:123e4567-e89b-42d3-a456-426614174000';
 const ATT = 'att-123e4567-e89b-42d3-a456-426614174001';
 const JOB_OLD = 'job_' + 'A'.repeat(43);

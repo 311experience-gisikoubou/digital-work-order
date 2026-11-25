@@ -218,15 +218,21 @@
     }
   }
 
+  // Only the most recent selection may populate the detail or export it.
+  let detailGeneration = 0;
   async function loadDetail(jobId) {
+    const generation = ++detailGeneration;
     const panel = document.getElementById('detail-panel');
     panel.textContent = '';
     try {
       const detail = await getJson('/api/jobs/' + encodeURIComponent(jobId));
+      if (generation !== detailGeneration) return;
+      if (!detail || detail.jobId !== jobId) throw new Error('VIEWER_JOB_MISMATCH');
       panel.appendChild(el('h2', { text: '受信ジョブ詳細' }));
 
       const downloadBtn = el('button', { text: '納品・請求アプリ用JSONをダウンロード' });
       downloadBtn.addEventListener('click', function () {
+        if (generation !== detailGeneration) return;
         triggerDownload('/api/jobs/' + encodeURIComponent(jobId) + '/delivery-intake.json');
       });
       panel.appendChild(downloadBtn);
@@ -243,6 +249,8 @@
       });
       panel.appendChild(mediaBox);
     } catch (error) {
+      if (generation !== detailGeneration) return;
+      panel.textContent = '';
       panel.appendChild(el('p', { text: '詳細を表示できませんでした: ' + (error && error.message) }));
     }
   }
