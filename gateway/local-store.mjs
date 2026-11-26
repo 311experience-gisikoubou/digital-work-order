@@ -131,7 +131,25 @@ export async function persistVerifiedPackage(input, options = {}) {
     await fs.writeFile(path.join(tempDir, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n', { flag: 'wx' });
 
     try {
-      await fs.rename(tempDir, finalDir);
+      // Windows may temporarily refuse this atomic directory rename while a
+      // file handle is held. Retry only the same operation, never replace a
+      // destination or change the existing conflict/cleanup policy.
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          await fs.rename(tempDir, finalDir);
+          break;
+        } catch (renameError) {
+          if (process.platform !== 'win32' || !renameError ||
+              !['EPERM', 'EBUSY'].includes(renameError.code) || attempt >= 3) throw renameError;
+          await new Promise(resolve => setTimeout(resolve, [100, 250, 500][attempt]));
+          try {
+            await fs.lstat(finalDir);
+            throw renameError;
+          } catch (checkError) {
+            if (checkError.code !== 'ENOENT') throw checkError;
+          }
+        }
+      }
     } catch (error) {
       if (error && (error.code === 'EEXIST' || error.code === 'ENOTEMPTY')) {
         const existing = await readExistingReceipt(finalDir, jobId, workOrderRef);
