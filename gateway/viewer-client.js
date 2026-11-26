@@ -140,10 +140,29 @@
     });
   }
 
+  // A selection or drop is a new detail intent; late replies must not replace it.
+  let relatedDetailGeneration = 0;
+  function beginRelatedDetail() {
+    const generation = ++relatedDetailGeneration;
+    document.getElementById('related-detail-panel').textContent = '';
+    return generation;
+  }
+
+  function renderCurrentRelatedDetail(detail, token, generation) {
+    if (generation !== relatedDetailGeneration) return;
+    if (!detail || !detail.pdf || detail.pdf.token !== token) {
+      throw new Error('VIEWER_RELATED_PDF_MISMATCH');
+    }
+    renderRelatedDetail(detail);
+  }
+
   async function loadRelatedDetail(token) {
+    const generation = beginRelatedDetail();
     try {
-      renderRelatedDetail(await getJson('/api/related-media/pdfs/' + encodeURIComponent(token)));
+      const detail = await getJson('/api/related-media/pdfs/' + encodeURIComponent(token));
+      renderCurrentRelatedDetail(detail, token, generation);
     } catch (error) {
+      if (generation !== relatedDetailGeneration) return;
       document.getElementById('related-detail-panel').textContent =
         'PDF詳細を表示できません: ' + (error && error.message);
     }
@@ -151,6 +170,7 @@
 
   async function associateDroppedVideo(pdf, file) {
     if (!file || !file.name || !Number.isSafeInteger(file.size)) return;
+    const generation = beginRelatedDetail();
     const response = await fetch('/api/related-media/associate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -166,7 +186,7 @@
     });
     const data = await response.json().catch(function () { return null; });
     if (!response.ok) throw new Error((data && data.error) || ('HTTP_' + response.status));
-    renderRelatedDetail(data);
+    renderCurrentRelatedDetail(data, pdf.token, generation);
     await loadRelatedPdfs();
   }
 

@@ -79,6 +79,59 @@ test('Viewer selection ignores late details and stale download actions', async (
   assert.match(panel.textContent,/CURRENT_B/);
   assert.doesNotMatch(panel.textContent,/STALE_FAILURE/);
 });
+test('Related PDF selection ignores stale loads and association replies', async () => {
+  const vm = await import('node:vm');
+  const source = await fs.readFile(new URL('../gateway/viewer-client.js', import.meta.url), 'utf8');
+  function node(tag) {
+    return {tag,children:[],attrs:{},events:{},classList:{add(){},remove(){}},
+      set textContent(value){this.value=value;this.children=[];},
+      get textContent(){return (this.value||'')+this.children.map(c=>c.textContent).join('');},
+      appendChild(c){this.children.push(c);},setAttribute(k,v){this.attrs[k]=v;},
+      addEventListener(k,fn){this.events[k]=fn;},click(){this.events.click?.();}
+    };
+  }
+  const ids=['job-list','detail-panel','related-media-section','related-pdf-list','related-detail-panel'];
+  const nodes=Object.fromEntries(ids.map(id=>[id,node('div')]));
+  const pdf=(token,basename)=>({token,basename,caseId:token,url:'/manual-media/'+token,relatedVideoCount:0});
+  const a=pdf('a'.repeat(32),'SYNTHETIC_A'),b=pdf('b'.repeat(32),'SYNTHETIC_B');
+  const response=data=>({ok:true,json:async()=>data});
+  const pending=[],alerts=[];
+  const flush=()=>new Promise(resolve=>setImmediate(resolve));
+  vm.runInNewContext(source,{
+    document:{createElement:node,getElementById:id=>nodes[id]},
+    window:{alert:message=>alerts.push(message)},
+    fetch:async(url,options)=>{
+      if(url==='/api/jobs')return response({jobs:[]});
+      if(url==='/api/related-media/pdfs')return response({pdfs:[a,b]});
+      return new Promise((resolve,reject)=>pending.push({url,options,resolve,reject}));
+    }
+  });
+  await flush();
+  const [first,second]=nodes['related-pdf-list'].children;
+  const panel=nodes['related-detail-panel'];
+  const detail=(p,basename)=>({pdf:p,videos:[{basename,url:'/manual-media/video'}]});
+  first.click();second.click();
+  pending[1].resolve(response(detail(b,'VIDEO_B')));await flush();
+  assert.match(panel.textContent,/VIDEO_B/);
+  pending[0].resolve(response(detail(a,'VIDEO_A')));await flush();
+  assert.doesNotMatch(panel.textContent,/VIDEO_A/);
+  first.events.drop({preventDefault(){},dataTransfer:{files:[{name:'test.mp4',size:5,lastModified:0}]}});
+  assert.equal(panel.textContent,'');
+  assert.equal(JSON.parse(pending[2].options.body).pdfToken,a.token);
+  second.click();
+  pending[3].resolve(response(detail(b,'CURRENT_B')));await flush();
+  pending[2].resolve(response(detail(a,'LATE_ASSOCIATION_A')));await flush();
+  assert.match(panel.textContent,/CURRENT_B/);
+  assert.doesNotMatch(panel.textContent,/LATE_ASSOCIATION_A/);
+  first.click();pending[4].resolve(response(detail(b,'WRONG_PDF')));await flush();
+  assert.match(panel.textContent,/VIEWER_RELATED_PDF_MISMATCH/);
+  assert.doesNotMatch(panel.textContent,/WRONG_PDF/);
+  first.click();second.click();pending[6].resolve(response(detail(b,'FINAL_B')));await flush();
+  pending[5].reject(new Error('STALE_FAILURE'));await flush();
+  assert.match(panel.textContent,/FINAL_B/);
+  assert.doesNotMatch(panel.textContent,/STALE_FAILURE/);
+  assert.deepEqual(alerts,[]);
+});
 const REF = 'dwo:123e4567-e89b-42d3-a456-426614174000';
 const ATT = 'att-123e4567-e89b-42d3-a456-426614174001';
 const JOB_OLD = 'job_' + 'A'.repeat(43);
