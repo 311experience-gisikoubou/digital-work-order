@@ -528,6 +528,27 @@ test('Phase 8 fails closed for malformed manifest, receipt mismatch, work-order 
   });
 });
 
+test('Phase 8 rejects a redirected media directory even when attachment bytes match', async () => {
+  await withTempRoot(async root => {
+    const fixture = await writeSyntheticJob(root);
+    const media = path.join(fixture.dir, 'media');
+    const moved = path.join(root, 'synthetic-media-outside-job');
+    await fs.rename(media, moved);
+    await fs.symlink(moved, media, process.platform === 'win32' ? 'junction' : 'dir');
+    try {
+      assert.equal((await fs.lstat(media)).isSymbolicLink(), true);
+      await assert.rejects(() => loadVerifiedJob(root, JOB_OLD), {code:'VIEWER_UNSAFE_FILE_TYPE'});
+      const listed = await listVerifiedJobs(root);
+      assert.equal(listed.invalidCount, 1);
+      assert.equal(listed.jobs.length, 0);
+      assert.deepEqual(await fs.readFile(path.join(moved, fixture.mediaFilename)), fixture.mediaBytes);
+    } finally {
+      // Remove only the synthetic link, never recurse through its target.
+      if ((await fs.lstat(media)).isSymbolicLink()) await fs.unlink(media);
+    }
+  });
+});
+
 test('Phase 8 rejects traversal-shaped job IDs and malformed viewer config', async () => {
   await withTempRoot(async root => {
     await assert.rejects(

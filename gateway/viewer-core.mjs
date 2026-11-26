@@ -190,6 +190,17 @@ export async function loadVerifiedJob(root, jobId) {
   }
 
   const attachments = [];
+  // File-level lstat does not detect a redirected parent directory.
+  // Reject a symlink/junction before reading any attachment outside the job.
+  if (manifest.attachments.length) {
+    const mediaDir = path.join(jobDir, 'media');
+    let mediaStat;
+    try { mediaStat = await fs.lstat(mediaDir); }
+    catch (_) { throw viewerError('VIEWER_ATTACHMENT_FILE_MISSING', manifest.attachments[0].attachmentId); }
+    if (!mediaStat.isDirectory() || mediaStat.isSymbolicLink()) {
+      throw viewerError('VIEWER_UNSAFE_FILE_TYPE', 'media');
+    }
+  }
   for (const entry of manifest.attachments) {
     const filename = entry.attachmentId + extensionForMime(entry.mime);
     const mediaPath = path.join(jobDir, 'media', filename);
