@@ -48,6 +48,83 @@ test('explicit send UI stays absent until an exact frozen controller is installe
   );
 });
 
+test('one explicit activation composes the stored session authority into the UI without exposing it', async () => {
+  const { sandbox, state } = load();
+  const controller = Object.freeze({
+    async dispatch() { return { status: 'KEEP_PENDING', jobId }; }
+  });
+  let receivedUrl = null;
+  sandbox.DriveRelaySessionStore = Object.freeze({
+    async activateDeployment(url) {
+      receivedUrl = url;
+      return controller;
+    }
+  });
+  sandbox.DwoFinalIssue = { setIssuedDriveSessionProviderTrial() {} };
+
+  const result = await sandbox.DriveRelaySendUi.activateDeployment('https://script.google.com/macros/s/example/exec');
+  assert.equal(result.available, true);
+  assert.deepEqual(Object.keys(result), ['available']);
+  assert.equal(receivedUrl, 'https://script.google.com/macros/s/example/exec');
+  assert.equal(state.renders, 1);
+  assert.ok(sandbox.DriveRelaySendUi.createButton(ref));
+});
+
+test('activation authority replacement or UI install failure clears the final-issue provider', async () => {
+  const first = load();
+  const firstClears = [];
+  const firstController = Object.freeze({ dispatch() {} });
+  first.sandbox.DwoFinalIssue = {
+    setIssuedDriveSessionProviderTrial(value) { firstClears.push(value); }
+  };
+  first.sandbox.DriveRelaySessionStore = Object.freeze({
+    async activateDeployment() {
+      first.sandbox.DriveRelaySessionStore = Object.freeze({ activateDeployment() {} });
+      return firstController;
+    }
+  });
+  await assert.rejects(
+    first.sandbox.DriveRelaySendUi.activateDeployment('https://script.google.com/macros/s/example/exec'),
+    /DRIVE_RELAY_SEND_AUTHORITY_CHANGED/
+  );
+  assert.deepEqual(firstClears, [null]);
+  assert.equal(first.sandbox.DriveRelaySendUi.createButton(ref), null);
+
+  const replacedFinalIssue = load();
+  const replacedClears = [];
+  replacedFinalIssue.sandbox.DwoFinalIssue = {
+    setIssuedDriveSessionProviderTrial(value) { replacedClears.push(value); }
+  };
+  replacedFinalIssue.sandbox.DriveRelaySessionStore = Object.freeze({
+    async activateDeployment() {
+      replacedFinalIssue.sandbox.DwoFinalIssue = { setIssuedDriveSessionProviderTrial() {} };
+      return firstController;
+    }
+  });
+  await assert.rejects(
+    replacedFinalIssue.sandbox.DriveRelaySendUi.activateDeployment('https://script.google.com/macros/s/example/exec'),
+    /DRIVE_RELAY_SEND_AUTHORITY_CHANGED/
+  );
+  assert.deepEqual(replacedClears, [null]);
+  assert.equal(replacedFinalIssue.sandbox.DriveRelaySendUi.createButton(ref), null);
+
+  const second = load();
+  const secondClears = [];
+  second.sandbox.DwoFinalIssue = {
+    setIssuedDriveSessionProviderTrial(value) { secondClears.push(value); }
+  };
+  second.sandbox.DriveRelaySessionStore = Object.freeze({
+    async activateDeployment() { return Object.freeze({ dispatch() {} }); }
+  });
+  second.sandbox.renderOrders = () => { throw new Error('RENDER_FAILED'); };
+  await assert.rejects(
+    second.sandbox.DriveRelaySendUi.activateDeployment('https://script.google.com/macros/s/example/exec'),
+    /RENDER_FAILED/
+  );
+  assert.deepEqual(secondClears, [null]);
+  assert.equal(second.sandbox.DriveRelaySendUi.createButton(ref), null);
+});
+
 test('explicit confirmation reports relay acceptance separately from lab ACK', async () => {
   const { sandbox, state, toasts } = load();
   const calls = [];

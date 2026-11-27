@@ -20,9 +20,45 @@
     if (activeController && activeController !== controller) {
       throw new Error('DRIVE_RELAY_SEND_CONTROLLER_REPLACEMENT_FORBIDDEN');
     }
+    const previousController = activeController;
     activeController = controller;
-    if (typeof global.renderOrders === 'function') global.renderOrders();
+    try {
+      if (typeof global.renderOrders === 'function') global.renderOrders();
+    } catch (error) {
+      activeController = previousController;
+      throw error;
+    }
     return Object.freeze({ available: true });
+  }
+
+  function clearFinalIssueProvider(finalIssue) {
+    if (!finalIssue || typeof finalIssue.setIssuedDriveSessionProviderTrial !== 'function') return;
+    try { finalIssue.setIssuedDriveSessionProviderTrial(null); } catch (_) {}
+  }
+
+  async function activateDeployment(deploymentUrl) {
+    if (activeController) throw new Error('DRIVE_RELAY_SEND_ALREADY_ACTIVE');
+    const sessionStore = global.DriveRelaySessionStore;
+    const finalIssue = global.DwoFinalIssue;
+    if (!sessionStore || !Object.isFrozen(sessionStore) ||
+        typeof sessionStore.activateDeployment !== 'function') {
+      throw new Error('DRIVE_RELAY_SEND_SESSION_AUTHORITY_UNAVAILABLE');
+    }
+    if (!finalIssue || typeof finalIssue.setIssuedDriveSessionProviderTrial !== 'function') {
+      throw new Error('DRIVE_RELAY_SEND_FINAL_ISSUE_AUTHORITY_UNAVAILABLE');
+    }
+
+    const controller = await sessionStore.activateDeployment(deploymentUrl);
+    if (global.DriveRelaySessionStore !== sessionStore || global.DwoFinalIssue !== finalIssue) {
+      clearFinalIssueProvider(finalIssue);
+      throw new Error('DRIVE_RELAY_SEND_AUTHORITY_CHANGED');
+    }
+    try {
+      return install(controller);
+    } catch (error) {
+      clearFinalIssueProvider(finalIssue);
+      throw error;
+    }
   }
 
   function isExactResult(result) {
@@ -89,5 +125,5 @@
     global.addEventListener('pagehide', clearControllerAndRender);
   }
 
-  global.DriveRelaySendUi = Object.freeze({ install, createButton });
+  global.DriveRelaySendUi = Object.freeze({ activateDeployment, install, createButton });
 })(typeof window !== 'undefined' ? window : globalThis);
