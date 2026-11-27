@@ -4,17 +4,19 @@
 仕様書・履歴・議事録を複製せず、製品・主要タスクの安定した現在地だけを保ちます。
 
 - Status: `ACTIVE`
-- Current phase: `Media transfer Phase 8 localhost viewer and delivery/billing JSON handoff implemented, locally verified, and harmless lab-PC startup smoke passed; repo-side production activation runbook (docs/production-activation-runbook.md) and read-only production-readiness preflight tooling are implemented and verified, and are merge-ready; production Firebase/Google Cloud project selection, Blaze billing, spend controls, IAM, DPAPI, Scheduled Task, backup/retention policy, and real-data activation remain intentionally unexecuted`
-- Active product Issue: `NONE`
+- Current phase: `Approved teal iPad input/PDF baseline is implemented; existing verified Windows inbox/viewer and billing JSON handoff are available. Drive + Apps Script is the current provisional relay candidate (not production adoption). Issued B5 transfer preparation and signed recovery are locally verified in the PR #180 changes; ordinary live send is not yet enabled.`
+- Active product Issue: `#172 (automatic receive and final real-device acceptance remain incomplete)`
 - Active product PR: `NONE`
-- Last completed product work: `Media transfer Phase 8: verified inbox reuse, localhost-only read-only viewer, manifest/receipt/work-order/media revalidation, safe media playback, existing digital-work-order-intake-v1 export, and harmless Windows lab-PC startup/HTTP smoke are verified`
-- Current blocker: `NONE`
-- Next action: `No remaining Phase 8 code verification is required. The production activation runbook (docs/production-activation-runbook.md Stages 1-10) defines the ordered human gates; the repo-side preflight (gateway/ops/production-readiness-preflight.mjs, verified by gateway/ops/production-readiness-preflight-selftest.mjs) is merge-ready. Exact project/billing identity, spend controls, dedicated relay bucket, least-privilege IAM, receiver token/DPAPI, Scheduled Task, backup target/retention, and any real-data activation remain separate human-authenticated operations and require explicit authorization before execution`
-- PC-free work: `Phase 8 PR review / GitHub audit / production-operation planning without real data; production-activation-runbook/preflight review`
-- PC-required work: `Only the separately authorized production cloud/DPAPI/Scheduled Task and backup/retention setup remains PC/credential dependent; the harmless lab-PC viewer startup smoke is complete`
-- User action required: `NO for Phase 8 code verification and NO for the repo-side production-activation-runbook/preflight tooling in this PR. Explicit human authorization is required before production cloud/IAM/DPAPI/Scheduled Task activation, paid billing changes if any, or backup/retention policy setup, following docs/production-activation-runbook.md Stages 1-10 in order; merge of this PR also requires explicit human authorization`
+- Last completed product work: `Approved teal layout (#163/#164); synthetic actual iPad-to-Drive-to-Windows receipt/save/delete (#168/#170); retained receive/viewer (#172); #180 bounded issued B5/attachment preparation, signed recovery, local receive/viewer safety corrections, and synthetic billing intake compatibility checks. These are separate evidence levels, not a full production PASS.`
+- Current blocker: `Independent review of the new chunk/recovery candidate, authorized production pairing/send, current Safari preview route, and real integrated transfer/automatic receive remain unverified. Prior isolated Claude audit timed out; do not repeat it unchanged. The large-media candidates in the isolated Windows evidence directory are not product code.`
+- Next action: `Reuse all applicable passing evidence in docs/drive-apps-script-relay-production-design-20261007.md and PR #180. Complete the missing independent review and qualified Safari preview route; integrate the existing large-media candidate only after its safety gate permits it, then verify the current integrated real transfer and final Windows receive. No repeated unchanged tests or new parallel trial systems.`
+- PC-free work: `Existing-source review and evidence reconciliation only; no real data or production credentials.`
+- PC-required work: `Current iPad Safari signed recovery and integrated real relay, Windows automatic receive after off/sleep/reconnection, verified receipt/delete and actual billing handoff. Defer disruptive Windows logoff until final acceptance as already decided in #172.`
+- User action required: `NO at this checkpoint. Individual merge, actual device operation, production pairing/configuration, key backup/retention, and real-data activation retain their existing approval boundaries. Do not request repeated registration or previously completed device checks.`
 - Merge authorized: `NO`
-- Last product-state update: `2026-10-03`
+- Last product-state update: `2026-11-27`
+
+This checkpoint describes the resulting source state if PR #180 is merged; until then #180 remains a draft, and the isolated candidates are not included in it. The earlier Firebase/Blaze activation runbook remains historical evidence, not the next execution instruction. Drive + Apps Script remains provisional under its existing gates A-E.
 
 ## Optional short notes
 
@@ -25,7 +27,7 @@
 - U03/U04: missing/abutmentは排他、cautionは独立。既存歯形態を維持した2軸状態を32歯で実装済みで、数字・図・発行snapshotが同じ状態を参照する。
 - U06: B5上下2面を維持し、8番歯・模型発送予定日・急ぎ料金をPDFへ反映済み。2件印刷は各受注のsnapshotを独立描画し、既存休日/料金式は変更していない。
 - 現行 `state.orders` は同一タブ `sessionStorage` 復元のまま。Phase 2のdraft永続化と発行済み受注の長期DB化を混同しない。
-- メディア永続化（`media-storage.js` / `media.js`）はOPFS（Blob本体）+ IndexedDB（metadata）で実装済み。`persistAttachment` / `restoreOwner` / `removeOwner` / `commitDraftToWorkOrder` は呼び出し側が渡す明示的な `draftRef` / `ownerRef` だけで動作し、media-storage自身は独立したactive draftを生成・補修・ローテーションしない。IndexedDBの `settings` オブジェクトストアはschema互換のためだけに残し、authorityとしては使わない。
+- メディア永続化（`media-storage.js` / `media.js`）はOPFS（Blob本体）+ IndexedDB（metadata）で実装済み。`persistAttachment` / `restoreOwner` / `removeOwner` / `commitDraftToWorkOrder` は呼び出し側が渡す明示的な `draftRef` / `ownerRef` だけで動作し、media-storage自身は独立したactive draftを生成・補修・ローテーションしない。IndexedDBの `settings` オブジェクトストアは、下書きauthorityではない。PR #180では限定した暗号化outbox試験recordにも再利用するが、通常送信の認可を付与しない。
 - `ReferenceMediaManager.commitCurrentDraft(workOrderRef)` は正式発行フローから使用され、添付を `draftRef` から `workOrderRef` へ確定する。後工程失敗時の補償用rollbackも実装済み。
 - 紙指示書は既存のブラウザ内ローカルOCR + 人間確認 + 成功後破棄を維持する。
 - 複数クラスプ/バーは配列で発行受注・session・詳細・PDFへ保持し、`digital-work-order-intake-v1` の旧単一値互換は維持する。stable `workOrderRef` も維持する。
