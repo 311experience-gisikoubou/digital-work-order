@@ -36,6 +36,11 @@
     if (typeof global.showToast === 'function') global.showToast(message, type);
   }
 
+  function clearControllerAndRender() {
+    activeController = null;
+    if (typeof global.renderOrders === 'function') global.renderOrders();
+  }
+
   function createButton(workOrderRef) {
     const controller = activeController;
     if (!controller) return null;
@@ -81,7 +86,7 @@
   }
 
   if (typeof global.addEventListener === 'function') {
-    global.addEventListener('pagehide', function() { activeController = null; });
+    global.addEventListener('pagehide', clearControllerAndRender);
   }
 
   global.DriveRelaySendUi = Object.freeze({ install, createButton });

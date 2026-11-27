@@ -73,7 +73,7 @@ test('explicit confirmation reports relay acceptance separately from lab ACK', a
 });
 
 test('cancel, uncertain response, controller replacement and pagehide fail closed', async () => {
-  const { sandbox, listeners, toasts } = load();
+  const { sandbox, listeners, state, toasts } = load();
   let dispatches = 0;
   const controller = Object.freeze({
     async dispatch(workOrderRef) {
@@ -97,6 +97,7 @@ test('cancel, uncertain response, controller replacement and pagehide fail close
   );
   listeners.get('pagehide')();
   assert.equal(sandbox.DriveRelaySendUi.createButton(ref), null);
+  assert.equal(state.renders, 2);
 });
 
 test('orders wire the gated button and the module loads before orders', () => {
