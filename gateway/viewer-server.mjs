@@ -16,7 +16,7 @@ import {
   mediaFilePath,
   summarizeJob
 } from './viewer-core.mjs';
-import { buildDigitalWorkOrderIntake, buildDeliveryIntakeFilename } from './delivery-intake-reuse.mjs';
+import { buildDigitalWorkOrderIntake, buildDeliveryIntakeFilename, DELIVERY_INTAKE_MAX_PAYLOAD_BYTES } from './delivery-intake-reuse.mjs';
 import { createRelatedMediaService } from './related-media-core.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -188,11 +188,12 @@ function buildMediaHeaders(attachment) {
       'Accept-Ranges': 'bytes'
     };
   }
-  // filename built only from the opaque attachmentId + fixed ".bin", never
-  // from request input or any patient/clinic field.
+  // The verified issued B5 copy gets a usable PDF filename, but the
+  // existing forced-download security policy stays identical.
+  const extension = attachment.issuedPdfDownload === true ? '.pdf' : '.bin';
   return {
     'Content-Type': 'application/octet-stream',
-    'Content-Disposition': 'attachment; filename="' + attachment.attachmentId + '.bin"',
+    'Content-Disposition': 'attachment; filename="' + attachment.attachmentId + extension + '"',
     'X-Content-Type-Options': 'nosniff',
     'Content-Security-Policy': FORCED_DOWNLOAD_CSP,
     'Cache-Control': 'no-store',
@@ -304,6 +305,9 @@ async function handleDeliveryIntake(res, inboxRoot, rawJobId) {
     const payload = buildDigitalWorkOrderIntake(job.workOrder);
     const filename = buildDeliveryIntakeFilename(payload.workOrderRef);
     const body = JSON.stringify(payload, null, 2);
+    if (Buffer.byteLength(body, 'utf8') > DELIVERY_INTAKE_MAX_PAYLOAD_BYTES) {
+      throw viewerServerError('DELIVERY_INTAKE_EXPORT_TOO_LARGE');
+    }
     res.writeHead(200, {
       'Content-Type': 'application/json; charset=utf-8',
       'Content-Disposition': 'attachment; filename="' + filename + '"',

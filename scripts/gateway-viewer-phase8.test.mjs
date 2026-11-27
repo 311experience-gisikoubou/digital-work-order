@@ -18,6 +18,120 @@ import {
 } from '../gateway/viewer-config.mjs';
 import { caseIdForFilename, scanManualRoot } from '../gateway/related-media-core.mjs';
 
+test('Viewer selection ignores late details and stale download actions', async () => {
+  const vm = await import('node:vm');
+  const source = await fs.readFile(new URL('../gateway/viewer-client.js', import.meta.url), 'utf8');
+  const ids = ['job-list','detail-panel','related-media-section','related-pdf-list'];
+  const downloads = [];
+  function node(tag) {
+    return {tag,children:[],attrs:{},events:{},style:{},
+      set textContent(value) { this.value=value; this.children=[]; },
+      get textContent() { return (this.value||'')+this.children.map(c=>c.textContent).join(''); },
+      appendChild(c){this.children.push(c);},
+      setAttribute(k,v){this.attrs[k]=v;},
+      addEventListener(k,fn){this.events[k]=fn;},
+      click(){if(tag==='a')downloads.push(this.attrs.href);else this.events.click?.();},
+      remove(){}
+    };
+  }
+  const nodes=Object.fromEntries(ids.map(id=>[id,node('div')]));
+  const pending=[];
+  const response=data=>({ok:true,json:async()=>data});
+  const flush=()=>new Promise(resolve=>setImmediate(resolve));
+  const detail=(id,text)=>({jobId:id,fields:[{key:'patient',value:text}],attachments:[]});
+  const a='job_'+'A'.repeat(43), b='job_'+'B'.repeat(43);
+  vm.runInNewContext(source,{
+    document:{createElement:node,getElementById:id=>nodes[id],body:node('body')},
+    fetch:async url=>{
+      if(url==='/api/jobs')return response({jobs:[{jobId:a,receivedAt:0},{jobId:b,receivedAt:0}]});
+      if(url==='/api/related-media/pdfs')return response({pdfs:[]});
+      return new Promise((resolve,reject)=>pending.push({url,resolve,reject}));
+    }
+  });
+  await flush();
+  const [first,second]=nodes['job-list'].children;
+  const panel=nodes['detail-panel'];
+  first.click(); second.click();
+  assert.equal(pending.length,2);
+  pending[1].resolve(response(detail(b,'SYNTHETIC_B')));
+  await flush();
+  const button=panel.children.find(x=>x.tag==='button');
+  assert.ok(button);assert.match(panel.textContent,/SYNTHETIC_B/);
+  pending[0].resolve(response(detail(a,'SYNTHETIC_A')));
+  await flush();
+  assert.doesNotMatch(panel.textContent,/SYNTHETIC_A/);
+  assert.equal(panel.children.filter(x=>x.tag==='button').length,1);
+  button.click();
+  assert.deepEqual(downloads,['/api/jobs/'+b+'/delivery-intake.json']);
+  first.click();
+  button.click();
+  assert.equal(downloads.length,1);
+  pending[2].resolve(response(detail(b,'WRONG_JOB')));
+  await flush();
+  assert.doesNotMatch(panel.textContent,/WRONG_JOB/);
+  assert.match(panel.textContent,/VIEWER_JOB_MISMATCH/);
+  assert.equal(panel.children.filter(x=>x.tag==='button').length,0);
+  first.click();second.click();
+  pending[4].resolve(response(detail(b,'CURRENT_B')));
+  await flush();
+  pending[3].reject(new Error('STALE_FAILURE'));
+  await flush();
+  assert.match(panel.textContent,/CURRENT_B/);
+  assert.doesNotMatch(panel.textContent,/STALE_FAILURE/);
+});
+test('Related PDF selection ignores stale loads and association replies', async () => {
+  const vm = await import('node:vm');
+  const source = await fs.readFile(new URL('../gateway/viewer-client.js', import.meta.url), 'utf8');
+  function node(tag) {
+    return {tag,children:[],attrs:{},events:{},classList:{add(){},remove(){}},
+      set textContent(value){this.value=value;this.children=[];},
+      get textContent(){return (this.value||'')+this.children.map(c=>c.textContent).join('');},
+      appendChild(c){this.children.push(c);},setAttribute(k,v){this.attrs[k]=v;},
+      addEventListener(k,fn){this.events[k]=fn;},click(){this.events.click?.();}
+    };
+  }
+  const ids=['job-list','detail-panel','related-media-section','related-pdf-list','related-detail-panel'];
+  const nodes=Object.fromEntries(ids.map(id=>[id,node('div')]));
+  const pdf=(token,basename)=>({token,basename,caseId:token,url:'/manual-media/'+token,relatedVideoCount:0});
+  const a=pdf('a'.repeat(32),'SYNTHETIC_A'),b=pdf('b'.repeat(32),'SYNTHETIC_B');
+  const response=data=>({ok:true,json:async()=>data});
+  const pending=[],alerts=[];
+  const flush=()=>new Promise(resolve=>setImmediate(resolve));
+  vm.runInNewContext(source,{
+    document:{createElement:node,getElementById:id=>nodes[id]},
+    window:{alert:message=>alerts.push(message)},
+    fetch:async(url,options)=>{
+      if(url==='/api/jobs')return response({jobs:[]});
+      if(url==='/api/related-media/pdfs')return response({pdfs:[a,b]});
+      return new Promise((resolve,reject)=>pending.push({url,options,resolve,reject}));
+    }
+  });
+  await flush();
+  const [first,second]=nodes['related-pdf-list'].children;
+  const panel=nodes['related-detail-panel'];
+  const detail=(p,basename)=>({pdf:p,videos:[{basename,url:'/manual-media/video'}]});
+  first.click();second.click();
+  pending[1].resolve(response(detail(b,'VIDEO_B')));await flush();
+  assert.match(panel.textContent,/VIDEO_B/);
+  pending[0].resolve(response(detail(a,'VIDEO_A')));await flush();
+  assert.doesNotMatch(panel.textContent,/VIDEO_A/);
+  first.events.drop({preventDefault(){},dataTransfer:{files:[{name:'test.mp4',size:5,lastModified:0}]}});
+  assert.equal(panel.textContent,'');
+  assert.equal(JSON.parse(pending[2].options.body).pdfToken,a.token);
+  second.click();
+  pending[3].resolve(response(detail(b,'CURRENT_B')));await flush();
+  pending[2].resolve(response(detail(a,'LATE_ASSOCIATION_A')));await flush();
+  assert.match(panel.textContent,/CURRENT_B/);
+  assert.doesNotMatch(panel.textContent,/LATE_ASSOCIATION_A/);
+  first.click();pending[4].resolve(response(detail(b,'WRONG_PDF')));await flush();
+  assert.match(panel.textContent,/VIEWER_RELATED_PDF_MISMATCH/);
+  assert.doesNotMatch(panel.textContent,/WRONG_PDF/);
+  first.click();second.click();pending[6].resolve(response(detail(b,'FINAL_B')));await flush();
+  pending[5].reject(new Error('STALE_FAILURE'));await flush();
+  assert.match(panel.textContent,/FINAL_B/);
+  assert.doesNotMatch(panel.textContent,/STALE_FAILURE/);
+  assert.deepEqual(alerts,[]);
+});
 const REF = 'dwo:123e4567-e89b-42d3-a456-426614174000';
 const ATT = 'att-123e4567-e89b-42d3-a456-426614174001';
 const JOB_OLD = 'job_' + 'A'.repeat(43);
@@ -414,6 +528,27 @@ test('Phase 8 fails closed for malformed manifest, receipt mismatch, work-order 
   });
 });
 
+test('Phase 8 rejects a redirected media directory even when attachment bytes match', async () => {
+  await withTempRoot(async root => {
+    const fixture = await writeSyntheticJob(root);
+    const media = path.join(fixture.dir, 'media');
+    const moved = path.join(root, 'synthetic-media-outside-job');
+    await fs.rename(media, moved);
+    await fs.symlink(moved, media, process.platform === 'win32' ? 'junction' : 'dir');
+    try {
+      assert.equal((await fs.lstat(media)).isSymbolicLink(), true);
+      await assert.rejects(() => loadVerifiedJob(root, JOB_OLD), {code:'VIEWER_UNSAFE_FILE_TYPE'});
+      const listed = await listVerifiedJobs(root);
+      assert.equal(listed.invalidCount, 1);
+      assert.equal(listed.jobs.length, 0);
+      assert.deepEqual(await fs.readFile(path.join(moved, fixture.mediaFilename)), fixture.mediaBytes);
+    } finally {
+      // Remove only the synthetic link, never recurse through its target.
+      if ((await fs.lstat(media)).isSymbolicLink()) await fs.unlink(media);
+    }
+  });
+});
+
 test('Phase 8 rejects traversal-shaped job IDs and malformed viewer config', async () => {
   await withTempRoot(async root => {
     await assert.rejects(
@@ -489,6 +624,50 @@ test('Phase 8 localhost server exposes verified detail/media and reuses digital-
 
       const after = await snapshotTree(root);
       assert.deepEqual(after, before);
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
+  });
+});
+
+test('Delivery intake viewer enforces the shared UTF-8 byte limit before download', async () => {
+  await withTempRoot(async root => {
+    const limit = 256 * 1024; // Receiver's existing Rust intake-v1 limit.
+    const value = '\u754c'.repeat(2000);
+    const order = makeOrder({
+      orderTypes: Array(32).fill(value),
+      devices: Array(11).fill(value),
+      remarks: ['x', 'x', 'x']
+    });
+    const size = order => Buffer.byteLength(
+      JSON.stringify(globalThis.buildDigitalWorkOrderIntake(order), null, 2), 'utf8');
+    let remaining = limit - size(order);
+    assert.ok(remaining > 0 && remaining <= 3 * 1999);
+    order.remarks = order.remarks.map(text => {
+      const n = Math.min(1999, remaining);
+      remaining -= n;
+      return text + 'x'.repeat(n);
+    });
+    assert.equal(size(order), limit);
+    const over = { ...order, remarks: order.remarks.slice() };
+    over.remarks[over.remarks.length - 1] += 'x';
+    assert.equal(size(over), limit + 1);
+    await writeSyntheticJob(root, { jobId: JOB_NEW, order });
+    await writeSyntheticJob(root, { jobId: JOB_OLD, order: over });
+    const before = await snapshotTree(root);
+    const server = await startViewer({ inboxRoot: root, port: 0 });
+    try {
+      const base = 'http://127.0.0.1:' + server.address().port;
+      const endpoint = jobId => base + '/api/jobs/' + encodeURIComponent(jobId) + '/delivery-intake.json';
+      const ok = await fetch(endpoint(JOB_NEW));
+      assert.equal(ok.status, 200);
+      assert.equal((await ok.arrayBuffer()).byteLength, limit);
+      assert.match(ok.headers.get('content-disposition') || '', /^attachment;/);
+      const rejected = await fetch(endpoint(JOB_OLD));
+      assert.equal(rejected.status, 422);
+      assert.equal(rejected.headers.get('content-disposition'), null);
+      assert.deepEqual(await rejected.json(), { error: 'DELIVERY_INTAKE_EXPORT_TOO_LARGE' });
+      assert.deepEqual(await snapshotTree(root), before);
     } finally {
       await new Promise(resolve => server.close(resolve));
     }
@@ -867,5 +1046,102 @@ test('PHASE8-SEC-02: forces safe download headers (never inline) for HTML/SVG/JS
     } finally {
       await new Promise(resolve => server.close(resolve));
     }
+  });
+});
+
+test('B5-receiver decrypts, stores and downloads the PDF with original bytes and forced safety headers', async () => {
+  const { createRequire } = await import('node:module');
+  const { webcrypto } = await import('node:crypto');
+  const require = createRequire(import.meta.url);
+  const T = require('../media-transfer-package.js');
+  const C = require('../media-transfer-crypto.js');
+  const { PDFDocument } = require('../vendor/pdf/pdf-lib-1.17.1.min.js');
+  const { persistVerifiedPackage } = await import('../gateway/local-store.mjs');
+  const opts = { crypto: webcrypto, transferApi: T };
+  const doc = await PDFDocument.create();
+  doc.addPage([182 * 72 / 25.4, 257 * 72 / 25.4]);
+  const bytes = Buffer.from(await doc.save());
+  const pdf = new Blob([bytes], { type: 'application/pdf' });
+  const sender = await C.generateSenderIdentity(opts);
+  const recipient = await C.generateRecipientIdentity('synthetic-B5-receiver-passphrase', opts);
+  const offer = await C.createPairingOffer(recipient, opts);
+  const pairing = await C.createPairingResponse(offer, sender, opts);
+  const registry = await C.verifyPairingResponse(offer, pairing, opts);
+  const image = new Blob([Buffer.from([1,2,3,4])], { type: 'image/jpeg' });
+  const items = [{ meta: { attachmentId: ATT, kind: 'image', mime: image.type, size: image.size }, blob: image }];
+  const pkg = await T.buildPackage(REF, makeOrder(), items, { ...opts, issuedB5Pdf: pdf });
+  const envelope = await C.encryptPackage(pkg, sender, recipient, opts);
+  const decrypted = await C.decryptEnvelope(envelope, recipient, registry, opts);
+  await withTempRoot(async root => {
+    const jobId = 'job_' + 'P'.repeat(43);
+    const stored = await persistVerifiedPackage({ jobId, workOrderRef: REF, pkg: decrypted.package,
+      descriptorSha256: 'd'.repeat(64) }, { root });
+    assert.equal(stored.status, 'stored');
+    assert.equal(stored.receipt.attachmentCount, 2);
+    const disk = path.join(stored.directory, 'media', 'att-issued-b5-pdf.bin');
+    assert.deepEqual(await fs.readFile(disk), bytes);
+    const server = await startViewer({ inboxRoot: root, port: 0 });
+    try {
+      const base = 'http://127.0.0.1:' + server.address().port;
+      const detail = await (await fetch(base + '/api/jobs/' + jobId)).json();
+      const item = detail.attachments.find(a => a.attachmentId === 'att-issued-b5-pdf');
+      assert.ok(item);
+      const url = base + item.url;
+      for (const request of [{}, {method:'HEAD'}, {headers:{Range:'bytes=0-4'}}]) {
+        const response = await fetch(url, request);
+        const partial = !!request.headers;
+        assert.equal(response.status, partial ? 206 : 200);
+        assert.equal(response.headers.get('content-disposition'), 'attachment; filename="att-issued-b5-pdf.pdf"');
+        assert.equal(response.headers.get('content-type'), 'application/octet-stream');
+        assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+        assert.equal(response.headers.get('content-security-policy'), "default-src 'none'; sandbox");
+        assert.equal(response.headers.get('cache-control'), 'no-store');
+        if (request.method !== 'HEAD') assert.deepEqual(Buffer.from(await response.arrayBuffer()),
+          partial ? bytes.subarray(0,5) : bytes);
+      }
+      const other = detail.attachments.find(a => a.attachmentId === ATT);
+      const imageResponse = await fetch(base + other.url);
+      assert.equal(imageResponse.headers.get('content-type'), 'image/jpeg');
+      assert.deepEqual(Buffer.from(await imageResponse.arrayBuffer()), Buffer.from([1,2,3,4]));
+      const again = await persistVerifiedPackage({ jobId, workOrderRef: REF, pkg: decrypted.package,
+        descriptorSha256: 'd'.repeat(64) }, { root });
+      assert.equal(again.status, 'already-stored');
+      assert.deepEqual(await fs.readFile(disk), bytes);
+      const corrupt = Buffer.from(bytes);
+      corrupt[0] ^= 1;
+      await fs.writeFile(disk, corrupt);
+      const rejected = await fetch(url);
+      assert.ok(rejected.status >= 400);
+      await rejected.arrayBuffer();
+    } finally { await new Promise(resolve => server.close(resolve)); }
+  });
+});
+
+test('B5-receiver leaves non-PDF and unrelated PDF attachments on forced bin download', async () => {
+  await withTempRoot(async root => {
+    const cases = [
+      { jobId:'job_'+'Q'.repeat(43), attachmentMime:'application/pdf', attachmentKind:'file', mediaBytes:Buffer.from('%PDF-ordinary'), reserved:false },
+      { jobId:'job_'+'R'.repeat(43), attachmentMime:'application/pdf', attachmentKind:'file', mediaBytes:Buffer.from('<html>not a PDF</html>'), reserved:true },
+      { jobId:'job_'+'S'.repeat(43), attachmentMime:'text/html', attachmentKind:'file', mediaBytes:Buffer.from('%PDF-not-pdf-mime'), reserved:true }
+    ];
+    for (const spec of cases) {
+      const fixture = await writeSyntheticJob(root, { ...spec,
+        manifestMutator: spec.reserved ? m => {m.attachments[0].attachmentId = 'att-issued-b5-pdf';} : null });
+      if (spec.reserved) await fs.rename(path.join(fixture.dir, 'media', fixture.mediaFilename),
+        path.join(fixture.dir, 'media', 'att-issued-b5-pdf.bin'));
+    }
+    const server = await startViewer({ inboxRoot:root, port:0 });
+    try {
+      const base = 'http://127.0.0.1:' + server.address().port;
+      for (const spec of cases) {
+        const id = spec.reserved ? 'att-issued-b5-pdf' : ATT;
+        const response = await fetch(base + '/media/' + spec.jobId + '/' + id);
+        assert.equal(response.status, 200);
+        assert.equal(response.headers.get('content-disposition'), 'attachment; filename="' + id + '.bin"');
+        assert.equal(response.headers.get('content-type'), 'application/octet-stream');
+        assert.equal(response.headers.get('content-security-policy'), "default-src 'none'; sandbox");
+        assert.deepEqual(Buffer.from(await response.arrayBuffer()), spec.mediaBytes);
+      }
+    } finally { await new Promise(resolve => server.close(resolve)); }
   });
 });

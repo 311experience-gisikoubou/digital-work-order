@@ -245,6 +245,49 @@ function makeFetch(state, recipientKeyId, behavior = {}) {
   };
 }
 
+test('Windows local store retries transient rename but preserves a competing destination and fails boundedly', { skip: process.platform !== 'win32' }, async () => {
+  const { persistVerifiedPackage } = await import('../gateway/local-store.mjs');
+  const pkg = await T.buildPackage(REF, {workOrderRef: REF, patientName: 'SYNTHETIC_RENAME_ONLY'}, [], {crypto:webcrypto});
+  const root = await fs.mkdtemp(path.join(os.tmpdir(),'dwo-rename-delta-'));
+  const original = fs.rename;
+  try {
+    for (const scenario of ['transient','persistent','competing']) {
+      const inbox = path.join(root,scenario), jobId = 'job_'+'a'.repeat(64), final = path.join(inbox,jobId);
+      let calls=0;
+      fs.rename = async (from,to) => {
+        assert.equal(to,final);
+        calls++;
+        if(scenario==='transient' && calls===2) return original(from,to);
+        if(scenario==='competing' && calls===1) {
+          await fs.mkdir(final);
+          await fs.writeFile(path.join(final,'keep.txt'),'SYNTHETIC_KEEP',{flag:'wx'});
+        }
+        throw Object.assign(Error('SYNTHETIC_RENAME_BLOCKED'),{code:'EPERM'});
+      };
+      const action=()=>persistVerifiedPackage({jobId,workOrderRef:REF,pkg,descriptorSha256:'a'.repeat(64)},{root:inbox});
+      if(scenario==='transient') {
+        assert.equal((await action()).status,'stored');
+        assert.equal(calls,2);
+        const {loadVerifiedJob}=await import('../gateway/viewer-core.mjs');
+        assert.equal((await loadVerifiedJob(inbox,jobId)).workOrderRef,REF);
+      } else {
+        await assert.rejects(action,{code:'EPERM'});
+        assert.equal(calls,scenario==='persistent'?4:1);
+        if(scenario==='competing') {
+          assert.equal(await fs.readFile(path.join(final,'keep.txt'),'utf8'),'SYNTHETIC_KEEP');
+          assert.deepEqual(await fs.readdir(final),['keep.txt']);
+        } else {
+          await assert.rejects(()=>fs.lstat(final),{code:'ENOENT'});
+        }
+      }
+      assert.equal((await fs.readdir(inbox)).some(n=>n.startsWith('.tmp-')),false);
+    }
+  } finally {
+    fs.rename=original;
+    await fs.rm(root,{recursive:true,force:true});
+  }
+});
+
 test('synthetic Phase7 end-to-end stores locally, ACKs, then deletes cloud ciphertext and job metadata', async () => {
   const fixture = await buildFixture();
   const state = makeRelayState(fixture.cloudRegistry);

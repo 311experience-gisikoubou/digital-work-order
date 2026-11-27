@@ -52,12 +52,13 @@
     });
   }
 
-  async function putRecord(record) {
+  async function putRecord(record, addOnly = false) {
     const db = await openDb();
     try {
       await new Promise((resolve, reject) => {
         const tx = db.transaction(STORE, 'readwrite');
-        tx.objectStore(STORE).put(record);
+        if (addOnly) tx.objectStore(STORE).add(record);
+        else tx.objectStore(STORE).put(record);
         tx.oncomplete = resolve;
         tx.onerror = () => reject(tx.error || new Error('INDEXEDDB_WRITE_FAILED'));
         tx.onabort = () => reject(tx.error || new Error('INDEXEDDB_WRITE_ABORTED'));
@@ -67,11 +68,11 @@
     }
   }
 
-  async function getRecord() {
+  async function getRecord(id = RECORD_ID) {
     const db = await openDb();
     try {
       return await new Promise((resolve, reject) => {
-        const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(RECORD_ID);
+        const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(id);
         req.onsuccess = () => resolve(req.result || null);
         req.onerror = () => reject(req.error || new Error('INDEXEDDB_READ_FAILED'));
       });
@@ -284,7 +285,101 @@
     }
   }
 
+  // DWO_SIGNED_OUTBOX_DEVICE_PROBE_V2: existing unlinked, no-network
+  // synthetic page. Keep prior v1 evidence intact; never open dwo_media_v1.
+  const OUTBOX_DB = 'dwo_synthetic_signed_outbox_device_probe_v2';
+  const OUTBOX_META = 'synthetic-signed-outbox-metadata-v2';
+  const OUTBOX_REF = 'dwo:123e4567-e89b-42d3-a456-426614174010';
+  let documentToken;
+  let outboxBusy = false;
+  function outboxStorage() {
+    const api = window.ReferenceMediaStorage;
+    if (!window.isSecureContext || !api || !window.MediaRelayTransport || !window.crypto?.subtle) {
+      throw new Error('OUTBOX_PROBE_UNAVAILABLE');
+    }
+    return api.createDriveOutboxTrial({
+      crypto: window.crypto, MediaRelayTransport: window.MediaRelayTransport,
+      MediaTransferCrypto: window.MediaTransferCrypto, IDBKeyRange: window.IDBKeyRange,
+      indexedDB: { open(name, version) {
+        if (name !== api.DB_NAME) throw new Error('OUTBOX_PROBE_DB_INVALID');
+        return indexedDB.open(OUTBOX_DB, version);
+      } }
+    });
+  }
+  async function initializeOutbox() {
+    if (await getRecord(OUTBOX_META)) throw new Error('OUTBOX_PROBE_EXISTS');
+    const opts = {crypto: window.crypto, transferApi: window.MediaTransferPackage};
+    const sender = await window.MediaTransferCrypto.generateSenderIdentity(opts);
+    const recipient = await window.MediaTransferCrypto.generateRecipientIdentity('synthetic-outbox-device-probe', opts);
+    const pkg = await window.MediaTransferPackage.buildPackage(OUTBOX_REF,
+      {workOrderRef: OUTBOX_REF, trial: 'SYNTHETIC_OUTBOX_DEVICE_PROBE'}, [],
+      {...opts, issuedB5Pdf: new Blob(['%PDF-1.7\nsynthetic'], {type:'application/pdf'})});
+    const envelope = await window.MediaTransferCrypto.encryptPackage(pkg, sender, recipient, opts);
+    const body = await window.MediaRelayTransport.buildDriveRelayBody(envelope, sender, recipient,
+      {...opts, bootstrapApi: window.MediaReceiverBootstrap});
+    const binding = await sha256Hex('synthetic-signed-outbox-device-probe-v2');
+    const digest = await sha256Hex(window.MediaRelayTransport.canonicalJson(body));
+    const pairing = {
+      sender:{clinicDeviceId:sender.clinicDeviceId,signingKeyId:sender.signingKeyId,publicJwk:sender.publicJwk},
+      recipient:{recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk}
+    };
+    // Independently stored synthetic public pairing, not extracted from the outbox.
+    // A failed claim leaves an incomplete fixture and cannot produce a false PASS.
+    await putRecord({id:OUTBOX_META,digest,jobId:body.jobId,pairing,documentToken}, true);
+    const saved = await outboxStorage().claimSignedRecovery(OUTBOX_REF,binding,sender,recipient,body);
+    if (saved.status !== 'RECOVERY_PENDING_ONLY' || saved.jobId !== body.jobId ||
+        saved.wireSha256 !== digest) throw new Error('OUTBOX_PROBE_MISMATCH');
+    return '保存成功。Safariを閉じ、同じURLを開いて②を押してください。';
+  }
+  async function verifyOutbox() {
+    const record = await getRecord(OUTBOX_META);
+    if (!record || record.id !== OUTBOX_META ||
+        Object.keys(record).sort().join('|') !== 'digest|documentToken|id|jobId|pairing' ||
+        !/^[0-9a-f]{64}$/.test(record.digest || '') ||
+        !/^job_[0-9a-f]{64}$/.test(record.jobId || '') ||
+        !record.pairing ||
+        !/^[A-Za-z0-9_-]{22}$/.test(record.documentToken || '')) throw new Error('OUTBOX_PROBE_MISSING');
+    // Discover without providing the previous work-order reference or a session.
+    const list = await outboxStorage().listSignedRecovery(record.pairing);
+    const entry = list.entries?.[0];
+    if (list.status !== 'RECOVERY_PENDING_LIST' || list.unverifiedCount !== 0 ||
+        list.entries?.length !== 1 || !entry ||
+        entry.status !== 'RECOVERY_PENDING_ONLY' || entry.workOrderRef !== OUTBOX_REF ||
+        entry.jobId !== record.jobId || entry.wireSha256 !== record.digest ||
+        Object.keys(entry).sort().join('|') !== 'jobId|status|wireSha256|workOrderRef') {
+      throw new Error('OUTBOX_PROBE_MISMATCH');
+    }
+    return record.documentToken === documentToken
+      ? '保存内容は一致。Safariを閉じてから②を押してください。'
+      : 'PASS：新しいページで署名付き暗号化データを再発見し、完全一致しました。';
+  }
+  async function outboxAction(action) {
+    if (outboxBusy) return;
+    outboxBusy = true;
+    const buttons = ['probe-outbox-init','probe-outbox-verify'].map(id=>document.getElementById(id));
+    const status = document.getElementById('probe-outbox-status');
+    buttons.forEach(b=>{b.disabled=true;});
+    try {
+      if (!documentToken) documentToken = randomToken(16);
+      status.textContent = await action();
+    } catch (error) {
+      const code = error?.code || error?.message;
+      const messages = {
+        OUTBOX_PROBE_EXISTS:'保存済みです。②で確認してください。',
+        OUTBOX_PROBE_MISSING:'保存記録が見つかりません。復元は未確認です。',
+        DRIVE_OUTBOX_STRICT_UNAVAILABLE:'FAIL：安全な保存方式に未対応です。',
+        DRIVE_OUTBOX_MISSING:'FAIL：暗号化データが見つかりません。'
+      };
+      status.textContent = Object.hasOwn(messages,code) ? messages[code] : 'FAIL：保存または復元を確認できません。';
+    } finally {
+      buttons.forEach(b=>{b.disabled=false;});
+      outboxBusy=false;
+    }
+  }
+
   function wireUi() {
+    document.getElementById('probe-outbox-init').addEventListener('click',()=>outboxAction(initializeOutbox));
+    document.getElementById('probe-outbox-verify').addEventListener('click',()=>outboxAction(verifyOutbox));
     ui.init().addEventListener('click', () => safeAction(initialize));
     ui.verify().addEventListener('click', () => safeAction(verify));
     ui.copy().addEventListener('click', () => safeAction(copySummary));

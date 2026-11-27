@@ -9,5 +9,6 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 require('../delivery-intake-export.js');
 
+export const DELIVERY_INTAKE_MAX_PAYLOAD_BYTES = globalThis.DELIVERY_INTAKE_MAX_PAYLOAD_BYTES;
 export const buildDigitalWorkOrderIntake = globalThis.buildDigitalWorkOrderIntake;
 export const buildDeliveryIntakeFilename = globalThis.buildDeliveryIntakeFilename;

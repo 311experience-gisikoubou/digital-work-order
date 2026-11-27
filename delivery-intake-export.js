@@ -198,6 +198,7 @@
     return { payload, filename };
   }
 
+  global.DELIVERY_INTAKE_MAX_PAYLOAD_BYTES = MAX_PAYLOAD_BYTES;
   global.buildDigitalWorkOrderIntake = buildDigitalWorkOrderIntake;
   global.buildDeliveryIntakeFilename = buildDeliveryIntakeFilename;
   global.downloadDeliveryIntakeJson = downloadDeliveryIntakeJson;

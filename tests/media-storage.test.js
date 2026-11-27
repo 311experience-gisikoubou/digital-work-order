@@ -621,7 +621,10 @@ test('modules load without DOM, expose globals, and media-storage stays local-on
   assert.equal(globalThis.ReferenceMediaStorage, S);
   assert.equal(globalThis.ReferenceMediaManager, M);
   const src = fs.readFileSync(path.join(root, 'media-storage.js'), 'utf8');
-  assert.doesNotMatch(src, /localStorage|sessionStorage|fetch\(|XMLHttpRequest|WebSocket|sendBeacon|subtle|createObjectURL|collectFormData|getOrCreateActiveDraft/);
+  assert.doesNotMatch(src, /localStorage|sessionStorage|fetch\(|XMLHttpRequest|WebSocket|sendBeacon|createObjectURL|collectFormData|getOrCreateActiveDraft/);
+  // Outbox integrity uses local SHA-256 only; other WebCrypto operations remain forbidden here.
+  assert.doesNotMatch(src, /\bsubtle\.(?!digest\b)/);
+  assert.match(src, /scope\.crypto\.subtle\.digest\(\s*'SHA-256'/);
   const ui = fs.readFileSync(path.join(root, 'media.js'), 'utf8');
   assert.doesNotMatch(ui, /indexedDB|getDirectory|FileSystemFileHandle/);
 });
@@ -744,4 +747,212 @@ test('media.js: store.add failure activates the block, keeps persisted data, and
   assert.match(restore, /else materializationFailureCount \+= 1/);
   assert.doesNotMatch(restore, /removeAttachment|deleteAttachment/);
   assert.match(src, /hiddenAttachmentBlock: materializationFailureCount > 0/);
+});
+
+function makeOutboxTrialDb({ failAdd = false, strictUnavailable = false } = {}) {
+  const records = new Map();
+  let tail = Promise.resolve();
+  const db = { transaction(names, mode, options) {
+    assert.deepEqual(names, ['settings']);
+    const wait = tail;
+    let release;
+    tail = new Promise(resolve => { release = resolve; });
+    const tx = { durability: strictUnavailable ? 'default' : (options?.durability || 'default'),
+      error: null, oncomplete: null, onerror: null, onabort: null };
+    let pending = 0, done = false;
+    const staged = new Map();
+    const abort = error => {
+      if (done) return;
+      done = true; tx.error = error; tx.onabort?.(); release();
+    };
+    const request = op => {
+      const req = { result: undefined, onsuccess: null };
+      pending++;
+      wait.then(() => queueMicrotask(() => {
+        if (done) return;
+        try {
+          req.result = op();
+          req.onsuccess?.();
+          pending--;
+          if (pending === 0) queueMicrotask(() => {
+            if (done || pending) return;
+            for (const [k,v] of staged) records.set(k, structuredClone(v));
+            done = true; tx.oncomplete?.(); release();
+          });
+        } catch (e) { abort(e); }
+      }));
+      return req;
+    };
+    tx.abort = () => abort(new Error('AbortError'));
+    tx.objectStore = name => {
+      assert.equal(name, 'settings');
+      return {
+        get(key) { return request(() => structuredClone(records.get(key))); },
+        getAllKeys(range, count) {
+          assert.equal(mode, 'readonly');
+          return request(() => [...records.keys()].filter(k => typeof k === 'string' &&
+            k >= range.lower && k <= range.upper).sort().slice(0, count));
+        },
+        add(record) {
+          assert.equal(mode, 'readwrite');
+          return request(() => {
+            if (failAdd) throw Object.assign(new Error('quota'), {name:'QuotaExceededError'});
+            if (records.has(record.key) || staged.has(record.key)) throw Error('ConstraintError');
+            staged.set(record.key,structuredClone(record)); return record.key;
+          });
+        }
+      };
+    };
+    return tx;
+  }};
+  return { records, indexedDB:{open() {
+    const req={result:db}; queueMicrotask(()=>req.onsuccess?.()); return req;
+  }}};
+}
+async function outboxTrialFixture() {
+  const T=require('../media-transfer-package.js'), C=require('../media-transfer-crypto.js'),
+    R=require('../media-relay.js'), B=require('../media-receiver-bootstrap.js');
+  const opts={crypto:webcrypto,transferApi:T};
+  const sender=await C.generateSenderIdentity(opts);
+  const recipient=await C.generateRecipientIdentity('synthetic-outbox-trial-passphrase',opts);
+  const pkg=await T.buildPackage(WORK_ORDER_REF,{workOrderRef:WORK_ORDER_REF,patientName:'SYNTHETIC-OUTBOX'},[],
+    {...opts,issuedB5Pdf:new Blob(['%PDF-1.7\nsynthetic'],{type:'application/pdf'})});
+  const envelope=await C.encryptPackage(pkg,sender,recipient,opts);
+  const body=await R.buildDriveRelayBody(envelope,sender,recipient,{...opts,bootstrapApi:B});
+  return {R,C,sender,recipient,body,binding:'b'.repeat(64)};
+}
+test('Drive-outbox-trial exact ciphertext survives new adapter, concurrent claims conflict, no plaintext or credentials', async()=>{
+  const f=await outboxTrialFixture(), db=makeOutboxTrialDb();
+  const env={indexedDB:db.indexedDB,crypto:webcrypto,MediaRelayTransport:f.R};
+  const a=S.createDriveOutboxTrial(env), b=S.createDriveOutboxTrial(env);
+  const args=[WORK_ORDER_REF,f.binding,f.recipient.recipientKeyId,f.body];
+  const results=await Promise.allSettled([a.claim(...args),b.claim(...args)]);
+  assert.equal(results.filter(x=>x.status==='fulfilled').length,1);
+  assert.equal(results.find(x=>x.status==='rejected').reason.code,'DRIVE_OUTBOX_EXISTS');
+  assert.equal(db.records.size,1);
+  assert.deepEqual(await S.createDriveOutboxTrial(env).resume(...args.slice(0,3)),f.body);
+  const [key,record]=[...db.records][0];
+  assert.ok(key.startsWith('dwo-drive-outbox-trial-v1:dwo:'));
+  assert.deepEqual(Object.keys(record).sort(),['bindingSha256','key','planSha256','recordSha256','version','wire','wireSha256']);
+  assert.equal(JSON.stringify(record).includes('SYNTHETIC-OUTBOX'),false);
+  assert.equal(Object.hasOwn(JSON.parse(record.wire),'bearer'),false);
+  await assert.rejects(()=>a.resume(WORK_ORDER_REF,'c'.repeat(64),f.recipient.recipientKeyId),{code:'DRIVE_OUTBOX_BINDING_CONFLICT'});
+});
+test('Drive-outbox-trial malformed records and altered ciphertext reject without overwriting',async()=>{
+  const f=await outboxTrialFixture(), db=makeOutboxTrialDb();
+  const out=S.createDriveOutboxTrial({indexedDB:db.indexedDB,crypto:webcrypto,MediaRelayTransport:f.R});
+  const args=[WORK_ORDER_REF,f.binding,f.recipient.recipientKeyId,f.body];
+  await assert.rejects(()=>out.claim(...args.slice(0,3),{...f.body,bearer:'synthetic-secret'}),{code:'RELAY_DRIVE_BODY_INVALID'});
+  const broken=structuredClone(f.body);
+  broken.objects[0].bytes=(broken.objects[0].bytes[0]==='A'?'B':'A')+broken.objects[0].bytes.slice(1);
+  await assert.rejects(()=>out.claim(...args.slice(0,3),broken),{code:'RELAY_DRIVE_BODY_INVALID'});
+  assert.equal(db.records.size,0);
+  await out.claim(...args);
+  const [key,record]=[...db.records][0];
+  db.records.set(key,{...record,wireSha256:'0'.repeat(64)});
+  const before=structuredClone(db.records.get(key));
+  await assert.rejects(()=>out.resume(...args.slice(0,3)),{code:'DRIVE_OUTBOX_CORRUPT'});
+  await assert.rejects(()=>out.claim(...args),{code:'DRIVE_OUTBOX_CORRUPT'});
+  assert.deepEqual(db.records.get(key),before);
+});
+test('Drive-outbox-trial abort, unavailable strict hint and missing resume never create a record',async()=>{
+  const f=await outboxTrialFixture(), args=[WORK_ORDER_REF,f.binding,f.recipient.recipientKeyId,f.body];
+  for(const config of [{failAdd:true},{strictUnavailable:true},{}]){
+    const db=makeOutboxTrialDb(config),out=S.createDriveOutboxTrial({indexedDB:db.indexedDB,crypto:webcrypto,MediaRelayTransport:f.R});
+    await assert.rejects(()=>out.resume(...args.slice(0,3)),{code:'DRIVE_OUTBOX_MISSING'});
+    if(config.failAdd) await assert.rejects(()=>out.claim(...args),{name:'QuotaExceededError'});
+    if(config.strictUnavailable) await assert.rejects(()=>out.claim(...args),{code:'DRIVE_OUTBOX_STRICT_UNAVAILABLE'});
+    assert.equal(db.records.size,0);
+  }
+});
+
+test('Signed recovery trial atomic claim and fresh adapter use current independent pairing, return opaque only',async()=>{
+  const f=await outboxTrialFixture(), db=makeOutboxTrialDb();
+  const env={indexedDB:db.indexedDB,crypto:webcrypto,MediaRelayTransport:f.R,MediaTransferCrypto:f.C};
+  const pairing={sender:{clinicDeviceId:f.sender.clinicDeviceId,signingKeyId:f.sender.signingKeyId,publicJwk:f.sender.publicJwk},
+    recipient:{recipientKeyId:f.recipient.recipientKeyId,publicJwk:f.recipient.publicJwk}};
+  const a=S.createDriveOutboxTrial(env), b=S.createDriveOutboxTrial(env);
+  const args=[WORK_ORDER_REF,f.binding,f.sender,f.recipient,f.body];
+  const claims=await Promise.allSettled([a.claimSignedRecovery(...args),b.claimSignedRecovery(...args)]);
+  assert.equal(claims.filter(v=>v.status==='fulfilled').length,1);
+  assert.equal(claims.find(v=>v.status==='rejected').reason.code,'DRIVE_OUTBOX_EXISTS');
+  assert.equal(db.records.size,1);
+  const expected=claims.find(v=>v.status==='fulfilled').value;
+  assert.deepEqual(Object.keys(expected).sort(),['jobId','status','wireSha256']);
+  assert.equal(expected.status,'RECOVERY_PENDING_ONLY');assert.equal(expected.jobId,f.body.jobId);
+  const fresh=S.createDriveOutboxTrial(env);
+  assert.deepEqual(await fresh.inspectSignedRecovery(WORK_ORDER_REF,pairing),expected);
+  const [key,record]=[...db.records][0];
+  assert.equal(JSON.stringify(record).includes('SYNTHETIC-OUTBOX'),false);
+  assert.equal(Object.hasOwn(record,'publicJwk'),false);
+  await assert.rejects(()=>fresh.resume(WORK_ORDER_REF,f.binding,f.recipient.recipientKeyId),{code:'DRIVE_OUTBOX_CORRUPT'});
+  for(const field of ['bindingSha256','wireSha256','signature','wire']){
+    const value=record[field],changed=(value[0]==='A'?'B':'A')+value.slice(1);
+    db.records.set(key,{...record,[field]:changed});
+    await assert.rejects(()=>fresh.inspectSignedRecovery(WORK_ORDER_REF,pairing),{code:'DRIVE_OUTBOX_SIGNED_RECOVERY_INVALID'});
+    assert.deepEqual(db.records.get(key),{...record,[field]:changed});
+  }
+  db.records.set(key,record);
+  const alternate=await f.C.generateSenderIdentity({crypto:webcrypto});
+  await assert.rejects(()=>fresh.inspectSignedRecovery(WORK_ORDER_REF,{...pairing,sender:alternate}),{code:'DRIVE_OUTBOX_SIGNED_RECOVERY_INVALID'});
+  const otherRecipient=await f.C.generateRecipientIdentity('synthetic-rotation',{crypto:webcrypto});
+  await assert.rejects(()=>fresh.inspectSignedRecovery(WORK_ORDER_REF,{...pairing,recipient:otherRecipient}),{code:'DRIVE_OUTBOX_SIGNED_RECOVERY_INVALID'});
+  assert.deepEqual(db.records.get(key),record);
+});
+
+test('Signed recovery trial rejects missing and unsigned records, abort does not save either part',async()=>{
+  const f=await outboxTrialFixture();
+  const pairing={sender:{clinicDeviceId:f.sender.clinicDeviceId,signingKeyId:f.sender.signingKeyId,publicJwk:f.sender.publicJwk},
+    recipient:{recipientKeyId:f.recipient.recipientKeyId,publicJwk:f.recipient.publicJwk}};
+  for(const config of [{failAdd:true},{strictUnavailable:true},{}]){
+    const db=makeOutboxTrialDb(config), out=S.createDriveOutboxTrial({indexedDB:db.indexedDB,crypto:webcrypto,MediaRelayTransport:f.R,MediaTransferCrypto:f.C});
+    await assert.rejects(()=>out.inspectSignedRecovery(WORK_ORDER_REF,pairing),{code:'DRIVE_OUTBOX_MISSING'});
+    const args=[WORK_ORDER_REF,f.binding,f.sender,f.recipient,f.body];
+    if(config.failAdd) await assert.rejects(()=>out.claimSignedRecovery(...args),{name:'QuotaExceededError'});
+    else if(config.strictUnavailable) await assert.rejects(()=>out.claimSignedRecovery(...args),{code:'DRIVE_OUTBOX_STRICT_UNAVAILABLE'});
+    else {
+      await out.claim(WORK_ORDER_REF,f.binding,f.recipient.recipientKeyId,f.body);
+      const [key,record]=[...db.records][0];
+      await assert.rejects(()=>out.inspectSignedRecovery(WORK_ORDER_REF,pairing),{code:'DRIVE_OUTBOX_SIGNED_RECOVERY_INVALID'});
+      await assert.rejects(()=>out.claimSignedRecovery(...args),{code:'DRIVE_OUTBOX_EXISTS'});
+      assert.deepEqual(db.records.get(key),record);
+      assert.deepEqual(await out.resume(WORK_ORDER_REF,f.binding,f.recipient.recipientKeyId),f.body);
+      continue;
+    }
+    assert.equal(db.records.size,0);
+  }
+});
+
+test('Pending discovery trial enumerates only bounded verified signed entries without a remembered ref or mutation',async()=>{
+  const f=await outboxTrialFixture(), db=makeOutboxTrialDb();
+  const env={indexedDB:db.indexedDB,IDBKeyRange:{bound:(lower,upper)=>({lower,upper})},
+    crypto:webcrypto,MediaRelayTransport:f.R,MediaTransferCrypto:f.C};
+  const pairing={sender:{clinicDeviceId:f.sender.clinicDeviceId,signingKeyId:f.sender.signingKeyId,publicJwk:f.sender.publicJwk},
+    recipient:{recipientKeyId:f.recipient.recipientKeyId,publicJwk:f.recipient.publicJwk}};
+  const prefix='dwo-drive-outbox-trial-v1:';
+  const out=S.createDriveOutboxTrial(env);
+  db.records.set('unrelated-settings',{private:'SYNTHETIC-UNRELATED'});
+  assert.deepEqual(await out.listSignedRecovery(pairing),{status:'RECOVERY_PENDING_LIST',entries:[],unverifiedCount:0});
+  const proof=await out.claimSignedRecovery(WORK_ORDER_REF,f.binding,f.sender,f.recipient,f.body);
+  const fresh=S.createDriveOutboxTrial(env);
+  const expected={workOrderRef:WORK_ORDER_REF,...proof};
+  const snapshot=structuredClone(db.records);
+  assert.deepEqual(await fresh.listSignedRecovery(pairing),{status:'RECOVERY_PENDING_LIST',entries:[expected],unverifiedCount:0});
+  assert.deepEqual(db.records,snapshot);
+  assert.deepEqual(Object.keys(expected).sort(),['jobId','status','wireSha256','workOrderRef']);
+  const badRef='dwo:223e4567-e89b-42d3-a456-426614174099';
+  db.records.set(prefix+badRef,{key:prefix+badRef,version:'dwo-drive-outbox-trial-v1'});
+  db.records.set(prefix+'invalid-key',{key:prefix+'invalid-key'});
+  const mixed=structuredClone(db.records);
+  assert.deepEqual(await fresh.listSignedRecovery(pairing),{status:'RECOVERY_LIST_INCOMPLETE',entries:[expected],unverifiedCount:2});
+  const alternate=await f.C.generateSenderIdentity({crypto:webcrypto});
+  assert.deepEqual(await fresh.listSignedRecovery({...pairing,sender:alternate}),
+    {status:'RECOVERY_LIST_INCOMPLETE',entries:[],unverifiedCount:3});
+  assert.deepEqual(db.records,mixed);
+  for(let i=0;i<32;i++)db.records.set(prefix+'overflow-'+String(i).padStart(2,'0'),{});
+  const overflow=structuredClone(db.records);
+  await assert.rejects(()=>fresh.listSignedRecovery(pairing),{code:'DRIVE_OUTBOX_LIST_LIMIT'});
+  assert.deepEqual(db.records,overflow);
+  await assert.rejects(()=>S.createDriveOutboxTrial({...env,IDBKeyRange:undefined}).listSignedRecovery(pairing),
+    {code:'DRIVE_OUTBOX_LIST_UNAVAILABLE'});
 });

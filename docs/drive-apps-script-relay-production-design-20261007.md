@@ -257,10 +257,11 @@ Current evidence is recorded in
 
 - synthetic Chrome comparison: PASS;
 - provisional recommendation: bearer token;
-- exact iPad Safari persistence/restore: still required;
-- a standalone no-network iPad probe is prepared and locally 15/15 PASS; see
-  `docs/drive-relay-ipad-device-probe-20261007.md`;
-- therefore Gate B is PARTIAL PASS, not complete until the actual iPad Safari run passes.
+- the original no-network iPad probe was locally 15/15 PASS and later passed the actual
+  iPad Safari credential close/reopen check (D1 below); do not repeat that unchanged check;
+- the bearer recommendation remains provisional for production: normal-app trusted pairing,
+  revocation/repair, and authorized send wiring are not yet established. The synthetic D1/D2
+  results do not by themselves authorize production adoption.
 
 ### C. Permanent-delete prototype
 
@@ -316,8 +317,40 @@ Only after D1 passes:
 
 No patient/clinic data is used in either D1 or D2.
 
-D2 currently has a local repository harness only; it is locally tested but is **not** a real D2
-PASS. External Apps Script remains disabled and unmodified.
+### D2 evidence reconciliation (2026-11-25)
+
+**PARTIAL real-device PASS, not production-ready.** The earlier local-only status is superseded
+by the following recorded synthetic real-device results. Reuse these results rather than
+repeating an unchanged transfer, receipt or deletion:
+
+- [#168](https://github.com/311experience-gisikoubou/digital-work-order/issues/168):
+  actual iPad Safari -> Apps Script v26 -> Drive -> Windows transfer, verified receipt/save
+  and approved complete deletion succeeded; the sender initially displayed a timeout.
+- [#170](https://github.com/311experience-gisikoubou/digital-work-order/issues/170):
+  actual iPad 2026-11-15 status recovery PASS after #169; old job was not regenerated;
+  trial flags stopped and pairing/deletion records preserved.
+- [#172](https://github.com/311experience-gisikoubou/digital-work-order/issues/172):
+  second synthetic iPad job reached Drive/Windows sync. The
+  [2026-11-19 retained receive](https://github.com/311experience-gisikoubou/digital-work-order/issues/172#issuecomment-6996492981)
+  and [local viewer](https://github.com/311experience-gisikoubou/digital-work-order/issues/172#issuecomment-6997714297)
+  passed with the existing attachment. No ACK/delete was performed for that retained job.
+- [#172, 2026-11-21 decision](https://github.com/311experience-gisikoubou/digital-work-order/issues/172#issuecomment-7030427725):
+  defer disruptive Windows logoff until final acceptance. The isolated one-shot task was
+  registered but did not run before its 2026-11-22 expiry; do not ask for re-registration
+  or logoff merely to meet an expired test window.
+- [Draft #180](https://github.com/311experience-gisikoubou/digital-work-order/pull/180):
+  new B5 PDF/attachment, signed pending recovery, and status-first retry have bounded
+  local/synthetic evidence. The
+  [signed-recovery browser check](https://github.com/311experience-gisikoubou/digital-work-order/pull/180#issuecomment-7151541409)
+  is managed Chrome, not actual Safari. The ordinary issuance action still does not
+  authorize or perform production transfer.
+
+Remaining: actual Safari signed-outbox close/reopen using the approved preview route;
+the current integrated B5 transfer over an authorized real relay; actual automatic Windows
+receive after off/sleep/reconnection; verified receipt/deletion for the current integrated
+flow; actual billing intake handoff; production pairing/authorization and operating limits.
+The synthetic trial's last recorded flags are OFF; this record is not a new live settings
+check or permission to enable them.
 
 ### E. Failure matrix
 
@@ -336,6 +369,15 @@ Complete the original roadmap cases:
 - delete interrupted
 
 For all cases prove: **not lost, not duplicated, retryable, and not deleted before verified receipt.**
+
+Reuse the existing bounded evidence: #167 source-only retry/delete checks, #169 status recovery
+and #170 real iPad status check, #172 retained sync/save evidence, and #180 local B5 partial-sync,
+interrupted ACK/delete, duplicate/retry and signed recovery checks. These are not an all-cases
+live failure-matrix PASS. The PC off/asleep/disconnected cases, actual clinic network interruption,
+and current integrated real-relay failure handling remain unverified. Before scheduling a new
+test, distinguish the actual missing condition from the existing synthetic or prior real-device
+result; test only the new condition. Do not force another external send, cloud deletion, or
+Windows logoff outside its authorized scope.
 
 ## Production adoption rule
 

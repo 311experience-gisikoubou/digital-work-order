@@ -287,6 +287,12 @@ function renderOrders() {
       detailBtn.addEventListener('click', function() { showDetail(order.id); });
       actions.appendChild(detailBtn);
 
+      const sendBtn = globalThis.DriveRelaySendUi &&
+        typeof globalThis.DriveRelaySendUi.createButton === 'function'
+        ? globalThis.DriveRelaySendUi.createButton(order.workOrderRef)
+        : null;
+      if (sendBtn) actions.appendChild(sendBtn);
+
       const bridgeBtn = document.createElement('button');
       bridgeBtn.className = 'act-btn detail';
       bridgeBtn.textContent = '\u7d0d\u54c1\u9023\u643a';

@@ -864,6 +864,38 @@ async function fixture() { const recipient=await C.generateRecipientIdentity('d2
 async function writeJob(f) { const root=await fs.mkdtemp(path.join(os.tmpdir(),'d2-synced-root-')),dir=path.join(root,'job');await fs.mkdir(dir);const objects=[]; for(const [ordinal,part] of f.built.parts.entries()){const bytes=Buffer.from(await part.blob.arrayBuffer());const name=`obj_${String(ordinal).padStart(4,'0')}.bin`;await fs.writeFile(path.join(dir,name),bytes);objects.push({ordinal,name,fileId:`synthetic_${ordinal}`,size:bytes.length,ciphertextSha256:h(bytes)});} const first=f.built.request.plan.entries[0],descriptorSha256=f.built.request.envelopeHeader.descriptorSha256,planSha256=h(Buffer.from(R.canonicalJson(f.built.request.plan))),totalBytes=objects.reduce((n,o)=>n+o.size,0);const meta={version:constants.META_VERSION,state:'ready',jobId:'job_'+descriptorSha256,descriptorSha256,ackProofHash:'b'.repeat(64),planSha256,totalBytes,objects,bootstrap:{version:first.bootstrapVersion,recipientKeyId:first.recipientKeyId,ephemeralPublicJwk:first.ephemeralPublicJwk,hkdfSalt:first.hkdfSalt,iv:first.iv,ciphertextSize:objects[0].size,ciphertextSha256:objects[0].ciphertextSha256}};const metaText=JSON.stringify(meta);await fs.writeFile(path.join(dir,'meta.json'),metaText);await fs.writeFile(path.join(dir,'ready.json'),JSON.stringify({version:constants.META_VERSION,jobId:meta.jobId,state:'ready',planSha256,metaSha256:h(Buffer.from(metaText))}));return {root,dir,meta}; }
 test('D2 package/envelope is buildable and relay metadata is opaque',async()=>{const f=await fixture(),{root,dir,meta}=await writeJob(f);try{const text=JSON.stringify(meta);assert.equal(text.includes(f.marker),false);assert.equal(text.includes(REF),false);assert.equal((await readVerifiedSyncedJob(dir)).blobs.length,meta.objects.length);}finally{await fs.rm(root,{recursive:true,force:true});}});
 test('D2 adapter refuses incomplete or mismatched objects before persistence or ACK',async()=>{const f=await fixture(),{root,dir,meta}=await writeJob(f);let persisted=false,acked=false;try{await fs.rm(path.join(dir,meta.objects[1].name));await assert.rejects(()=>processD2SyncedJob(dir,{persist:async()=>{persisted=true;},ack:async()=>{acked=true;}}),{code:'D2_SYNC_OBJECT_MISSING'});assert.equal(persisted,false);assert.equal(acked,false);await fs.writeFile(path.join(dir,meta.objects[1].name),'wrong');await assert.rejects(()=>readVerifiedSyncedJob(dir),{code:/D2_SYNC_OBJECT_(SIZE|HASH)_MISMATCH/});}finally{await fs.rm(root,{recursive:true,force:true});}});
+test('D2 receive enforces existing sender byte/object limits before reading or persisting',async()=>{
+  const f=await fixture(),{root,dir,meta}=await writeJob(f);
+  let persisted=0,acked=0;
+  const options={persist:async()=>{persisted++;},control:{issueAckCapability:async()=>{acked++;},ack:async()=>{acked++;}}};
+  const max=1024*1024;
+  async function writeMeta(value){
+    const text=JSON.stringify(value);
+    await fs.writeFile(path.join(dir,'meta.json'),text);
+    await fs.writeFile(path.join(dir,'ready.json'),JSON.stringify({version:value.version,jobId:value.jobId,state:'ready',planSha256:value.planSha256,metaSha256:h(Buffer.from(text))}));
+  }
+  try{
+    const tooMany=structuredClone(meta);
+    while(tooMany.objects.length<17){
+      const ordinal=tooMany.objects.length;
+      tooMany.objects.push({ordinal,name:'obj_'+String(ordinal).padStart(4,'0')+'.bin',fileId:'synthetic_extra_'+ordinal,size:1,ciphertextSha256:h(Buffer.from([0]))});
+      tooMany.totalBytes++;
+    }
+    await writeMeta(tooMany);
+    await assert.rejects(()=>processD2SyncedJob(dir,options),{code:'D2_METADATA_INVALID'});
+    const tooLarge=structuredClone(meta);
+    tooLarge.objects[1].size+=max+1-tooLarge.totalBytes;
+    tooLarge.totalBytes=max+1;
+    await writeMeta(tooLarge);
+    await assert.rejects(()=>processD2SyncedJob(dir,options),{code:'D2_METADATA_INVALID'});
+    await writeMeta(meta);
+    await fs.truncate(path.join(dir,meta.objects[1].name),max+1);
+    await assert.rejects(()=>processD2SyncedJob(dir,options),{code:'D2_SYNC_OBJECT_SIZE_MISMATCH'});
+    await fs.truncate(path.join(dir,'meta.json'),max+1);
+    await assert.rejects(()=>processD2SyncedJob(dir,options),{code:'D2_METADATA_INVALID'});
+    assert.equal(persisted,0);assert.equal(acked,0);
+  }finally{await fs.rm(root,{recursive:true,force:true});}
+});
 test('adapter rejects a ready/meta byte-hash mismatch before persist or ACK',async()=>{const f=await fixture(),{root,dir}=await writeJob(f);let persisted=false,acked=false;try{const marker=JSON.parse(await fs.readFile(path.join(dir,'ready.json'),'utf8'));marker.metaSha256='0'.repeat(64);await fs.writeFile(path.join(dir,'ready.json'),JSON.stringify(marker));await assert.rejects(()=>processD2SyncedJob(dir,{persist:async()=>{persisted=true;return{status:'stored'};},control:{issueAckCapability:async()=>{acked=true;},ack:async()=>{acked=true;}}}),{code:'D2_METADATA_INVALID'});assert.equal(persisted,false);assert.equal(acked,false);}finally{await fs.rm(root,{recursive:true,force:true});}});
 test('simple Apps Script pairing JSON decrypts, then persist/issue-capability/ACK are ordered',async()=>{const f=await fixture(),{root,dir,meta}=await writeJob(f),order=[];try{const s=f.registry;await fs.writeFile(path.join(root,'pairing.json'),JSON.stringify({clinicDeviceId:s.clinicDeviceId,signingKeyId:s.activeSigningKey.signingKeyId,signingPublicJwk:s.activeSigningKey.publicJwk,recipientKeyId:s.pairedRecipientKeyId}));const result=await processD2SyncedJob(dir,{recipientKeyRingOrIdentity:f.recipient,inboxRoot:path.join(root,'inbox'),now:()=>9,persist:async(value,opts)=>{order.push('persist');assert.equal(value.workOrderRef,REF);return persistVerifiedPackage(value,opts);},control:{issueAckCapability:async id=>{order.push('issue');return{jobId:id,ackCapability:'Z'.repeat(43)};},ack:async value=>{order.push('ack');assert.equal(value.jobId,meta.jobId);assert.match(value.ackProof,/^[0-9a-f]{64}$/);return{jobId:meta.jobId,status:'deleted'};}}});assert.equal(result.status,'stored');assert.deepEqual(order,['persist','issue','ack']);}finally{await fs.rm(root,{recursive:true,force:true});}});
 test('Apps Script control sends receiver bearer and raw ACK proof as JSON and rejects bad endpoint',async()=>{let body;const c=createAppsScriptControl('https://script.google.com/macros/s/ABC_123/exec','A'.repeat(43),async(_u,o)=>{body=JSON.parse(o.body);return{ok:true,json:async()=>({jobId:body.jobId,status:'deleted'})};});await c.ack({jobId:'job_'+ 'a'.repeat(64),ackCapability:'x',ackProof:'b'.repeat(64)});assert.equal(body.action,'ack');assert.equal(body.receiverBearer,'A'.repeat(43));assert.equal(body.ackProof,'b'.repeat(64));assert.throws(()=>createAppsScriptControl('https://bad.test','A'.repeat(43),async()=>{}),{code:'D2_CONTROL_CONFIG_INVALID'});});
@@ -872,8 +904,8 @@ test('actual Apps Script source parses in VM, keeps control inert, and uses ALLO
 const b64u=b=>Buffer.from(b).toString('base64url');const canonical=v=>v===null||typeof v!=='object'?JSON.stringify(v):Array.isArray(v)?'['+v.map(canonical).join(',')+']':'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canonical(v[k])).join(',')+'}';
 async function fakeGateway(){const source=await fs.readFile(new URL('../gateway/drive-relay-d2-trial.gs',import.meta.url),'utf8'),rows=new Map(),props=new Map(),rootId='root id',id=(()=>{let n=0;return()=>`drive id ${++n}`})(),add=(kind,name,parent,bytes=Buffer.alloc(0))=>{const x={id:id(),kind,name,parent,bytes:Buffer.from(bytes)};rows.set(x.id,x);return x},root=add('folder','DWO_RELAY_D2_SYNTHETIC_ONLY',null),iter=a=>{let i=0;return{hasNext:()=>i<a.length,next:()=>a[i++]}};
 function folder(x){return{getId:()=>x.id,getName:()=>x.name,getFilesByName:n=>iter([...rows.values()].filter(v=>v.parent===x.id&&v.kind==='file'&&v.name===n).map(file)),getFoldersByName:n=>iter([...rows.values()].filter(v=>v.parent===x.id&&v.kind==='folder'&&v.name===n).map(folder)),getFiles:()=>iter([...rows.values()].filter(v=>v.parent===x.id&&v.kind==='file').map(file)),getFolders:()=>iter([...rows.values()].filter(v=>v.parent===x.id&&v.kind==='folder').map(folder)),createFile:(n,v)=>file(add('file',n,x.id,typeof v==='string'?v:v.bytes)),createFolder:n=>folder(add('folder',n,x.id))};}
-function file(x){return{getId:()=>x.id,getSize:()=>x.bytes.length,getBlob:()=>blob(x.bytes),setContent:v=>{x.bytes=Buffer.from(v)}};}function blob(bytes){return{bytes:Buffer.from(bytes),getBytes(){return [...this.bytes].map(x=>x>127?x-256:x)},getDataAsString(){return this.bytes.toString()}};}
-const upload='upload bearer',receiver='receiver bearer',sha=v=>h(Buffer.from(String(v))),jwk={kty:'EC',crv:'P-256',x:'x'.repeat(43),y:'y'.repeat(43)};for(const [k,v] of Object.entries({D2_TRIAL_ENABLED:'true',D2_PARENT_ORIGIN:'https://311experience-gisikoubou.github.io',D2_SYNTHETIC_ROOT_ID:root.id,D2_RECEIVER_BEARER_SHA256:sha(receiver),D2_RECIPIENT_PUBLIC_JSON:JSON.stringify({recipientKeyId:'rk_receiver',publicJwk:jwk}),D2_UPLOAD_BEARER_SHA256:sha(upload),D2_PAIRING_ENABLED:'true'}))props.set(k,v);let failDelete='',failDeleteName='';const lockStats={wait:0,release:0},response=(code,text='')=>({getResponseCode:()=>code,getContentText:()=>text});const sandbox={JSON,Error,encodeURIComponent,Number,Math,PropertiesService:{getScriptProperties:()=>({getProperty:k=>props.get(k)||null,setProperty:(k,v)=>props.set(k,v),deleteProperty:k=>props.delete(k)})},DriveApp:{getFolderById:i=>{const x=rows.get(i);if(!x||x.kind!=='folder')throw Error('missing');return folder(x)}},MimeType:{PLAIN_TEXT:'text'},LockService:{getScriptLock:()=>({waitLock(){lockStats.wait++;},releaseLock(){lockStats.release++;}})},Utilities:{base64DecodeWebSafe:s=>[...Buffer.from(s,'base64url')].map(x=>x>127?x-256:x),newBlob:(v,_t,n)=>({bytes:Buffer.from(v),name:n}),computeDigest:(_a,b)=>[...createHash('sha256').update(Buffer.from(b.map(x=>x<0?x+256:x))).digest()].map(x=>x>127?x-256:x),DigestAlgorithm:{SHA_256:'sha'},getUuid:()=> 'a'.repeat(32)},ScriptApp:{getOAuthToken:()=> 'token'},UrlFetchApp:{fetch:(url,opt={})=>{const m=/files\/([^?]+)/.exec(url),x=m&&rows.get(decodeURIComponent(m[1]));if(opt.method==='delete'){if(!x)return response(404);if(failDelete===x.id||failDeleteName===x.name){failDelete='';failDeleteName='';return response(500);}rows.delete(x.id);return response(204);}if(!x)return response(404);return response(200,JSON.stringify({id:x.id,name:x.name,parents:x.parent?[x.parent]:[],mimeType:x.kind==='folder'?'application/vnd.google-apps.folder':'text/plain'}));}},ContentService:{MimeType:{JSON:'json'},createTextOutput:v=>({v,setMimeType(){return this},getContent(){return this.v}})},HtmlService:{XFrameOptionsMode:{ALLOWALL:'ALLOWALL'},createHtmlOutput:v=>({v,setXFrameOptionsMode(x){this.x=x;return this}})}};vm.runInNewContext(source,sandbox,{filename:'drive-relay-d2-trial.gs'});return{g:sandbox,rows,props,lockStats,root,upload,receiver,sha,setFail:id=>{failDelete=id},setFailName:name=>{failDeleteName=name},file:(parent,name)=>[...rows.values()].find(x=>x.parent===parent.id&&x.name===name),add:(parent,name)=>add('file',name,parent.id,'unrelated')};}
+function file(x){return{getId:()=>x.id,getName:()=>x.name,getSize:()=>x.bytes.length,getBlob:()=>blob(x.bytes),setContent:v=>{x.bytes=Buffer.from(v)}};}function blob(bytes){return{bytes:Buffer.from(bytes),getBytes(){return [...this.bytes].map(x=>x>127?x-256:x)},getDataAsString(){return this.bytes.toString()}};}
+const upload='upload bearer',receiver='receiver bearer',sha=v=>h(Buffer.from(String(v))),jwk={kty:'EC',crv:'P-256',x:'x'.repeat(43),y:'y'.repeat(43)};for(const [k,v] of Object.entries({D2_TRIAL_ENABLED:'true',D2_PARENT_ORIGIN:'https://311experience-gisikoubou.github.io',D2_SYNTHETIC_ROOT_ID:root.id,D2_RECEIVER_BEARER_SHA256:sha(receiver),D2_RECIPIENT_PUBLIC_JSON:JSON.stringify({recipientKeyId:'rk_receiver',publicJwk:jwk}),D2_UPLOAD_BEARER_SHA256:sha(upload),D2_PAIRING_ENABLED:'true'}))props.set(k,v);let failDelete='',failDeleteName='';const lockStats={wait:0,release:0},response=(code,text='')=>({getResponseCode:()=>code,getContentText:()=>text});const sandbox={JSON,Error,encodeURIComponent,Number,Math,Object,PropertiesService:{getScriptProperties:()=>({getProperty:k=>props.get(k)||null,getProperties:()=>Object.fromEntries(props),setProperty:(k,v)=>props.set(k,v),deleteProperty:k=>props.delete(k)})},DriveApp:{getFolderById:i=>{const x=rows.get(i);if(!x||x.kind!=='folder')throw Error('missing');return folder(x)}},MimeType:{PLAIN_TEXT:'text'},LockService:{getScriptLock:()=>({waitLock(){lockStats.wait++;},releaseLock(){lockStats.release++;}})},Utilities:{base64DecodeWebSafe:s=>[...Buffer.from(s,'base64url')].map(x=>x>127?x-256:x),newBlob:(v,_t,n)=>({bytes:Buffer.from(v),name:n,getBytes(){return [...this.bytes].map(x=>x>127?x-256:x)}}),computeDigest:(_a,b)=>[...createHash('sha256').update(Buffer.from(b.map(x=>x<0?x+256:x))).digest()].map(x=>x>127?x-256:x),DigestAlgorithm:{SHA_256:'sha'},getUuid:()=> 'a'.repeat(32)},ScriptApp:{getOAuthToken:()=> 'token'},UrlFetchApp:{fetch:(url,opt={})=>{const m=/files\/([^?]+)/.exec(url),x=m&&rows.get(decodeURIComponent(m[1]));if(opt.method==='delete'){if(!x)return response(404);if(failDelete===x.id||failDeleteName===x.name){failDelete='';failDeleteName='';return response(500);}rows.delete(x.id);return response(204);}if(!x)return response(404);return response(200,JSON.stringify({id:x.id,name:x.name,parents:x.parent?[x.parent]:[],mimeType:x.kind==='folder'?'application/vnd.google-apps.folder':'text/plain'}));}},ContentService:{MimeType:{JSON:'json'},createTextOutput:v=>({v,setMimeType(){return this},getContent(){return this.v}})},HtmlService:{XFrameOptionsMode:{ALLOWALL:'ALLOWALL'},createHtmlOutput:v=>({v,setXFrameOptionsMode(x){this.x=x;return this}})}};vm.runInNewContext(source,sandbox,{filename:'drive-relay-d2-trial.gs'});return{g:sandbox,rows,props,lockStats,root,upload,receiver,sha,setFail:id=>{failDelete=id},setFailName:name=>{failDeleteName=name},file:(parent,name)=>[...rows.values()].find(x=>x.parent===parent.id&&x.name===name),add:(parent,name)=>add('file',name,parent.id,'unrelated')};}
 async function testGateway(){const e=await fakeGateway();e.g.Utilities.newBlob=(v,_t,n)=>({bytes:Buffer.from(v),name:n,getBytes(){return [...this.bytes].map(x=>x>127?x-256:x)}});return e;}
 const rawFakeGateway=fakeGateway;fakeGateway=async()=>{const e=await rawFakeGateway(),wrap=f=>{const cf=f.createFile,cd=f.createFolder,gf=f.getFoldersByName;f.createFile=(a,b)=>typeof a==='object'?cf(a.name||'blob',a):cf(a,b);f.createFolder=n=>wrap(cd(n));f.getFoldersByName=n=>{const i=gf(n);return{hasNext:()=>i.hasNext(),next:()=>wrap(i.next())}};return f},get=e.g.DriveApp.getFolderById;e.g.Utilities.newBlob=(v,_t,n)=>({bytes:Buffer.from(v),name:n,getBytes(){return [...this.bytes].map(x=>x>127?x-256:x)}});e.g.DriveApp.getFolderById=i=>wrap(get(i));return e;};
 function body(env,proof='proof-a'){env.rawAckProof=proof;const descriptor='d'.repeat(64),parts=[Buffer.from('one'),Buffer.from('two'),Buffer.from('three'),Buffer.from('four')],hashes=parts.map(h),plan={version:'dwo-relay-plan-v1',totalBytes:parts.reduce((n,p)=>n+p.length,0),entries:[{slot:'receiver-bootstrap',kind:'receiver-bootstrap',iv:'iv0',size:parts[0].length,ciphertextSha256:hashes[0],bootstrapVersion:'dwo-receiver-bootstrap-v1',recipientKeyId:'rk_receiver',ephemeralPublicJwk:{kty:'EC',crv:'P-256',x:'x'.repeat(43),y:'y'.repeat(43)},hkdfSalt:'salt'},{slot:'manifest',kind:'manifest',iv:'iv1',size:parts[1].length,ciphertextSha256:hashes[1]},{slot:'work-order',kind:'work-order',iv:'iv2',size:parts[2].length,ciphertextSha256:hashes[2]},{slot:'attachment:att_one:0',kind:'attachment',iv:'iv3',size:parts[3].length,ciphertextSha256:hashes[3],attachmentId:'att_one',index:0}]};return{bearer:env.upload,jobId:'job_'+descriptor,descriptorSha256:descriptor,ackProofHash:h(proof),rawAckProof:proof,plan,planSha256:h(Buffer.from(canonical(plan))),objects:parts.map((v,ordinal)=>({ordinal,size:v.length,ciphertextSha256:h(v),bytes:b64u(v)}))};}
@@ -881,6 +913,7 @@ function control(env,v){return env.g.d2Control_({receiverBearer:env.receiver,...
 test('gateway VM: public HtmlService bridge delegates only to private D2 bridge logic',async()=>{const e=await fakeGateway(),c='A'.repeat(24),cfg=e.g.d2Bridge(c,'getConfig',{});assert.equal(cfg.recipientKeyId,'rk_receiver');assert.deepEqual(cfg.publicJwk,{kty:'EC',crv:'P-256',x:'x'.repeat(43),y:'y'.repeat(43)});assert.throws(()=>e.g.d2Bridge('short','getConfig',{}),/D2_BRIDGE_INVALID/);assert.throws(()=>e.g.d2Bridge(c,'unknown',{}),/D2_BRIDGE_ACTION_INVALID/);});
 test('gateway VM: pairing is serialized and conflicting retry cannot rotate verifier',async()=>{const e=await fakeGateway(),jwk={kty:'EC',crv:'P-256',x:'x'.repeat(43),y:'y'.repeat(43)},pair={bearerSha256:e.sha(e.upload),clinicDeviceId:'dev_pair',signingKeyId:'sk_pair',signingPublicJwk:jwk,recipientKeyId:'rk_receiver'};assert.equal(e.g.d2Pair_(pair).status,'paired');assert.deepEqual(e.lockStats,{wait:1,release:1});const verifier=e.props.get('D2_UPLOAD_BEARER_SHA256');assert.throws(()=>e.g.d2Pair_({...pair,bearerSha256:'0'.repeat(64)}),/D2_PAIR_CONFLICT/);assert.deepEqual(e.lockStats,{wait:2,release:2});assert.equal(e.props.get('D2_UPLOAD_BEARER_SHA256'),verifier);assert.equal([...e.rows.values()].filter(x=>x.name==='pairing.json').length,1);});
 test('gateway VM: bearer, inside-job staging, partial retry, and idempotent finalization',async()=>{const e=await fakeGateway(),b=body(e);assert.throws(()=>e.g.d2Put_({...b,bearer:'wrong'}),/D2_UPLOAD_AUTH_INVALID/);assert.equal(e.rows.size,1);const corrupt=structuredClone(b);corrupt.objects[2].bytes=b64u(Buffer.from('bad'));assert.throws(()=>e.g.d2Put_(corrupt),/D2_OBJECT_HASH_INVALID/);const job=e.file(e.root,b.jobId);assert.ok(job);assert.ok(e.file(job,'staging.json'));assert.equal(e.file(job,'meta.json'),undefined);assert.equal(e.file(job,'ready.json'),undefined);assert.equal(e.file(job,'obj_0000.bin').name,'obj_0000.bin');const changed=structuredClone(b);changed.plan.entries[3].slot='attachment:att_other:0';changed.plan.entries[3].attachmentId='att_other';changed.planSha256=h(Buffer.from(canonical(changed.plan)));assert.throws(()=>e.g.d2Put_(changed),/D2_CONFLICT/);assert.equal(e.g.d2Put_(b).status,'ready');assert.equal(e.g.d2Put_(b).status,'ready');const ready=JSON.parse(e.file(job,'ready.json').bytes);assert.equal(ready.planSha256,b.planSha256);assert.equal(ready.metaSha256,h(e.file(job,'meta.json').bytes));assert.equal([...e.rows.values()].filter(x=>x.name===b.jobId).length,1);assert.equal([...e.rows.values()].filter(x=>x.name==='meta.json').length,1);assert.equal([...e.rows.values()].filter(x=>x.name==='ready.json').length,1);e.file(job,'obj_0001.bin').bytes=Buffer.from('changed');assert.throws(()=>e.g.d2Put_(b),/D2_CONFLICT/);e.root.name='not dedicated';assert.throws(()=>e.g.d2Put_(b),/D2_ROOT_INVALID/);});
+test('gateway VM: script-property headroom rejects only a new job and preserves existing partial recovery plus tombstones',async()=>{const e=await fakeGateway(),first=body(e),corrupt=structuredClone(first);corrupt.objects[2].bytes=b64u(Buffer.from('bad'));assert.throws(()=>e.g.d2Put_(corrupt),/D2_OBJECT_HASH_INVALID/);const partial=e.file(e.root,first.jobId);assert.ok(partial);e.add(e.root,'unrelated-root-file.txt');const tombKey='D2_DELETED_job_'+'f'.repeat(64),tombValue='preserve-replay-proof';e.props.set(tombKey,tombValue);for(let i=0;i<48;i++)e.props.set('FILL_'+i,'x'.repeat(8192));const second=body(e);second.descriptorSha256='e'.repeat(64);second.jobId='job_'+second.descriptorSha256;assert.throws(()=>e.g.d2Put_(second),/D2_PROPERTY_CAPACITY_EXHAUSTED/);assert.equal(e.file(e.root,second.jobId),undefined,'capacity rejection must occur before creating a Drive folder');assert.equal(e.props.get(tombKey),tombValue,'replay-prevention tombstones must never be evicted to create space');assert.equal(e.g.d2Put_(first).status,'ready','an already-started partial job remains recoverable even after the new-job guard closes');});
 test('gateway VM: ACK auth, deletion resume, and staging deletion preserve unrelated root files',async()=>{const e=await fakeGateway(),b=body(e);e.g.d2Put_(b);const job=e.file(e.root,b.jobId),stage=e.file(job,'staging.json'),rootFile=e.add(e.root,'keep.txt');assert.throws(()=>e.g.d2Control_({receiverBearer:'bad',action:'ack',jobId:b.jobId}),/D2_RECEIVER_AUTH_INVALID/);assert.throws(()=>control(e,{action:'ack',jobId:b.jobId,ackCapability:'bad',ackProof:b.ackProofHash}),/D2_ACK_INVALID/);let issued=control(e,{action:'issueAckCapability',jobId:b.jobId});assert.throws(()=>control(e,{action:'ack',jobId:b.jobId,ackCapability:issued.ackCapability,ackProof:'0'.repeat(64)}),/D2_ACK_INVALID/);issued=control(e,{action:'issueAckCapability',jobId:b.jobId});const first=e.file(job,'obj_0000.bin');e.setFail(first.id);assert.throws(()=>control(e,{action:'ack',jobId:b.jobId,ackCapability:issued.ackCapability,ackProof:b.ackProofHash}),/D2_DELETE_FAILED/);const controlFile=e.file(e.root,'control_'+b.jobId+'.json');assert.ok(controlFile);assert.equal(JSON.parse(e.file(job,'meta.json').bytes).state,'deleting');assert.throws(()=>control(e,{action:'issueAckCapability',jobId:b.jobId}),/D2_JOB_NOT_READY/);assert.equal(control(e,{action:'ack',jobId:b.jobId,ackCapability:issued.ackCapability,ackProof:b.ackProofHash}).status,'deleted');assert.equal(e.file(e.root,b.jobId),undefined);assert.equal(e.rows.has(stage.id),false);assert.ok(e.rows.has(rootFile.id));});
 
 test('gateway VM: folder-deleted/control-delete interruption resumes and lost ACK response is idempotent',async()=>{const e=await fakeGateway(),b=body(e);e.g.d2Put_(b);const rootFile=e.add(e.root,'keep-after-delete.txt'),issued=control(e,{action:'issueAckCapability',jobId:b.jobId}),controlName='control_'+b.jobId+'.json';e.setFailName(controlName);assert.throws(()=>control(e,{action:'ack',jobId:b.jobId,ackCapability:issued.ackCapability,ackProof:b.ackProofHash}),/D2_DELETE_FAILED/);assert.equal(e.file(e.root,b.jobId),undefined);assert.ok(e.file(e.root,controlName));assert.ok(e.rows.has(rootFile.id));assert.equal(control(e,{action:'ack',jobId:b.jobId,ackCapability:issued.ackCapability,ackProof:b.ackProofHash}).status,'deleted');assert.equal(e.file(e.root,controlName),undefined);assert.throws(()=>control(e,{action:'ack',jobId:b.jobId,ackCapability:'B'.repeat(64),ackProof:b.ackProofHash}),/D2_ACK_INVALID/);assert.throws(()=>control(e,{action:'ack',jobId:b.jobId,ackCapability:issued.ackCapability,ackProof:'0'.repeat(64)}),/D2_ACK_INVALID/);assert.equal(control(e,{action:'ack',jobId:b.jobId,ackCapability:issued.ackCapability,ackProof:b.ackProofHash}).status,'deleted');assert.ok(e.rows.has(rootFile.id));});
@@ -1833,4 +1866,532 @@ test('D2 retained Windows PowerShell script: real executable regression with a f
       await assert.rejects(fs.stat(passphraseFile), { code: 'ENOENT' }, 'the child must never be invoked on a malformed secrets file');
     }
   } finally { await fs.rm(base, { recursive: true, force: true }); }
+});
+test('B5-drive-candidate crosses actual D2 mock wire, delayed sync, verified Windows save and interrupted ACK', async () => {
+  const { PDFDocument } = require('../vendor/pdf/pdf-lib-1.17.1.min.js');
+  const opts = { crypto: webcrypto, transferApi: T };
+  const sender = await C.generateSenderIdentity(opts);
+  const recipient = await C.generateRecipientIdentity('synthetic-B5-wire-passphrase', opts);
+  const offer = await C.createPairingOffer(recipient, opts);
+  const pairing = await C.createPairingResponse(offer, sender, opts);
+  const registry = await C.verifyPairingResponse(offer, pairing, opts);
+  const pdf = await PDFDocument.create();
+  pdf.addPage([182 * 72 / 25.4, 257 * 72 / 25.4]);
+  const bytes = Buffer.from(await pdf.save());
+  const pkg = await T.buildPackage(REF, { workOrderRef: REF, patientName: 'SYNTHETIC_B5_WIRE' }, [],
+    { ...opts, issuedB5Pdf: new Blob([bytes], { type: 'application/pdf' }) });
+  const envelope = await C.encryptPackage(pkg, sender, recipient, opts);
+  const wire = await R.buildDriveRelayBody(envelope, sender, recipient, { ...opts, bootstrapApi: B });
+  assert.equal(wire.ackProofHash, h(h('dwo-receiver-ack-v1|' + wire.jobId + '|' + wire.descriptorSha256 + '|' + REF)));
+  assert.equal(JSON.stringify(wire).includes(REF), false);
+  assert.equal(JSON.stringify(wire).includes('SYNTHETIC_B5_WIRE'), false);
+  const e = await fakeGateway();
+  e.props.set('D2_RECIPIENT_PUBLIC_JSON', JSON.stringify({recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk}));
+  e.g.d2Pair_({bearerSha256:e.sha(e.upload),clinicDeviceId:sender.clinicDeviceId,signingKeyId:sender.signingKeyId,
+    signingPublicJwk:sender.publicJwk,recipientKeyId:recipient.recipientKeyId});
+  const request = {...wire,bearer:e.upload};
+  assert.equal(e.g.d2Put_(request).status,'ready');
+  assert.equal(e.g.d2Put_(request).status,'ready');
+  const job=e.file(e.root,wire.jobId), unrelated=e.add(e.root,'keep.txt');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(),'dwo-b5-wire-'));
+  try {
+    const sync=path.join(root,wire.jobId), inbox=path.join(root,'inbox');
+    await fs.mkdir(sync);
+    const entries=[...e.rows.values()].filter(row=>row.parent===job.id && row.kind==='file');
+    const missing=entries.find(row=>row.name==='obj_0001.bin');
+    assert.ok(missing);
+    for (const row of entries) if(row!==missing) await fs.writeFile(path.join(sync,row.name),row.bytes);
+    let calls=0;
+    const call=(action,body)=>{calls++;return e.g.d2Control_({receiverBearer:e.receiver,action,...body});};
+    const receiveOpts={recipientKeyRingOrIdentity:recipient,senderRegistries:{senders:[registry]},inboxRoot:inbox,
+      control:{issueAckCapability:async jobId=>call('issueAckCapability',{jobId}),
+        ack:async value=>{assert.deepEqual(await fs.readFile(path.join(inbox,wire.jobId,'media','att-issued-b5-pdf.bin')),bytes);return call('ack',value);},
+        resumeAck:async value=>call('resumeAck',value)}};
+    await assert.rejects(()=>receiveD2Job(sync,receiveOpts),{code:'D2_SYNC_OBJECT_MISSING'});
+    assert.equal(calls,0);
+    await fs.writeFile(path.join(sync,missing.name),missing.bytes);
+    e.setFailName('obj_0001.bin');
+    await assert.rejects(()=>receiveD2Job(sync,receiveOpts),/D2_DELETE_FAILED/);
+    assert.deepEqual(await fs.readFile(path.join(inbox,wire.jobId,'media','att-issued-b5-pdf.bin')),bytes);
+    assert.ok(e.file(e.root,'control_'+wire.jobId+'.json'));
+    const completed=await receiveD2Job(sync,receiveOpts);
+    assert.equal(completed.status,'already-stored');
+    assert.equal(completed.cloudStatus,'deleted');
+    assert.equal(e.file(e.root,wire.jobId),undefined);
+    assert.ok(e.rows.has(unrelated.id));
+    assert.deepEqual(await fs.readFile(path.join(inbox,wire.jobId,'media','att-issued-b5-pdf.bin')),bytes);
+  } finally { await fs.rm(root,{recursive:true,force:true}); }
+});
+
+test('B5-drive-candidate refuses wrong recipient and oversize instead of dropping data', async () => {
+  const opts = {crypto:webcrypto,transferApi:T};
+  const sender=await C.generateSenderIdentity(opts);
+  const recipient=await C.generateRecipientIdentity('synthetic-drive-limit-passphrase',opts);
+  const large = new Blob(['%PDF-',new Uint8Array(1024*1024)],{type:'application/pdf'});
+  const pkg=await T.buildPackage(REF,{workOrderRef:REF},[],{...opts,issuedB5Pdf:large});
+  const envelope=await C.encryptPackage(pkg,sender,recipient,opts);
+  await assert.rejects(()=>R.buildDriveRelayBody(envelope,sender,{...recipient,recipientKeyId:'rk_other'},{...opts,bootstrapApi:B}),{code:'RELAY_DRIVE_BINDING_INVALID'});
+  await assert.rejects(()=>R.buildDriveRelayBody(envelope,sender,recipient,{...opts,bootstrapApi:B}),{code:'RELAY_DRIVE_TRIAL_LIMIT'});
+});
+
+test('Drive-batch-candidate selects opaque directories and control-only retries once, excluding aliases and unrelated names', async () => {
+  const {selectD2ReceiveCandidates,receiveD2BatchCandidate}=await import('../gateway/drive-relay-d2-adapter.mjs');
+  const a='job_'+'a'.repeat(64), b='job_'+'b'.repeat(64), c='job_'+'c'.repeat(64);
+  const entry=(name,kind)=>({name,isDirectory:()=>kind==='dir',isFile:()=>kind==='file',isSymbolicLink:()=>kind==='link'});
+  const entries=[entry(b,'dir'),entry(a,'dir'),entry('control_'+a+'.json','file'),entry('control_'+c+'.json','file'),
+    entry('control_'+b+'.json','dir'),entry('job_'+'d'.repeat(64),'link'),entry('job_'+'e'.repeat(64),'file'),
+    entry('../'+a,'dir'),entry('pairing.json','file'),entry('control_'+c+'.json.bak','file')];
+  assert.deepEqual(selectD2ReceiveCandidates(entries),[a,b,c]);
+  const seen=[];
+  const batch=await receiveD2BatchCandidate(entries,async id=>{
+    seen.push(id);
+    if(id===a)throw Object.assign(Error('synthetic sensitive detail'),{code:'D2_SYNC_OBJECT_MISSING'});
+    if(id===b)return {jobId:b,status:'stored',cloudStatus:'deleted',workOrderRef:REF};
+    return {jobId:a,status:'stored',cloudStatus:'deleted'};
+  });
+  assert.deepEqual(seen,[a,b,c]);
+  assert.deepEqual(batch,{checked:3,results:[
+    {jobId:a,status:'failed',errorCode:'D2_SYNC_OBJECT_MISSING'},
+    {jobId:b,status:'stored',cloudStatus:'deleted'},
+    {jobId:c,status:'failed',errorCode:'D2_BATCH_RESULT_UNCONFIRMED'}
+  ]});
+  assert.equal(JSON.stringify(batch).includes(REF),false);
+});
+
+test('Drive-batch-candidate receives two independent encrypted PDF jobs despite partial sync and resumes only verified saved job', async()=>{
+  const {receiveD2BatchCandidate}=await import('../gateway/drive-relay-d2-adapter.mjs');
+  const {PDFDocument}=require('../vendor/pdf/pdf-lib-1.17.1.min.js');
+  const opts={crypto:webcrypto,transferApi:T};
+  const sender=await C.generateSenderIdentity(opts);
+  const recipient=await C.generateRecipientIdentity('synthetic-batch-receiver-passphrase',opts);
+  const offer=await C.createPairingOffer(recipient,opts);
+  const registry=await C.verifyPairingResponse(offer,await C.createPairingResponse(offer,sender,opts),opts);
+  const e=await fakeGateway();
+  e.props.set('D2_RECIPIENT_PUBLIC_JSON',JSON.stringify({recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk}));
+  e.g.d2Pair_({bearerSha256:e.sha(e.upload),clinicDeviceId:sender.clinicDeviceId,signingKeyId:sender.signingKeyId,signingPublicJwk:sender.publicJwk,recipientKeyId:recipient.recipientKeyId});
+  const refs=[REF,'dwo:323e4567-e89b-42d3-a456-426614174002'];
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'dwo-batch-candidate-'));
+  try {
+    const sync=path.join(root,'sync'),inbox=path.join(root,'inbox');
+    await fs.mkdir(sync);
+    const jobs=[];
+    for(const ref of refs){
+      const doc=await PDFDocument.create();doc.addPage([182*72/25.4,257*72/25.4]);
+      const bytes=Buffer.from(await doc.save());
+      const pkg=await T.buildPackage(ref,{workOrderRef:ref,patientName:'SYNTHETIC ONLY'},[],
+        {...opts,issuedB5Pdf:new Blob([bytes],{type:'application/pdf'})});
+      const env=await C.encryptPackage(pkg,sender,recipient,opts);
+      const wire=await R.buildDriveRelayBody(env,sender,recipient,{...opts,bootstrapApi:B});
+      e.g.d2Put_({...wire,bearer:e.upload});
+      const job=e.file(e.root,wire.jobId),dir=path.join(sync,wire.jobId);
+      await fs.mkdir(dir);
+      const rows=[...e.rows.values()].filter(row=>row.parent===job.id&&row.kind==='file');
+      for(const row of rows)await fs.writeFile(path.join(dir,row.name),row.bytes);
+      jobs.push({wire,dir,bytes,rows});
+    }
+    jobs.sort((a,b)=>a.wire.jobId.localeCompare(b.wire.jobId));
+    const [delayed,ready]=jobs;
+    const missing=delayed.rows.find(row=>row.name==='obj_0001.bin');
+    await fs.rm(path.join(delayed.dir,missing.name));
+    const acked=[];
+    const control=(action,body)=>e.g.d2Control_({receiverBearer:e.receiver,action,...body});
+    const run=id=>receiveD2Job(path.join(sync,id),{
+      recipientKeyRingOrIdentity:recipient,senderRegistries:{senders:[registry]},inboxRoot:inbox,
+      control:{issueAckCapability:async jobId=>control('issueAckCapability',{jobId}),
+        ack:async value=>{acked.push(value.jobId);return control('ack',value);},
+        resumeAck:async value=>control('resumeAck',value)}
+    });
+    const first=await receiveD2BatchCandidate(await fs.readdir(sync,{withFileTypes:true}),run);
+    assert.equal(first.checked,2);
+    assert.equal(first.results[0].errorCode,'D2_SYNC_OBJECT_MISSING');
+    assert.equal(first.results[1].status,'stored');
+    assert.deepEqual(acked,[ready.wire.jobId]);
+    await fs.writeFile(path.join(delayed.dir,missing.name),missing.bytes);
+    e.setFailName('obj_0001.bin');
+    const second=await receiveD2BatchCandidate(await fs.readdir(sync,{withFileTypes:true}),run);
+    assert.equal(second.results[0].status,'failed');
+    assert.equal(second.results[1].status,'already-stored');
+    assert.ok(e.file(e.root,'control_'+delayed.wire.jobId+'.json'));
+    // Cloud directory no longer needs to be locally present for ACK resume.
+    await fs.rm(delayed.dir,{recursive:true,force:true});
+    await fs.writeFile(path.join(sync,'control_'+delayed.wire.jobId+'.json'),'synthetic marker');
+    const third=await receiveD2BatchCandidate(await fs.readdir(sync,{withFileTypes:true}),run);
+    assert.equal(third.checked,2);
+    assert.ok(third.results.every(x=>x.status==='already-stored'&&x.cloudStatus==='deleted'));
+    assert.deepEqual(acked,[ready.wire.jobId,delayed.wire.jobId]);
+    for(const j of jobs)assert.deepEqual(await fs.readFile(path.join(inbox,j.wire.jobId,'media','att-issued-b5-pdf.bin')),j.bytes);
+    assert.equal((await fs.readdir(inbox)).filter(x=>x.startsWith('job_')).length,2);
+  } finally {await fs.rm(root,{recursive:true,force:true});}
+});
+
+test('Drive-outbox-retry-wire connects real B5 ciphertext to D2 sender and gateway after a partial upload and lost reply', async () => {
+  const opts = {crypto:webcrypto, transferApi:T};
+  const sender = await C.generateSenderIdentity(opts);
+  const recipient = await C.generateRecipientIdentity('synthetic-outbox-wire-passphrase',opts);
+  const pkg = await T.buildPackage(REF,{workOrderRef:REF,trial:'SYNTHETIC_OUTBOX_WIRE'},[],
+    {...opts,issuedB5Pdf:new Blob(['%PDF-1.7\nsynthetic'],{type:'application/pdf'})});
+  const wire = await R.buildDriveRelayBody(await C.encryptPackage(pkg,sender,recipient,opts),sender,recipient,{...opts,bootstrapApi:B});
+  const e = await fakeGateway();
+  const bearer='A'.repeat(43);
+  e.props.set('D2_RECIPIENT_PUBLIC_JSON',JSON.stringify({recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk}));
+  e.g.d2Pair_({bearerSha256:e.sha(bearer),clinicDeviceId:sender.clinicDeviceId,signingKeyId:sender.signingKeyId,
+    signingPublicJwk:sender.publicJwk,recipientKeyId:recipient.recipientKeyId});
+  const stored=R.canonicalJson(wire);
+  const restored=await R.verifyDriveRelayBody(JSON.parse(stored),REF,recipient.recipientKeyId,opts);
+  const status=b=>e.g.d2Status_({bearer,jobId:b.jobId,ackProofHash:b.ackProofHash,planSha256:b.planSha256});
+  assert.equal(status(restored).status,'not-started');
+  const interrupted={...restored,bearer,objects:restored.objects.map(o=>({...o}))};
+  interrupted.objects[2].bytes=Buffer.from('synthetic-corrupt-part').toString('base64url');
+  assert.throws(()=>e.g.d2Put_(interrupted),/D2_OBJECT_HASH_INVALID/);
+  assert.equal(status(restored).status,'partial');
+  // Connect the existing browser's actual status-first sender to the existing gateway VM.
+  // All keys and jobs are fictional; no browser, external request or deployed endpoint.
+  const db=makeFakeIndexedDB();
+  db.seed(await makeSenderState({clinicDeviceId:sender.clinicDeviceId,signingKeyId:sender.signingKeyId,
+    signingPrivateKey:sender.privateKey,signingPublicJwk:sender.publicJwk,uploadBearer:bearer,
+    recipientKeyId:recipient.recipientKeyId,recipientPublicJwk:recipient.publicJwk,
+    pendingJob:{status:'pending',body:{...restored,bearer}}}));
+  const ctx=buildSenderSandbox({indexedDB:db});
+  const source=await fs.readFile(new URL('../app/drive-relay-d2-trial.js',import.meta.url),'utf8');
+  vm.runInNewContext(testHookSource(source),ctx.sandbox);
+  const actions=[];
+  async function round(previous,expected,loseReply=false) {
+    const src=await waitForSrcChange(ctx,previous),channel=readChannel(ctx.nodes);
+    let observed;
+    const peer={postMessage(message){observed=message;}};
+    ctx.getOnMessage()({origin:SANDBOX_ORIGIN,source:peer,data:{version:'dwo-d2-bridge-v1',channel,type:'ready'}});
+    assert.equal(observed.action,expected);
+    actions.push(observed.action);
+    if(expected==='putSyntheticJob'){
+      const {bearer:sentBearer,...body}=observed.body;
+      assert.equal(sentBearer,bearer);
+      assert.equal(R.canonicalJson(body),stored);
+    }
+    const value=e.g.d2Bridge(channel,observed.action,observed.body);
+    ctx.getOnMessage()({origin:SANDBOX_ORIGIN,source:peer,data:{version:'dwo-d2-bridge-v1',channel,type:'result',ok:!loseReply,value:loseReply?undefined:value}});
+    return src;
+  }
+  const retry=ctx.sandbox.D2TrialTestHooks.send();
+  const first=await round('','getSyntheticJobStatus');
+  const second=await round(first,'putSyntheticJob',true);
+  await round(second,'getSyntheticJobStatus');
+  await retry;
+  assert.equal(db.peek('sender').pendingJob.status,'accepted');
+  assert.equal(db.peek('sender').pendingJob.body.jobId,wire.jobId);
+  assert.deepEqual(actions,['getSyntheticJobStatus','putSyntheticJob','getSyntheticJobStatus']);
+  assert.equal(status(restored).status,'ready');
+  const job=e.file(e.root,wire.jobId);
+  assert.ok(job);
+  assert.equal([...e.rows.values()].filter(x=>x.name===wire.jobId).length,1);
+  assert.equal([...e.rows.values()].filter(x=>x.parent===job.id&&x.name==='ready.json').length,1);
+  assert.equal(stored.includes(bearer),false);
+  assert.equal(stored.includes('SYNTHETIC_OUTBOX_WIRE'),false);
+});
+
+test('normal credential store persists before pairing and authorizes a stable session only after exact confirmation', async () => {
+  const source=await fs.readFile(new URL('../app/drive-relay-session-store.js',import.meta.url),'utf8');
+  const db=makeFakeIndexedDB();
+  const sandbox={indexedDB:db,crypto:webcrypto,MediaTransferCrypto:C,TextEncoder,Uint8Array,Array,Object,Error,Promise,globalThis:null};
+  sandbox.globalThis=sandbox;vm.runInNewContext(source,sandbox);
+  const store=sandbox.DriveRelaySessionStore;
+  const sender=await C.generateSenderIdentity({crypto:webcrypto});
+  const recipient=await C.generateRecipientIdentity('synthetic-normal-store-passphrase',{crypto:webcrypto});
+  const recipientPublicInfo={recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk};
+  const pairingOffer=await C.createPairingOffer(recipientPublicInfo,{crypto:webcrypto,now:()=>1000,expiresInMs:10000,pairingId:'pr_normal_store'});
+  const input={senderIdentity:sender,pairingOffer,uploadBearer:'S'.repeat(43)};
+  const actions=[];
+  const bridge=async(action,body)=>{actions.push(action);assert.equal(db.peek('current').status,'pairing','candidate must be durable before bridge call');
+    if(action==='getConfig')return recipientPublicInfo;
+    assert.equal(body.bearerSha256,createHash('sha256').update(input.uploadBearer).digest('hex'));
+    assert.equal(body.clinicDeviceId,sender.clinicDeviceId);return {status:'paired'};};
+  const completed=await store.beginPairingCredential(input,bridge,{now:()=>2000});
+  assert.equal(completed.status,'paired');assert.equal(C.decodePairingPayload(completed.pairingPayload).type,'dwo-pairing-response');
+  assert.deepEqual(actions,['getConfig','pair']);
+  assert.equal(db.peek('current').status,'paired');
+  assert.equal(db.peek('current').signingPrivateKey.extractable,false);
+  assert.equal(db.peek('current').uploadBearer,input.uploadBearer);
+  assert.equal(Object.hasOwn(db.peek('current'),'bridgeCall'),false);
+  assert.equal(Object.hasOwn(db.peek('current'),'endpoint'),false);
+  const restored=await store.restorePairedCredential();
+  assert.equal(restored.signingKeyId,sender.signingKeyId);
+  assert.equal(restored.recipientKeyId,recipient.recipientKeyId);
+  const provider=store.createSessionProvider(bridge);
+  const first=await provider(),second=await provider();
+  assert.equal(first,second);assert.equal(Object.isFrozen(first),true);
+  assert.equal(first.senderIdentity.privateKey,sender.privateKey);
+  assert.equal(first.bridgeCall,bridge);
+  await assert.rejects(()=>store.activateDeployment('https://script.google.com/macros/s/TEST/exec'),
+    {code:'DRIVE_SESSION_BRIDGE_AUTHORITY_UNAVAILABLE'});
+  await assert.rejects(()=>store.activateFinalIssueSession(bridge),{code:'DRIVE_SESSION_FINAL_ISSUE_UNAVAILABLE'});
+  let installed=null,dispatchedRef=null,dispatchedSession=null;
+  const finalIssue=Object.freeze({
+    setIssuedDriveSessionProviderTrial(value){installed=value;},
+    async dispatchIssuedDriveSessionTrial(ref){dispatchedRef=ref;dispatchedSession=await installed();return {decision:'KEEP_PENDING',jobId:'job_activation'};}
+  });
+  sandbox.DwoFinalIssue=finalIssue;
+  const controller=await store.activateFinalIssueSession(bridge);
+  assert.equal(Object.isFrozen(controller),true);assert.deepEqual(Object.keys(controller),['dispatch']);
+  assert.deepEqual(await controller.dispatch('wo_activation'),{decision:'KEEP_PENDING',jobId:'job_activation'});
+  assert.equal(dispatchedRef,'wo_activation');assert.equal(dispatchedSession,await installed());
+  assert.equal(dispatchedSession.senderIdentity.privateKey,sender.privateKey);
+  assert.equal(dispatchedSession.uploadBearer,input.uploadBearer);
+  assert.equal(JSON.stringify(controller).includes(input.uploadBearer),false);
+  const deploymentUrl='https://script.google.com/macros/s/DEPLOYMENT_TEST/exec';
+  let createdUrl=null;
+  sandbox.DriveRelayBridge=Object.freeze({create(url){createdUrl=url;return bridge;}});
+  const deploymentController=await store.activateDeployment(deploymentUrl);
+  assert.equal(createdUrl,deploymentUrl);
+  assert.deepEqual(await deploymentController.dispatch('wo_deployment'),{decision:'KEEP_PENDING',jobId:'job_activation'});
+  assert.equal(dispatchedRef,'wo_deployment');assert.equal(dispatchedSession.bridgeCall,bridge);
+  sandbox.DwoFinalIssue=Object.freeze({...finalIssue});
+  await assert.rejects(()=>controller.dispatch('wo_replaced'),{code:'DRIVE_SESSION_FINAL_ISSUE_CHANGED'});
+  await assert.rejects(()=>store.beginPairingCredential({...input,uploadBearer:'T'.repeat(43)},bridge,{now:()=>2000}),{code:'DRIVE_SESSION_CREDENTIAL_CONFLICT'});
+  assert.equal(db.peek('current').uploadBearer,input.uploadBearer,'conflict must not overwrite the paired credential');
+  db.erase('current');
+  await assert.rejects(()=>provider(),{code:'DRIVE_SESSION_CREDENTIAL_MISSING'});
+  assert.equal(typeof store.clear,'undefined','credential deletion requires a separate authority');
+});
+
+test('normal credential store retains an incomplete candidate after a lost reply and resumes without rotating identity', async () => {
+  const source=await fs.readFile(new URL('../app/drive-relay-session-store.js',import.meta.url),'utf8');
+  const db=makeFakeIndexedDB();
+  const sandbox={indexedDB:db,crypto:webcrypto,MediaTransferCrypto:C,TextEncoder,Uint8Array,Array,Object,Error,Promise,globalThis:null};
+  sandbox.globalThis=sandbox;vm.runInNewContext(source,sandbox);
+  const store=sandbox.DriveRelaySessionStore;
+  const sender=await C.generateSenderIdentity({crypto:webcrypto});
+  const recipient=await C.generateRecipientIdentity('synthetic-normal-store-replacement',{crypto:webcrypto});
+  const recipientPublicInfo={recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk};
+  const pairingOffer=await C.createPairingOffer(recipientPublicInfo,{crypto:webcrypto,now:()=>1000,expiresInMs:10000,pairingId:'pr_normal_resume'});
+  const input={senderIdentity:sender,pairingOffer,uploadBearer:'U'.repeat(43)};
+  let pairCalls=0;
+  const lost=async action=>{if(action==='getConfig')return recipientPublicInfo;pairCalls++;throw Error('synthetic lost reply');};
+  await assert.rejects(()=>store.beginPairingCredential(input,lost,{now:()=>2000}));
+  const pending=db.peek('current');assert.equal(pending.status,'pairing');assert.equal(pending.pairingResponse,null);
+  await assert.rejects(()=>store.restorePairedCredential(),{code:'DRIVE_SESSION_PAIRING_INCOMPLETE'});
+  let installed=0;
+  sandbox.DwoFinalIssue=Object.freeze({
+    setIssuedDriveSessionProviderTrial(){installed++;},
+    async dispatchIssuedDriveSessionTrial(){throw Error('must not dispatch');}
+  });
+  await assert.rejects(()=>store.activateFinalIssueSession(lost),{code:'DRIVE_SESSION_PAIRING_INCOMPLETE'});
+  assert.equal(installed,0,'an incomplete pairing must never register a send session');
+  const resumed=await store.resumePairingCredential(async action=>{
+    if(action==='getConfig')return recipientPublicInfo;pairCalls++;return {status:'paired'};
+  },{now:()=>2500});
+  assert.equal(resumed.status,'paired');assert.equal(pairCalls,2);
+  assert.equal(db.peek('current').signingPrivateKey,sender.privateKey);
+  assert.equal(db.peek('current').uploadBearer,input.uploadBearer);
+  const already=await store.resumePairingCredential(async()=>{throw Error('bridge must not run after paired');},{now:()=>3000});
+  assert.equal(already.pairingPayload,resumed.pairingPayload);
+});
+
+test('normal credential store rejects recipient/result mismatch and durable identity replacement without authorization', async () => {
+  const source=await fs.readFile(new URL('../app/drive-relay-session-store.js',import.meta.url),'utf8');
+  const db=makeFakeIndexedDB();
+  const sandbox={indexedDB:db,crypto:webcrypto,MediaTransferCrypto:C,TextEncoder,Uint8Array,Array,Object,Error,Promise,globalThis:null};
+  sandbox.globalThis=sandbox;vm.runInNewContext(source,sandbox);
+  const store=sandbox.DriveRelaySessionStore,sender=await C.generateSenderIdentity({crypto:webcrypto}),other=await C.generateSenderIdentity({crypto:webcrypto});
+  const recipient=await C.generateRecipientIdentity('synthetic-normal-store-mismatch',{crypto:webcrypto});
+  const recipientPublicInfo={recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk};
+  const pairingOffer=await C.createPairingOffer(recipientPublicInfo,{crypto:webcrypto,now:()=>1000,expiresInMs:10000,pairingId:'pr_normal_mismatch'});
+  const input={senderIdentity:sender,pairingOffer,uploadBearer:'V'.repeat(43)};
+  await assert.rejects(()=>store.beginPairingCredential(input,async action=>action==='getConfig'
+    ?{recipientKeyId:'rk_'+'A'.repeat(43),publicJwk:recipient.publicJwk}:{status:'paired'},{now:()=>2000}),
+    {code:'DRIVE_SESSION_PAIRING_RECIPIENT_MISMATCH'});
+  assert.equal(db.peek('current').status,'pairing');
+  await assert.rejects(()=>store.resumePairingCredential(async action=>action==='getConfig'?recipientPublicInfo:{status:'paired',extra:true},{now:()=>2200}),
+    {code:'DRIVE_SESSION_PAIRING_UNCONFIRMED'});
+  assert.equal(db.peek('current').status,'pairing');
+  db.seed({...db.peek('current'),signingKeyId:other.signingKeyId});
+  await assert.rejects(()=>store.resumePairingCredential(async()=>({}),{now:()=>2300}),{code:'DRIVE_SESSION_CREDENTIAL_INVALID'});
+  assert.equal(typeof store.clear,'undefined','credential deletion requires a separate authority');
+  assert.match(await fs.readFile(new URL('../index.html',import.meta.url),'utf8'),
+    /media-transfer-crypto\.js"><\/script>\s*<script src="app\/drive-relay-session-store\.js"><\/script>\s*<script src="media-receiver-bootstrap\.js/);
+});
+
+test('normal bridge is inert until called and pins the exact sandbox origin and source', async () => {
+  const source=await fs.readFile(new URL('../app/drive-relay-bridge.js',import.meta.url),'utf8');
+  const listeners={message:new Set(),pagehide:new Set()},frames=[],timers=new Map();let timerId=0;
+  const sandbox={crypto:webcrypto,Uint8Array,Promise,Object,Array,Error,Set,encodeURIComponent,
+    btoa:value=>Buffer.from(value,'binary').toString('base64'),
+    setTimeout(fn){const id=++timerId;timers.set(id,fn);return id;},clearTimeout(id){timers.delete(id);},
+    addEventListener(type,fn){listeners[type].add(fn);},removeEventListener(type,fn){listeners[type].delete(fn);},
+    document:{body:{appendChild(frame){frames.push(frame);}},createElement(tag){assert.equal(tag,'iframe');return{attrs:{},removed:false,setAttribute(k,v){this.attrs[k]=v;},remove(){this.removed=true;}};}},globalThis:null};
+  sandbox.globalThis=sandbox;vm.runInNewContext(source,sandbox);
+  assert.equal(frames.length,0,'module load and factory creation must not create a frame');
+  assert.throws(()=>sandbox.DriveRelayBridge.create('https://example.test/exec'),{code:'DRIVE_BRIDGE_URL_INVALID'});
+  const bridge=sandbox.DriveRelayBridge.create('https://script.google.com/macros/s/DEPLOYMENT_123/exec');
+  assert.equal(frames.length,0,'an exact URL alone must remain inert');
+  await assert.rejects(()=>bridge('delete',{}),{code:'DRIVE_BRIDGE_ACTION_INVALID'});
+  await assert.rejects(()=>bridge('getConfig',null),{code:'DRIVE_BRIDGE_BODY_INVALID'});
+  const pending=bridge('getConfig',{}),frame=frames[0],channel=new URL(frame.src).searchParams.get('channel');
+  assert.match(channel,/^[A-Za-z0-9_-]{32}$/);assert.equal(frame.hidden,true);assert.equal(frame.referrerPolicy,'no-referrer');
+  let posted=null;const peer={postMessage(message,origin){posted={message,origin};}},other={postMessage(){throw Error('wrong source');}};
+  const emit=(type,event)=>{for(const fn of [...listeners[type]])fn(event);};
+  emit('message',{origin:'https://script.googleusercontent.com',source:peer,data:{version:'dwo-d2-bridge-v1',channel,type:'ready'}});
+  assert.equal(posted,null);
+  const origin='https://abc-123-script.googleusercontent.com';
+  emit('message',{origin,source:peer,data:{version:'dwo-d2-bridge-v1',channel,type:'ready'}});
+  assert.equal(posted.origin,origin);assert.equal(posted.message.action,'getConfig');assert.deepEqual(posted.message.body,{});
+  emit('message',{origin,source:other,data:{version:'dwo-d2-bridge-v1',channel,type:'result',ok:true,value:{bad:true}}});
+  emit('message',{origin,source:peer,data:{version:'dwo-d2-bridge-v1',channel,type:'result',ok:true,value:{recipientKeyId:'rk_test'}}});
+  assert.deepEqual(await pending,{recipientKeyId:'rk_test'});assert.equal(frame.removed,true);
+  assert.equal(listeners.message.size,0);assert.equal(listeners.pagehide.size,0);assert.equal(timers.size,0);
+  const closing=bridge('getConfig',{}),closingFrame=frames[1];emit('pagehide',{});
+  await assert.rejects(()=>closing,{code:'DRIVE_BRIDGE_PAGE_CLOSED'});assert.equal(closingFrame.removed,true);
+  assert.match(await fs.readFile(new URL('../index.html',import.meta.url),'utf8'),
+    /media-transfer-crypto\.js"><\/script>\s*<script src="app\/drive-relay-bridge\.js"><\/script>\s*<script src="app\/drive-relay-session-store\.js/);
+});
+
+// Test-only bridge between the actual signed outbox and existing Apps Script VM.
+// Never imported by the app, never opens a real DB/endpoint, never accepts external
+// pairing/bearer/wire or status. The synthetic operator intent is one-shot.
+async function makeSignedD2ConnectorTrial(){
+  const S=require('../media-storage.js'), opts={crypto:webcrypto,transferApi:T};
+  const sender=await C.generateSenderIdentity(opts);
+  const recipient=await C.generateRecipientIdentity('signed-d2-connector-synthetic',opts);
+  const pairing={sender:{clinicDeviceId:sender.clinicDeviceId,signingKeyId:sender.signingKeyId,publicJwk:sender.publicJwk},
+    recipient:{recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk}};
+  let currentPairing=structuredClone(pairing);
+  const bearer='A'.repeat(43);
+  const storage=makeFakeIndexedDB();
+  const indexedDB={open(name,version){
+    assert.equal(name,S.DB_NAME);assert.equal(version,S.DB_VERSION);
+    const req=storage.open(),db=req.result;
+    // Adapt the existing isolated FIFO DB double to the real settings key path;
+    // unwrap records on reads, keep the stored signed record itself unmodified.
+    req.result={transaction(names,mode,options){
+      assert.deepEqual(names,[S.STORE_SETTINGS]);
+      const tx=db.transaction();
+      tx.durability=options?.durability||'default';
+      const store=tx.objectStore();
+      tx.objectStore=name=>{
+        assert.equal(name,S.STORE_SETTINGS);
+        return {
+          get(key){
+            const inner=store.get(key);
+            return {get result(){return structuredClone(inner.result?.value);},
+              set onsuccess(fn){inner.onsuccess=fn;}};
+          },
+          add(record){
+            assert.equal(mode,'readwrite');assert.equal(tx.durability,'strict');
+            return store.add({id:record.key,value:structuredClone(record)});
+          }
+        };
+      };
+      return tx;
+    }};
+    return req;
+  }};
+  const env={indexedDB,crypto:webcrypto,MediaTransferCrypto:C,MediaRelayTransport:R};
+  const pkg=await T.buildPackage(REF,{workOrderRef:REF,trial:'SYNTHETIC_SIGNED_D2_CONNECTOR'},[],
+    {...opts,issuedB5Pdf:new Blob(['%PDF-1.7\nsynthetic connector'],{type:'application/pdf'})});
+  const candidate=await R.buildDriveRelayBody(await C.encryptPackage(pkg,sender,recipient,opts),
+    sender,recipient,{...opts,bootstrapApi:B});
+  const proof=await S.createDriveOutboxTrial(env).claimSignedRecovery(REF,'b'.repeat(64),sender,recipient,candidate);
+  const selection=Object.freeze({workOrderRef:REF,jobId:proof.jobId,wireSha256:proof.wireSha256});
+  const key='dwo-drive-outbox-trial-v1:'+REF;
+  const original=structuredClone(storage.peek(key).value);
+  const gateway=await fakeGateway();
+  gateway.props.set('D2_RECIPIENT_PUBLIC_JSON',JSON.stringify(pairing.recipient));
+  gateway.g.d2Pair_({bearerSha256:gateway.sha(bearer),clinicDeviceId:sender.clinicDeviceId,
+    signingKeyId:sender.signingKeyId,signingPublicJwk:sender.publicJwk,recipientKeyId:recipient.recipientKeyId});
+  const calls=[];
+  let nextIntent=null, afterStatus=null, loseReply=false;
+  const reject=()=>Error('SIGNED_D2_CONNECTOR_REJECTED');
+  const sameSelection=s=>s&&Object.keys(s).sort().join('|')==='jobId|wireSha256|workOrderRef'&&
+    s.workOrderRef===REF&&s.jobId===selection.jobId&&s.wireSha256===selection.wireSha256;
+  // Only an explicit synthetic operator action can mint this in-memory token.
+  // It is never persisted, never available to application code, and is consumed once.
+  function confirmSyntheticOperatorIntent(s){
+    if(!sameSelection(s))throw reject();
+    nextIntent=Object.freeze({});
+    return nextIntent;
+  }
+  async function readCurrent(s){
+    if(!sameSelection(s))throw reject();
+    const trusted=structuredClone(currentPairing);
+    // Use the production trial adapter's signature verifier with an independently
+    // restored pairing, not data from the outbox or arguments of send().
+    const verified=await S.createDriveOutboxTrial(env).inspectSignedRecovery(REF,trusted);
+    const record=structuredClone(storage.peek(key)?.value);
+    if(!record||verified.jobId!==s.jobId||verified.wireSha256!==s.wireSha256||
+       h(record.wire)!==s.wireSha256||record.wireSha256!==s.wireSha256||
+       R.canonicalJson(trusted)!==R.canonicalJson(currentPairing))throw reject();
+    const body=await R.verifyDriveRelayBody(JSON.parse(record.wire),REF,trusted.recipient.recipientKeyId,opts);
+    if(R.canonicalJson(body)!==record.wire||body.jobId!==s.jobId||
+       R.canonicalJson(trusted)!==R.canonicalJson(currentPairing))throw reject();
+    return {body,wire:record.wire,trust: R.canonicalJson(trusted)};
+  }
+  async function send(s,intent){
+    if(!nextIntent||intent!==nextIntent)throw reject();
+    nextIntent=null;
+    const first=await readCurrent(s);
+    const body=first.body;
+    // This is the existing actual Apps Script status logic in its memory-only VM.
+    calls.push('getSyntheticJobStatus');
+    let reply;
+    try{reply=gateway.g.d2Status_({bearer,jobId:body.jobId,ackProofHash:body.ackProofHash,planSha256:body.planSha256});}
+    catch{return {status:'KEEP_PENDING',jobId:body.jobId};}
+    if(!reply||Object.keys(reply).sort().join('|')!=='jobId|status'||reply.jobId!==body.jobId)
+      return {status:'KEEP_PENDING',jobId:body.jobId};
+    if(afterStatus){const fn=afterStatus;afterStatus=null;fn();}
+    const current=await readCurrent(s);
+    if(current.wire!==first.wire||current.trust!==first.trust)throw reject();
+    if(reply.status==='ready'||reply.status==='deleted')return {status:'RELAY_REPORTED_ACCEPTED',jobId:body.jobId};
+    if(reply.status!=='partial'&&reply.status!=='not-started')return {status:'KEEP_PENDING',jobId:body.jobId};
+    calls.push('putSyntheticJob');
+    try{
+      const sent=gateway.g.d2Put_({...current.body,bearer});
+      if(loseReply){loseReply=false;return {status:'KEEP_PENDING',jobId:body.jobId};}
+      if(sent&&Object.keys(sent).sort().join('|')==='jobId|status'&&sent.status==='ready'&&sent.jobId===body.jobId)
+        return {status:'RELAY_REPORTED_ACCEPTED',jobId:body.jobId};
+    }catch{/* preserve the signed record; never auto-upload again */}
+    return {status:'KEEP_PENDING',jobId:body.jobId};
+  }
+  return {selection,confirmSyntheticOperatorIntent,send,calls,
+    assertOutboxUnchanged(){assert.deepEqual(storage.peek(key).value,original);},
+    assertExactMockBytes(){
+      const job=gateway.file(gateway.root,selection.jobId);assert.ok(job);
+      for(const obj of candidate.objects){
+        const name='obj_'+String(obj.ordinal).padStart(4,'0')+'.bin';
+        const file=gateway.file(job,name);assert.ok(file);assert.equal(h(file.bytes),obj.ciphertextSha256);
+      }
+      assert.equal([...gateway.rows.values()].filter(x=>x.name===selection.jobId).length,1);
+    },
+    simulateLostReply(){loseReply=true;},
+    changePairingAfterStatus(){afterStatus=()=>{currentPairing={...currentPairing,sender:{...currentPairing.sender,clinicDeviceId:'dev_revoked_synthetic'}};};},
+    tamperAfterStatus(){afterStatus=()=>{storage.seed({id:key,value:{...original,wireSha256:'0'.repeat(64)}});};},
+    interruptAfterStatus(){afterStatus=()=>{throw Error('SYNTHETIC_INTERRUPTED');};},
+    assertTamperPreserved(){assert.equal(storage.peek(key).value.wireSha256,'0'.repeat(64));}
+  };
+}
+test('Signed outbox D2 connector trial sends exact signed bytes only after explicit intent, lost reply and duplicate action are safe',async()=>{
+  const f=await makeSignedD2ConnectorTrial(),s=f.selection;
+  await assert.rejects(()=>f.send(s,{}),/SIGNED_D2_CONNECTOR_REJECTED/);
+  assert.deepEqual(f.calls,[]);
+  f.simulateLostReply();
+  const intent=f.confirmSyntheticOperatorIntent(s);
+  assert.deepEqual(await f.send(s,intent),{status:'KEEP_PENDING',jobId:s.jobId});
+  f.assertOutboxUnchanged();f.assertExactMockBytes();
+  await assert.rejects(()=>f.send(s,intent),/SIGNED_D2_CONNECTOR_REJECTED/);
+  assert.deepEqual(await f.send(s,f.confirmSyntheticOperatorIntent(s)),{status:'RELAY_REPORTED_ACCEPTED',jobId:s.jobId});
+  assert.deepEqual(f.calls,['getSyntheticJobStatus','putSyntheticJob','getSyntheticJobStatus']);
+  f.assertOutboxUnchanged();f.assertExactMockBytes();
+});
+test('Signed outbox D2 connector trial rejects mismatched selection and revalidates pairing or tampered record after status',async()=>{
+  const a=await makeSignedD2ConnectorTrial(),s=a.selection;
+  await assert.rejects(()=>a.send({...s,wireSha256:'0'.repeat(64)},a.confirmSyntheticOperatorIntent(s)),/SIGNED_D2_CONNECTOR_REJECTED/);
+  assert.deepEqual(a.calls,[]);
+  a.changePairingAfterStatus();
+  await assert.rejects(()=>a.send(s,a.confirmSyntheticOperatorIntent(s)));
+  assert.deepEqual(a.calls,['getSyntheticJobStatus']);a.assertOutboxUnchanged();
+  const b=await makeSignedD2ConnectorTrial();
+  b.tamperAfterStatus();
+  await assert.rejects(()=>b.send(b.selection,b.confirmSyntheticOperatorIntent(b.selection)));
+  assert.deepEqual(b.calls,['getSyntheticJobStatus']);b.assertTamperPreserved();
+  const c=await makeSignedD2ConnectorTrial();
+  c.interruptAfterStatus();
+  await assert.rejects(()=>c.send(c.selection,c.confirmSyntheticOperatorIntent(c.selection)),/SYNTHETIC_INTERRUPTED/);
+  assert.deepEqual(c.calls,['getSyntheticJobStatus']);c.assertOutboxUnchanged();
 });

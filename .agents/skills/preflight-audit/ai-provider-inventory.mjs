@@ -19,6 +19,7 @@ const KNOWN_CLAUDE_SUBSCRIPTIONS = new Set(['pro', 'max', 'team', 'enterprise'])
 const SAFE_REASONS = new Set([
   'cli_not_found',
   'version_probe_failed',
+  'version_probe_not_authorized',
   'prompt_smoke_timeout',
   'prompt_smoke_failed',
   'prompt_smoke_unexpected_output',
@@ -69,6 +70,16 @@ export function resolveProviderCommand(kind) {
     candidates.push(path.join(appData, 'npm', 'node_modules', '@openai', 'codex', 'bin', 'codex.js'));
   } else if (kind === 'claude') {
     candidates.push(path.join(home, '.local', 'bin', process.platform === 'win32' ? 'claude.exe' : 'claude'));
+  } else if (kind === 'antigravity' && process.platform === 'win32') {
+    // Fixed candidate discovery only. File presence does not verify a signature,
+    // product relationship, authentication, cost or execution qualification.
+    // Keep the existing Gemini resolver separate; do not invoke this provider.
+    const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+    candidates.push(
+      path.join(localAppData, 'agy', 'bin', 'agy.exe'),
+      path.join(appData, 'npm', 'antigravity.cmd'),
+      path.join(home, '.local', 'bin', 'antigravity.exe'),
+    );
   } else if (kind === 'gemini' || kind === 'antigravity') {
     const executable = process.platform === 'win32' ? `${kind}.cmd` : kind;
     candidates.push(
@@ -114,6 +125,11 @@ function safeTimestamp(value) {
 
 export function observeGenericCli(kind, timeoutMs, desc = resolveProviderCommand(kind)) {
   if (!desc) return { cliStatus: 'UNAVAILABLE', version: null, reason: 'cli_not_found' };
+  // Discovery is not execution authorization. Default resolution may still use
+  // platform PATH lookup helpers; this guard prevents the provider invocation.
+  if (kind === 'antigravity') {
+    return { cliStatus: 'UNAVAILABLE', version: null, reason: 'version_probe_not_authorized' };
+  }
   const run = spawnSync(desc.file, [...desc.prefix, '--version'], {
     encoding: 'utf8', windowsHide: true, timeout: Math.min(timeoutMs, 5000), maxBuffer: 64 * 1024,
   });
