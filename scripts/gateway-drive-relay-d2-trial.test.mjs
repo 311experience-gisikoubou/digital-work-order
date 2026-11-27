@@ -2120,6 +2120,22 @@ test('normal credential store persists before pairing and authorizes a stable se
   assert.equal(first,second);assert.equal(Object.isFrozen(first),true);
   assert.equal(first.senderIdentity.privateKey,sender.privateKey);
   assert.equal(first.bridgeCall,bridge);
+  await assert.rejects(()=>store.activateFinalIssueSession(bridge),{code:'DRIVE_SESSION_FINAL_ISSUE_UNAVAILABLE'});
+  let installed=null,dispatchedRef=null,dispatchedSession=null;
+  const finalIssue=Object.freeze({
+    setIssuedDriveSessionProviderTrial(value){installed=value;},
+    async dispatchIssuedDriveSessionTrial(ref){dispatchedRef=ref;dispatchedSession=await installed();return {decision:'KEEP_PENDING',jobId:'job_activation'};}
+  });
+  sandbox.DwoFinalIssue=finalIssue;
+  const controller=await store.activateFinalIssueSession(bridge);
+  assert.equal(Object.isFrozen(controller),true);assert.deepEqual(Object.keys(controller),['dispatch']);
+  assert.deepEqual(await controller.dispatch('wo_activation'),{decision:'KEEP_PENDING',jobId:'job_activation'});
+  assert.equal(dispatchedRef,'wo_activation');assert.equal(dispatchedSession,await installed());
+  assert.equal(dispatchedSession.senderIdentity.privateKey,sender.privateKey);
+  assert.equal(dispatchedSession.uploadBearer,input.uploadBearer);
+  assert.equal(JSON.stringify(controller).includes(input.uploadBearer),false);
+  sandbox.DwoFinalIssue=Object.freeze({...finalIssue});
+  await assert.rejects(()=>controller.dispatch('wo_replaced'),{code:'DRIVE_SESSION_FINAL_ISSUE_CHANGED'});
   await assert.rejects(()=>store.beginPairingCredential({...input,uploadBearer:'T'.repeat(43)},bridge,{now:()=>2000}),{code:'DRIVE_SESSION_CREDENTIAL_CONFLICT'});
   assert.equal(db.peek('current').uploadBearer,input.uploadBearer,'conflict must not overwrite the paired credential');
   db.erase('current');
@@ -2143,6 +2159,13 @@ test('normal credential store retains an incomplete candidate after a lost reply
   await assert.rejects(()=>store.beginPairingCredential(input,lost,{now:()=>2000}));
   const pending=db.peek('current');assert.equal(pending.status,'pairing');assert.equal(pending.pairingResponse,null);
   await assert.rejects(()=>store.restorePairedCredential(),{code:'DRIVE_SESSION_PAIRING_INCOMPLETE'});
+  let installed=0;
+  sandbox.DwoFinalIssue=Object.freeze({
+    setIssuedDriveSessionProviderTrial(){installed++;},
+    async dispatchIssuedDriveSessionTrial(){throw Error('must not dispatch');}
+  });
+  await assert.rejects(()=>store.activateFinalIssueSession(lost),{code:'DRIVE_SESSION_PAIRING_INCOMPLETE'});
+  assert.equal(installed,0,'an incomplete pairing must never register a send session');
   const resumed=await store.resumePairingCredential(async action=>{
     if(action==='getConfig')return recipientPublicInfo;pairCalls++;return {status:'paired'};
   },{now:()=>2500});

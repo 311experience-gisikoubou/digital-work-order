@@ -4,7 +4,8 @@
   // Normal clinic credential authority. This is deliberately separate from
   // every D1/D2/probe database and stores one add-only paired record containing
   // both the existing non-extractable sender key and the provisional bearer.
-  // It never selects an endpoint, pairs, sends, rotates, revokes, or deletes.
+  // It never selects an endpoint, starts automatically, rotates, revokes, or
+  // deletes. Pairing and dispatch require an explicit caller-supplied bridge.
   const DB_NAME = 'dwo_drive_relay_session_v1';
   const DB_VERSION = 2;
   const STORE = 'credentials';
@@ -351,10 +352,39 @@
     };
   }
 
+  // Closed adapter from the durable paired authority to the existing normal
+  // issue boundary. Activation itself performs no transport: it first proves
+  // that the stored credential is still paired, then registers only the stable
+  // provider. The returned controller exposes no provider, key, bearer, or
+  // session; an explicit later dispatch remains subject to DwoFinalIssue's
+  // status-first, same-session and same-ciphertext guards.
+  async function activateFinalIssueSession(bridgeCall) {
+    const finalIssue = globalThis.DwoFinalIssue;
+    if (!finalIssue || typeof finalIssue.setIssuedDriveSessionProviderTrial !== 'function' ||
+        typeof finalIssue.dispatchIssuedDriveSessionTrial !== 'function') {
+      throw fail('DRIVE_SESSION_FINAL_ISSUE_UNAVAILABLE');
+    }
+    const provider = createSessionProvider(bridgeCall);
+    await provider();
+    if (globalThis.DwoFinalIssue !== finalIssue) {
+      throw fail('DRIVE_SESSION_FINAL_ISSUE_CHANGED');
+    }
+    finalIssue.setIssuedDriveSessionProviderTrial(provider);
+    return Object.freeze({
+      dispatch: async workOrderRef => {
+        if (globalThis.DwoFinalIssue !== finalIssue) {
+          throw fail('DRIVE_SESSION_FINAL_ISSUE_CHANGED');
+        }
+        return finalIssue.dispatchIssuedDriveSessionTrial(workOrderRef);
+      }
+    });
+  }
+
   globalThis.DriveRelaySessionStore = Object.freeze({
     beginPairingCredential,
     resumePairingCredential,
     restorePairedCredential,
-    createSessionProvider
+    createSessionProvider,
+    activateFinalIssueSession
   });
 })();
