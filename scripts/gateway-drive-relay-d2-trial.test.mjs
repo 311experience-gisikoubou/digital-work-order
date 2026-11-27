@@ -2200,6 +2200,40 @@ test('normal credential store rejects recipient/result mismatch and durable iden
     /media-transfer-crypto\.js"><\/script>\s*<script src="app\/drive-relay-session-store\.js"><\/script>\s*<script src="media-receiver-bootstrap\.js/);
 });
 
+test('normal bridge is inert until called and pins the exact sandbox origin and source', async () => {
+  const source=await fs.readFile(new URL('../app/drive-relay-bridge.js',import.meta.url),'utf8');
+  const listeners={message:new Set(),pagehide:new Set()},frames=[],timers=new Map();let timerId=0;
+  const sandbox={crypto:webcrypto,Uint8Array,Promise,Object,Array,Error,Set,encodeURIComponent,
+    btoa:value=>Buffer.from(value,'binary').toString('base64'),
+    setTimeout(fn){const id=++timerId;timers.set(id,fn);return id;},clearTimeout(id){timers.delete(id);},
+    addEventListener(type,fn){listeners[type].add(fn);},removeEventListener(type,fn){listeners[type].delete(fn);},
+    document:{body:{appendChild(frame){frames.push(frame);}},createElement(tag){assert.equal(tag,'iframe');return{attrs:{},removed:false,setAttribute(k,v){this.attrs[k]=v;},remove(){this.removed=true;}};}},globalThis:null};
+  sandbox.globalThis=sandbox;vm.runInNewContext(source,sandbox);
+  assert.equal(frames.length,0,'module load and factory creation must not create a frame');
+  assert.throws(()=>sandbox.DriveRelayBridge.create('https://example.test/exec'),{code:'DRIVE_BRIDGE_URL_INVALID'});
+  const bridge=sandbox.DriveRelayBridge.create('https://script.google.com/macros/s/DEPLOYMENT_123/exec');
+  assert.equal(frames.length,0,'an exact URL alone must remain inert');
+  await assert.rejects(()=>bridge('delete',{}),{code:'DRIVE_BRIDGE_ACTION_INVALID'});
+  await assert.rejects(()=>bridge('getConfig',null),{code:'DRIVE_BRIDGE_BODY_INVALID'});
+  const pending=bridge('getConfig',{}),frame=frames[0],channel=new URL(frame.src).searchParams.get('channel');
+  assert.match(channel,/^[A-Za-z0-9_-]{32}$/);assert.equal(frame.hidden,true);assert.equal(frame.referrerPolicy,'no-referrer');
+  let posted=null;const peer={postMessage(message,origin){posted={message,origin};}},other={postMessage(){throw Error('wrong source');}};
+  const emit=(type,event)=>{for(const fn of [...listeners[type]])fn(event);};
+  emit('message',{origin:'https://script.googleusercontent.com',source:peer,data:{version:'dwo-d2-bridge-v1',channel,type:'ready'}});
+  assert.equal(posted,null);
+  const origin='https://abc-123-script.googleusercontent.com';
+  emit('message',{origin,source:peer,data:{version:'dwo-d2-bridge-v1',channel,type:'ready'}});
+  assert.equal(posted.origin,origin);assert.equal(posted.message.action,'getConfig');assert.deepEqual(posted.message.body,{});
+  emit('message',{origin,source:other,data:{version:'dwo-d2-bridge-v1',channel,type:'result',ok:true,value:{bad:true}}});
+  emit('message',{origin,source:peer,data:{version:'dwo-d2-bridge-v1',channel,type:'result',ok:true,value:{recipientKeyId:'rk_test'}}});
+  assert.deepEqual(await pending,{recipientKeyId:'rk_test'});assert.equal(frame.removed,true);
+  assert.equal(listeners.message.size,0);assert.equal(listeners.pagehide.size,0);assert.equal(timers.size,0);
+  const closing=bridge('getConfig',{}),closingFrame=frames[1];emit('pagehide',{});
+  await assert.rejects(()=>closing,{code:'DRIVE_BRIDGE_PAGE_CLOSED'});assert.equal(closingFrame.removed,true);
+  assert.match(await fs.readFile(new URL('../index.html',import.meta.url),'utf8'),
+    /media-transfer-crypto\.js"><\/script>\s*<script src="app\/drive-relay-bridge\.js"><\/script>\s*<script src="app\/drive-relay-session-store\.js/);
+});
+
 // Test-only bridge between the actual signed outbox and existing Apps Script VM.
 // Never imported by the app, never opens a real DB/endpoint, never accepts external
 // pairing/bearer/wire or status. The synthetic operator intent is one-shot.
