@@ -2088,7 +2088,7 @@ test('Drive-outbox-retry-wire connects real B5 ciphertext to D2 sender and gatew
   assert.equal(stored.includes('SYNTHETIC_OUTBOX_WIRE'),false);
 });
 
-test('normal credential store keeps one verified key+bearer record and supplies a stable revalidated session', async () => {
+test('normal credential store persists before pairing and authorizes a stable session only after exact confirmation', async () => {
   const source=await fs.readFile(new URL('../app/drive-relay-session-store.js',import.meta.url),'utf8');
   const db=makeFakeIndexedDB();
   const sandbox={indexedDB:db,crypto:webcrypto,MediaTransferCrypto:C,TextEncoder,Uint8Array,Array,Object,Error,Promise,globalThis:null};
@@ -2096,45 +2096,83 @@ test('normal credential store keeps one verified key+bearer record and supplies 
   const store=sandbox.DriveRelaySessionStore;
   const sender=await C.generateSenderIdentity({crypto:webcrypto});
   const recipient=await C.generateRecipientIdentity('synthetic-normal-store-passphrase',{crypto:webcrypto});
-  const input={senderIdentity:sender,recipientPublicInfo:{recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk},uploadBearer:'S'.repeat(43)};
-  const claimed=await store.claimPairedCredential(input);
-  assert.equal(claimed.signingPrivateKey.extractable,false);
+  const recipientPublicInfo={recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk};
+  const pairingOffer=await C.createPairingOffer(recipientPublicInfo,{crypto:webcrypto,now:()=>1000,expiresInMs:10000,pairingId:'pr_normal_store'});
+  const input={senderIdentity:sender,pairingOffer,uploadBearer:'S'.repeat(43)};
+  const actions=[];
+  const bridge=async(action,body)=>{actions.push(action);assert.equal(db.peek('current').status,'pairing','candidate must be durable before bridge call');
+    if(action==='getConfig')return recipientPublicInfo;
+    assert.equal(body.bearerSha256,createHash('sha256').update(input.uploadBearer).digest('hex'));
+    assert.equal(body.clinicDeviceId,sender.clinicDeviceId);return {status:'paired'};};
+  const completed=await store.beginPairingCredential(input,bridge,{now:()=>2000});
+  assert.equal(completed.status,'paired');assert.equal(C.decodePairingPayload(completed.pairingPayload).type,'dwo-pairing-response');
+  assert.deepEqual(actions,['getConfig','pair']);
+  assert.equal(db.peek('current').status,'paired');
+  assert.equal(db.peek('current').signingPrivateKey.extractable,false);
   assert.equal(db.peek('current').uploadBearer,input.uploadBearer);
   assert.equal(Object.hasOwn(db.peek('current'),'bridgeCall'),false);
   assert.equal(Object.hasOwn(db.peek('current'),'endpoint'),false);
   const restored=await store.restorePairedCredential();
   assert.equal(restored.signingKeyId,sender.signingKeyId);
   assert.equal(restored.recipientKeyId,recipient.recipientKeyId);
-  const bridge=async()=>({});
   const provider=store.createSessionProvider(bridge);
   const first=await provider(),second=await provider();
   assert.equal(first,second);assert.equal(Object.isFrozen(first),true);
   assert.equal(first.senderIdentity.privateKey,sender.privateKey);
   assert.equal(first.bridgeCall,bridge);
-  await assert.rejects(()=>store.claimPairedCredential({...input,uploadBearer:'T'.repeat(43)}),{code:'DRIVE_SESSION_CREDENTIAL_CONFLICT'});
-  assert.equal(db.peek('current').uploadBearer,input.uploadBearer,'conflict must not overwrite the current credential');
+  await assert.rejects(()=>store.beginPairingCredential({...input,uploadBearer:'T'.repeat(43)},bridge,{now:()=>2000}),{code:'DRIVE_SESSION_CREDENTIAL_CONFLICT'});
+  assert.equal(db.peek('current').uploadBearer,input.uploadBearer,'conflict must not overwrite the paired credential');
   db.erase('current');
   await assert.rejects(()=>provider(),{code:'DRIVE_SESSION_CREDENTIAL_MISSING'});
   assert.equal(typeof store.clear,'undefined','credential deletion requires a separate authority');
 });
 
-test('normal credential store rejects a replaced or mismatched durable identity without returning a session', async () => {
+test('normal credential store retains an incomplete candidate after a lost reply and resumes without rotating identity', async () => {
   const source=await fs.readFile(new URL('../app/drive-relay-session-store.js',import.meta.url),'utf8');
   const db=makeFakeIndexedDB();
   const sandbox={indexedDB:db,crypto:webcrypto,MediaTransferCrypto:C,TextEncoder,Uint8Array,Array,Object,Error,Promise,globalThis:null};
   sandbox.globalThis=sandbox;vm.runInNewContext(source,sandbox);
   const store=sandbox.DriveRelaySessionStore;
   const sender=await C.generateSenderIdentity({crypto:webcrypto});
-  const other=await C.generateSenderIdentity({crypto:webcrypto});
   const recipient=await C.generateRecipientIdentity('synthetic-normal-store-replacement',{crypto:webcrypto});
-  const input={senderIdentity:sender,recipientPublicInfo:{recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk},uploadBearer:'U'.repeat(43)};
-  await store.claimPairedCredential(input);
-  const provider=store.createSessionProvider(async()=>({}));
-  await provider();
-  db.seed({...db.peek('current'),signingKeyId:other.signingKeyId,signingPublicJwk:other.publicJwk,signingPrivateKey:other.privateKey});
-  await assert.rejects(()=>provider(),{code:'DRIVE_SESSION_CREDENTIAL_CHANGED'});
-  db.seed({...db.peek('current'),signingKeyId:sender.signingKeyId});
-  await assert.rejects(()=>store.restorePairedCredential(),{code:'DRIVE_SESSION_CREDENTIAL_INVALID'});
+  const recipientPublicInfo={recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk};
+  const pairingOffer=await C.createPairingOffer(recipientPublicInfo,{crypto:webcrypto,now:()=>1000,expiresInMs:10000,pairingId:'pr_normal_resume'});
+  const input={senderIdentity:sender,pairingOffer,uploadBearer:'U'.repeat(43)};
+  let pairCalls=0;
+  const lost=async action=>{if(action==='getConfig')return recipientPublicInfo;pairCalls++;throw Error('synthetic lost reply');};
+  await assert.rejects(()=>store.beginPairingCredential(input,lost,{now:()=>2000}));
+  const pending=db.peek('current');assert.equal(pending.status,'pairing');assert.equal(pending.pairingResponse,null);
+  await assert.rejects(()=>store.restorePairedCredential(),{code:'DRIVE_SESSION_PAIRING_INCOMPLETE'});
+  const resumed=await store.resumePairingCredential(async action=>{
+    if(action==='getConfig')return recipientPublicInfo;pairCalls++;return {status:'paired'};
+  },{now:()=>2500});
+  assert.equal(resumed.status,'paired');assert.equal(pairCalls,2);
+  assert.equal(db.peek('current').signingPrivateKey,sender.privateKey);
+  assert.equal(db.peek('current').uploadBearer,input.uploadBearer);
+  const already=await store.resumePairingCredential(async()=>{throw Error('bridge must not run after paired');},{now:()=>3000});
+  assert.equal(already.pairingPayload,resumed.pairingPayload);
+});
+
+test('normal credential store rejects recipient/result mismatch and durable identity replacement without authorization', async () => {
+  const source=await fs.readFile(new URL('../app/drive-relay-session-store.js',import.meta.url),'utf8');
+  const db=makeFakeIndexedDB();
+  const sandbox={indexedDB:db,crypto:webcrypto,MediaTransferCrypto:C,TextEncoder,Uint8Array,Array,Object,Error,Promise,globalThis:null};
+  sandbox.globalThis=sandbox;vm.runInNewContext(source,sandbox);
+  const store=sandbox.DriveRelaySessionStore,sender=await C.generateSenderIdentity({crypto:webcrypto}),other=await C.generateSenderIdentity({crypto:webcrypto});
+  const recipient=await C.generateRecipientIdentity('synthetic-normal-store-mismatch',{crypto:webcrypto});
+  const recipientPublicInfo={recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk};
+  const pairingOffer=await C.createPairingOffer(recipientPublicInfo,{crypto:webcrypto,now:()=>1000,expiresInMs:10000,pairingId:'pr_normal_mismatch'});
+  const input={senderIdentity:sender,pairingOffer,uploadBearer:'V'.repeat(43)};
+  await assert.rejects(()=>store.beginPairingCredential(input,async action=>action==='getConfig'
+    ?{recipientKeyId:'rk_'+'A'.repeat(43),publicJwk:recipient.publicJwk}:{status:'paired'},{now:()=>2000}),
+    {code:'DRIVE_SESSION_PAIRING_RECIPIENT_MISMATCH'});
+  assert.equal(db.peek('current').status,'pairing');
+  await assert.rejects(()=>store.resumePairingCredential(async action=>action==='getConfig'?recipientPublicInfo:{status:'paired',extra:true},{now:()=>2200}),
+    {code:'DRIVE_SESSION_PAIRING_UNCONFIRMED'});
+  assert.equal(db.peek('current').status,'pairing');
+  db.seed({...db.peek('current'),signingKeyId:other.signingKeyId});
+  await assert.rejects(()=>store.resumePairingCredential(async()=>({}),{now:()=>2300}),{code:'DRIVE_SESSION_CREDENTIAL_INVALID'});
+  assert.equal(typeof store.clear,'undefined','credential deletion requires a separate authority');
   assert.match(await fs.readFile(new URL('../index.html',import.meta.url),'utf8'),
     /media-transfer-crypto\.js"><\/script>\s*<script src="app\/drive-relay-session-store\.js"><\/script>\s*<script src="media-receiver-bootstrap\.js/);
 });
