@@ -1023,6 +1023,66 @@
     return pending;
   }
 
+  // Explicit synthetic connector only. The caller owns the already-paired,
+  // in-memory bearer and exact-origin bridge. No endpoint or credential is
+  // selected, generated or persisted here. Every attempt queries status first,
+  // then may upload only the exact ciphertext already committed to the outbox.
+  const dispatchingDriveRefs = new Set();
+  async function dispatchIssuedDriveOutboxTrial(workOrderRef, senderIdentity, recipientPublicInfo, uploadBearer, bridgeCall) {
+    const transport = global.MediaRelayTransport;
+    if (!transport || typeof transport.canonicalJson !== 'function' || typeof bridgeCall !== 'function') {
+      throw transferPackageError('TRANSFER_DRIVE_CONNECTOR_UNAVAILABLE');
+    }
+    if (typeof uploadBearer !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(uploadBearer)) {
+      throw transferPackageError('TRANSFER_DRIVE_CONNECTOR_AUTH_INVALID');
+    }
+    if (dispatchingDriveRefs.has(workOrderRef)) {
+      throw transferPackageError('TRANSFER_DRIVE_CONNECTOR_IN_PROGRESS');
+    }
+    dispatchingDriveRefs.add(workOrderRef);
+    try {
+      const durable = await prepareIssuedDriveOutboxTrial(workOrderRef, senderIdentity, recipientPublicInfo, 'resume');
+      const wire = transport.canonicalJson(durable);
+      const pending = { status: 'KEEP_PENDING', jobId: durable.jobId };
+      let statusReply;
+      try {
+        statusReply = await bridgeCall('getSyntheticJobStatus', {
+          bearer: uploadBearer,
+          jobId: durable.jobId,
+          ackProofHash: durable.ackProofHash,
+          planSha256: durable.planSha256
+        });
+      } catch (_) {
+        return pending;
+      }
+      const plan = await planIssuedDriveRetryTrial(workOrderRef, senderIdentity, recipientPublicInfo, statusReply);
+      if (plan.decision === 'RELAY_REPORTED_ACCEPTED') {
+        return { status: 'RELAY_REPORTED_ACCEPTED', jobId: durable.jobId };
+      }
+      if (plan.decision !== 'RETRY_SAME_CIPHERTEXT') return pending;
+
+      // Re-read after the status await. A pairing change, issued-order change,
+      // outbox mutation or replacement must stop before any put.
+      const current = await prepareIssuedDriveOutboxTrial(workOrderRef, senderIdentity, recipientPublicInfo, 'resume');
+      if (transport.canonicalJson(current) !== wire || transport.canonicalJson(plan.body) !== wire) {
+        throw transferPackageError('TRANSFER_DRIVE_CONNECTOR_CHANGED');
+      }
+      const transientBody = Object.assign({ bearer: uploadBearer }, JSON.parse(wire));
+      let sent;
+      try {
+        sent = await bridgeCall('putSyntheticJob', transientBody);
+      } catch (_) {
+        return pending;
+      }
+      if (!sent || typeof sent !== 'object' || Array.isArray(sent) ||
+          Object.keys(sent).sort().join('|') !== 'jobId|status' ||
+          sent.jobId !== durable.jobId || sent.status !== 'ready') return pending;
+      return { status: 'RELAY_REPORTED_ACCEPTED', jobId: durable.jobId };
+    } finally {
+      dispatchingDriveRefs.delete(workOrderRef);
+    }
+  }
+
   function getIssuedTransferStatus(workOrderRef) {
     if (typeof workOrderRef !== 'string' || !WORK_ORDER_REF_PATTERN.test(workOrderRef)) {
       return 'UNVERIFIED';
@@ -1060,6 +1120,7 @@
     inspectIssuedDriveRecoveryTrial,
     listIssuedDriveRecoveryTrial,
     getIssuedTransferStatus,
+    dispatchIssuedDriveOutboxTrial,
     refreshIssuedTransferState
   };
 })(globalThis);

@@ -1869,6 +1869,79 @@ test('Drive-retry-plan-trial uses only the durable same job and never advances r
   assert.equal(renders,1); assert.equal(claims,1);
 });
 
+test('issued Drive connector queries first, uploads the exact durable ciphertext once, and recovers a lost reply without regenerating', async () => {
+  const R=require('../media-relay.js'), B=require('../media-receiver-bootstrap.js'), opts={crypto:nodeCrypto.webcrypto};
+  const sender=await RealMediaTransferCrypto.generateSenderIdentity(opts);
+  const recipient=await RealMediaTransferCrypto.generateRecipientIdentity('synthetic-issued-connector',opts);
+  const h=makeHarness({mediaTransferCrypto:RealMediaTransferCrypto}); await h.run();
+  h.context.MediaRelayTransport=R; h.context.MediaReceiverBootstrap=B;
+  h.context.createIssuePdfBlob=async()=>new Blob(['%PDF-1.7\nsynthetic'],{type:'application/pdf'});
+  h.mediaManager.prepareTransferPackage=(order,options)=>RealMediaTransferPackage.buildPackage(order.workOrderRef,order,[],{...opts,...options});
+  let saved;
+  h.context.ReferenceMediaStorage={createDriveOutboxTrial:()=>({
+    async claim(ref,binding,rid,body){saved={ref,binding,rid,body};return body;},
+    async resume(ref,binding,rid){if(!saved)throw Object.assign(Error('missing'),{code:'DRIVE_OUTBOX_MISSING'});
+      if(ref!==saved.ref||binding!==saved.binding||rid!==saved.rid)throw Object.assign(Error('conflict'),{code:'DRIVE_OUTBOX_BINDING_CONFLICT'});return saved.body;}
+  })};
+  const api=h.dwoFinalIssue, body=await api.prepareIssuedDriveOutboxTrial(h.workOrderRef,sender,recipient,'create');
+  const bearer='A'.repeat(43), calls=[]; let statusRound=0;
+  const bridge=async(action,payload)=>{calls.push(action);if(action==='getSyntheticJobStatus'){
+      statusRound++;return {jobId:body.jobId,status:statusRound===1?'not-started':'ready'};
+    }
+    assert.equal(payload.bearer,bearer);const exact={...payload};delete exact.bearer;
+    assert.equal(R.canonicalJson(exact),R.canonicalJson(body));throw Error('synthetic lost reply');
+  };
+  const before=api.getIssuedTransferStatus(h.workOrderRef);
+  const lost=await api.dispatchIssuedDriveOutboxTrial(h.workOrderRef,sender,recipient,bearer,bridge);
+  assert.equal(lost.status,'KEEP_PENDING');assert.equal(lost.jobId,body.jobId);
+  assert.deepEqual(calls,['getSyntheticJobStatus','putSyntheticJob']);
+  const recovered=await api.dispatchIssuedDriveOutboxTrial(h.workOrderRef,sender,recipient,bearer,bridge);
+  assert.equal(recovered.status,'RELAY_REPORTED_ACCEPTED');assert.equal(recovered.jobId,body.jobId);
+  assert.deepEqual(calls,['getSyntheticJobStatus','putSyntheticJob','getSyntheticJobStatus']);
+  assert.equal(api.getIssuedTransferStatus(h.workOrderRef),before,'relay report is not a lab receipt or ACK');
+  assert.equal(R.canonicalJson(saved.body),R.canonicalJson(body),'outbox ciphertext must remain unchanged');
+});
+
+test('issued Drive connector keeps ambiguous replies pending and revalidates pairing before put', async () => {
+  const R=require('../media-relay.js'), B=require('../media-receiver-bootstrap.js'), opts={crypto:nodeCrypto.webcrypto};
+  const sender=await RealMediaTransferCrypto.generateSenderIdentity(opts);
+  const recipient=await RealMediaTransferCrypto.generateRecipientIdentity('synthetic-issued-connector-guard',opts);
+  const h=makeHarness({mediaTransferCrypto:RealMediaTransferCrypto}); await h.run();
+  h.context.MediaRelayTransport=R; h.context.MediaReceiverBootstrap=B;
+  h.context.createIssuePdfBlob=async()=>new Blob(['%PDF-1.7\nsynthetic'],{type:'application/pdf'});
+  h.mediaManager.prepareTransferPackage=(order,options)=>RealMediaTransferPackage.buildPackage(order.workOrderRef,order,[],{...opts,...options});
+  let saved;
+  h.context.ReferenceMediaStorage={createDriveOutboxTrial:()=>({
+    async claim(ref,binding,rid,body){saved={ref,binding,rid,body};return body;},
+    async resume(ref,binding,rid){if(binding!==saved.binding||ref!==saved.ref||rid!==saved.rid)
+      throw Object.assign(Error('conflict'),{code:'DRIVE_OUTBOX_BINDING_CONFLICT'});return saved.body;}
+  })};
+  const api=h.dwoFinalIssue, body=await api.prepareIssuedDriveOutboxTrial(h.workOrderRef,sender,recipient,'create'), bearer='B'.repeat(43);
+  let puts=0;
+  const ambiguous=await api.dispatchIssuedDriveOutboxTrial(h.workOrderRef,sender,recipient,bearer,async action=>{
+    if(action==='putSyntheticJob')puts++;return {jobId:body.jobId,status:'partial',extra:true};
+  });
+  assert.equal(ambiguous.status,'KEEP_PENDING');assert.equal(ambiguous.jobId,body.jobId);
+  assert.equal(puts,0);
+  let releaseStatus;
+  const inFlight=api.dispatchIssuedDriveOutboxTrial(h.workOrderRef,sender,recipient,bearer,async action=>{
+    if(action==='putSyntheticJob')puts++;
+    return new Promise(resolve=>{releaseStatus=resolve;});
+  });
+  for(let i=0;i<20&&!releaseStatus;i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(typeof releaseStatus,'function');
+  await assert.rejects(()=>api.dispatchIssuedDriveOutboxTrial(h.workOrderRef,sender,recipient,bearer,async()=>{}),
+    {code:'TRANSFER_DRIVE_CONNECTOR_IN_PROGRESS'});
+  releaseStatus({jobId:body.jobId,status:'unknown'});
+  const settled=await inFlight;assert.equal(settled.status,'KEEP_PENDING');assert.equal(puts,0);
+  await assert.rejects(()=>api.dispatchIssuedDriveOutboxTrial(h.workOrderRef,sender,recipient,bearer,async action=>{
+    if(action==='getSyntheticJobStatus'){sender.publicJwk.x='C'.repeat(43);return {jobId:body.jobId,status:'partial'};}
+    puts++;return {jobId:body.jobId,status:'ready'};
+  }),{code:'DRIVE_OUTBOX_BINDING_CONFLICT'});
+  assert.equal(puts,0,'pairing change after status must stop before put');
+  await assert.rejects(()=>api.dispatchIssuedDriveOutboxTrial(h.workOrderRef,sender,recipient,'bad',async()=>{}),{code:'TRANSFER_DRIVE_CONNECTOR_AUTH_INVALID'});
+});
+
 test('local issue feedback distinguishes local issuance from lab transfer in every committed outcome', async () => {
   for (const options of [{}, {sessionStorage:createThrowingSessionStorage()},
     {circularVisualSnapshot:true}, {openFail:true},
