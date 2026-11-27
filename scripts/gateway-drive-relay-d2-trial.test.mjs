@@ -2088,6 +2088,57 @@ test('Drive-outbox-retry-wire connects real B5 ciphertext to D2 sender and gatew
   assert.equal(stored.includes('SYNTHETIC_OUTBOX_WIRE'),false);
 });
 
+test('normal credential store keeps one verified key+bearer record and supplies a stable revalidated session', async () => {
+  const source=await fs.readFile(new URL('../app/drive-relay-session-store.js',import.meta.url),'utf8');
+  const db=makeFakeIndexedDB();
+  const sandbox={indexedDB:db,crypto:webcrypto,MediaTransferCrypto:C,TextEncoder,Uint8Array,Array,Object,Error,Promise,globalThis:null};
+  sandbox.globalThis=sandbox;vm.runInNewContext(source,sandbox);
+  const store=sandbox.DriveRelaySessionStore;
+  const sender=await C.generateSenderIdentity({crypto:webcrypto});
+  const recipient=await C.generateRecipientIdentity('synthetic-normal-store-passphrase',{crypto:webcrypto});
+  const input={senderIdentity:sender,recipientPublicInfo:{recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk},uploadBearer:'S'.repeat(43)};
+  const claimed=await store.claimPairedCredential(input);
+  assert.equal(claimed.signingPrivateKey.extractable,false);
+  assert.equal(db.peek('current').uploadBearer,input.uploadBearer);
+  assert.equal(Object.hasOwn(db.peek('current'),'bridgeCall'),false);
+  assert.equal(Object.hasOwn(db.peek('current'),'endpoint'),false);
+  const restored=await store.restorePairedCredential();
+  assert.equal(restored.signingKeyId,sender.signingKeyId);
+  assert.equal(restored.recipientKeyId,recipient.recipientKeyId);
+  const bridge=async()=>({});
+  const provider=store.createSessionProvider(bridge);
+  const first=await provider(),second=await provider();
+  assert.equal(first,second);assert.equal(Object.isFrozen(first),true);
+  assert.equal(first.senderIdentity.privateKey,sender.privateKey);
+  assert.equal(first.bridgeCall,bridge);
+  await assert.rejects(()=>store.claimPairedCredential({...input,uploadBearer:'T'.repeat(43)}),{code:'DRIVE_SESSION_CREDENTIAL_CONFLICT'});
+  assert.equal(db.peek('current').uploadBearer,input.uploadBearer,'conflict must not overwrite the current credential');
+  db.erase('current');
+  await assert.rejects(()=>provider(),{code:'DRIVE_SESSION_CREDENTIAL_MISSING'});
+  assert.equal(typeof store.clear,'undefined','credential deletion requires a separate authority');
+});
+
+test('normal credential store rejects a replaced or mismatched durable identity without returning a session', async () => {
+  const source=await fs.readFile(new URL('../app/drive-relay-session-store.js',import.meta.url),'utf8');
+  const db=makeFakeIndexedDB();
+  const sandbox={indexedDB:db,crypto:webcrypto,MediaTransferCrypto:C,TextEncoder,Uint8Array,Array,Object,Error,Promise,globalThis:null};
+  sandbox.globalThis=sandbox;vm.runInNewContext(source,sandbox);
+  const store=sandbox.DriveRelaySessionStore;
+  const sender=await C.generateSenderIdentity({crypto:webcrypto});
+  const other=await C.generateSenderIdentity({crypto:webcrypto});
+  const recipient=await C.generateRecipientIdentity('synthetic-normal-store-replacement',{crypto:webcrypto});
+  const input={senderIdentity:sender,recipientPublicInfo:{recipientKeyId:recipient.recipientKeyId,publicJwk:recipient.publicJwk},uploadBearer:'U'.repeat(43)};
+  await store.claimPairedCredential(input);
+  const provider=store.createSessionProvider(async()=>({}));
+  await provider();
+  db.seed({...db.peek('current'),signingKeyId:other.signingKeyId,signingPublicJwk:other.publicJwk,signingPrivateKey:other.privateKey});
+  await assert.rejects(()=>provider(),{code:'DRIVE_SESSION_CREDENTIAL_CHANGED'});
+  db.seed({...db.peek('current'),signingKeyId:sender.signingKeyId});
+  await assert.rejects(()=>store.restorePairedCredential(),{code:'DRIVE_SESSION_CREDENTIAL_INVALID'});
+  assert.match(await fs.readFile(new URL('../index.html',import.meta.url),'utf8'),
+    /media-transfer-crypto\.js"><\/script>\s*<script src="app\/drive-relay-session-store\.js"><\/script>\s*<script src="media-receiver-bootstrap\.js/);
+});
+
 // Test-only bridge between the actual signed outbox and existing Apps Script VM.
 // Never imported by the app, never opens a real DB/endpoint, never accepts external
 // pairing/bearer/wire or status. The synthetic operator intent is one-shot.
