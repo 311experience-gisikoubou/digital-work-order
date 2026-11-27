@@ -233,6 +233,7 @@ function makeHarness(options = {}) {
   const state = { orders: Array.isArray(options.initialOrders) ? options.initialOrders.slice() : [] };
   let boundHandler = null;
   const pageshowHandlers = [];
+  const pagehideHandlers = [];
   const legacyHandler = () => {};
   const button = {
     disabled: true,
@@ -341,6 +342,7 @@ function makeHarness(options = {}) {
     MediaTransferCrypto: options.mediaTransferCrypto,
     addEventListener(type, handler) {
       if (type === 'pageshow') pageshowHandlers.push(handler);
+      if (type === 'pagehide') pagehideHandlers.push(handler);
       events.push('bind:' + type);
     },
     submitOrder: legacyHandler,
@@ -414,6 +416,7 @@ function makeHarness(options = {}) {
     prepareCallArgs,
     run: () => boundHandler(),
     firePageshow: () => pageshowHandlers.forEach(handler => handler()),
+    firePagehide: () => pagehideHandlers.forEach(handler => handler()),
     get dwoFinalIssue() { return context.DwoFinalIssue; },
     resolvePrepare(value) {
       if (deferredPrepareResolve) deferredPrepareResolve(value);
@@ -1940,6 +1943,51 @@ test('issued Drive connector keeps ambiguous replies pending and revalidates pai
   }),{code:'DRIVE_OUTBOX_BINDING_CONFLICT'});
   assert.equal(puts,0,'pairing change after status must stop before put');
   await assert.rejects(()=>api.dispatchIssuedDriveOutboxTrial(h.workOrderRef,sender,recipient,'bad',async()=>{}),{code:'TRANSFER_DRIVE_CONNECTOR_AUTH_INVALID'});
+});
+
+test('normal-page Drive session admission is memory-only and stops provider replacement before put', async () => {
+  const R=require('../media-relay.js'), B=require('../media-receiver-bootstrap.js'), opts={crypto:nodeCrypto.webcrypto};
+  const sender=await RealMediaTransferCrypto.generateSenderIdentity(opts);
+  const recipient=await RealMediaTransferCrypto.generateRecipientIdentity('synthetic-session-admission',opts);
+  const h=makeHarness({mediaTransferCrypto:RealMediaTransferCrypto}); await h.run();
+  h.context.MediaRelayTransport=R; h.context.MediaReceiverBootstrap=B;
+  h.context.createIssuePdfBlob=async()=>new Blob(['%PDF-1.7\nsynthetic'],{type:'application/pdf'});
+  h.mediaManager.prepareTransferPackage=(order,options)=>RealMediaTransferPackage.buildPackage(order.workOrderRef,order,[],{...opts,...options});
+  let saved;
+  h.context.ReferenceMediaStorage={createDriveOutboxTrial:()=>({
+    async claim(ref,binding,rid,body){saved={ref,binding,rid,body};return body;},
+    async resume(ref,binding,rid){if(!saved)throw Object.assign(Error('missing'),{code:'DRIVE_OUTBOX_MISSING'});
+      if(ref!==saved.ref||binding!==saved.binding||rid!==saved.rid)throw Object.assign(Error('conflict'),{code:'DRIVE_OUTBOX_BINDING_CONFLICT'});return saved.body;}
+  })};
+  const api=h.dwoFinalIssue, body=await api.prepareIssuedDriveOutboxTrial(h.workOrderRef,sender,recipient,'create');
+  const bearer='D'.repeat(43); let puts=0;
+  const bridge=async action=>{
+    if(action==='getSyntheticJobStatus')return {jobId:body.jobId,status:'not-started'};
+    puts++;return {jobId:body.jobId,status:'ready'};
+  };
+  const session=Object.freeze({senderIdentity:sender,recipientPublicInfo:recipient,uploadBearer:bearer,bridgeCall:bridge});
+  const provider=async()=>session;
+  assert.throws(()=>api.setIssuedDriveSessionProviderTrial({}),{code:'TRANSFER_DRIVE_SESSION_PROVIDER_INVALID'});
+  api.setIssuedDriveSessionProviderTrial(provider);
+  const sent=await api.dispatchIssuedDriveSessionTrial(h.workOrderRef);
+  assert.equal(sent.status,'RELAY_REPORTED_ACCEPTED');assert.equal(puts,1);
+
+  api.setIssuedDriveSessionProviderTrial(async()=>({senderIdentity:sender,recipientPublicInfo:recipient,uploadBearer:bearer,bridgeCall:bridge}));
+  await assert.rejects(()=>api.dispatchIssuedDriveSessionTrial(h.workOrderRef),{code:'TRANSFER_DRIVE_SESSION_INVALID'});
+
+  const replacement=async()=>session;
+  const replacingSession=Object.freeze({senderIdentity:sender,recipientPublicInfo:recipient,uploadBearer:bearer,
+    bridgeCall:async action=>{if(action==='getSyntheticJobStatus'){
+      api.setIssuedDriveSessionProviderTrial(replacement);
+      return {jobId:body.jobId,status:'partial'};
+    } puts++;return {jobId:body.jobId,status:'ready'};}});
+  api.setIssuedDriveSessionProviderTrial(async()=>replacingSession);
+  await assert.rejects(()=>api.dispatchIssuedDriveSessionTrial(h.workOrderRef),{code:'TRANSFER_DRIVE_SESSION_CHANGED'});
+  assert.equal(puts,1,'replacement must stop before another put');
+
+  api.setIssuedDriveSessionProviderTrial(provider);
+  h.firePagehide();
+  await assert.rejects(()=>api.dispatchIssuedDriveSessionTrial(h.workOrderRef),{code:'TRANSFER_DRIVE_SESSION_UNAVAILABLE'});
 });
 
 test('local issue feedback distinguishes local issuance from lab transfer in every committed outcome', async () => {

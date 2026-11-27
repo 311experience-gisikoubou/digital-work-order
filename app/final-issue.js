@@ -1023,12 +1023,73 @@
     return pending;
   }
 
+  // Normal-page admission boundary for a future independently verified pairing
+  // authority. The provider and its returned session remain in this document's
+  // JS memory only; this module never reads the synthetic trial/probe databases,
+  // selects an endpoint, or persists a bearer/private key. No UI is wired here.
+  //
+  // A send attempt requires the provider to keep returning the exact same frozen
+  // session object. Replacement, page exit, or authority loss stops the attempt
+  // before the next relay operation. This deliberately leaves pairing creation,
+  // endpoint selection and user-visible send approval to their separate owners.
+  let issuedDriveSessionProviderTrial = null;
+
+  function setIssuedDriveSessionProviderTrial(provider) {
+    if (provider !== null && typeof provider !== 'function') {
+      throw transferPackageError('TRANSFER_DRIVE_SESSION_PROVIDER_INVALID');
+    }
+    issuedDriveSessionProviderTrial = provider;
+  }
+
+  async function readIssuedDriveSessionTrial(provider) {
+    if (typeof provider !== 'function') {
+      throw transferPackageError('TRANSFER_DRIVE_SESSION_UNAVAILABLE');
+    }
+    if (issuedDriveSessionProviderTrial !== provider) {
+      throw transferPackageError('TRANSFER_DRIVE_SESSION_CHANGED');
+    }
+    let session;
+    try {
+      session = await provider();
+    } catch (_) {
+      throw transferPackageError('TRANSFER_DRIVE_SESSION_UNAVAILABLE');
+    }
+    const keys = session && typeof session === 'object' && !Array.isArray(session)
+      ? Object.keys(session).sort().join('|') : '';
+    if (keys !== 'bridgeCall|recipientPublicInfo|senderIdentity|uploadBearer' ||
+        !Object.isFrozen(session) || typeof session.bridgeCall !== 'function') {
+      throw transferPackageError('TRANSFER_DRIVE_SESSION_INVALID');
+    }
+    return session;
+  }
+
+  async function dispatchIssuedDriveSessionTrial(workOrderRef) {
+    const provider = issuedDriveSessionProviderTrial;
+    const session = await readIssuedDriveSessionTrial(provider);
+    const assertCurrentSession = async () => {
+      const current = await readIssuedDriveSessionTrial(provider);
+      if (current !== session) throw transferPackageError('TRANSFER_DRIVE_SESSION_CHANGED');
+    };
+    return dispatchIssuedDriveOutboxTrial(
+      workOrderRef,
+      session.senderIdentity,
+      session.recipientPublicInfo,
+      session.uploadBearer,
+      session.bridgeCall,
+      assertCurrentSession
+    );
+  }
+
+  if (typeof global.addEventListener === 'function') {
+    global.addEventListener('pagehide', () => { issuedDriveSessionProviderTrial = null; });
+  }
+
   // Explicit synthetic connector only. The caller owns the already-paired,
   // in-memory bearer and exact-origin bridge. No endpoint or credential is
   // selected, generated or persisted here. Every attempt queries status first,
   // then may upload only the exact ciphertext already committed to the outbox.
   const dispatchingDriveRefs = new Set();
-  async function dispatchIssuedDriveOutboxTrial(workOrderRef, senderIdentity, recipientPublicInfo, uploadBearer, bridgeCall) {
+  async function dispatchIssuedDriveOutboxTrial(workOrderRef, senderIdentity, recipientPublicInfo, uploadBearer, bridgeCall, sessionGuard) {
     const transport = global.MediaRelayTransport;
     if (!transport || typeof transport.canonicalJson !== 'function' || typeof bridgeCall !== 'function') {
       throw transferPackageError('TRANSFER_DRIVE_CONNECTOR_UNAVAILABLE');
@@ -1041,6 +1102,7 @@
     }
     dispatchingDriveRefs.add(workOrderRef);
     try {
+      if (sessionGuard) await sessionGuard();
       const durable = await prepareIssuedDriveOutboxTrial(workOrderRef, senderIdentity, recipientPublicInfo, 'resume');
       const wire = transport.canonicalJson(durable);
       const pending = { status: 'KEEP_PENDING', jobId: durable.jobId };
@@ -1055,6 +1117,7 @@
       } catch (_) {
         return pending;
       }
+      if (sessionGuard) await sessionGuard();
       const plan = await planIssuedDriveRetryTrial(workOrderRef, senderIdentity, recipientPublicInfo, statusReply);
       if (plan.decision === 'RELAY_REPORTED_ACCEPTED') {
         return { status: 'RELAY_REPORTED_ACCEPTED', jobId: durable.jobId };
@@ -1067,6 +1130,7 @@
       if (transport.canonicalJson(current) !== wire || transport.canonicalJson(plan.body) !== wire) {
         throw transferPackageError('TRANSFER_DRIVE_CONNECTOR_CHANGED');
       }
+      if (sessionGuard) await sessionGuard();
       const transientBody = Object.assign({ bearer: uploadBearer }, JSON.parse(wire));
       let sent;
       try {
@@ -1121,6 +1185,8 @@
     listIssuedDriveRecoveryTrial,
     getIssuedTransferStatus,
     dispatchIssuedDriveOutboxTrial,
+    setIssuedDriveSessionProviderTrial,
+    dispatchIssuedDriveSessionTrial,
     refreshIssuedTransferState
   };
 })(globalThis);
