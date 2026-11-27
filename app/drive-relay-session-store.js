@@ -380,11 +380,33 @@
     });
   }
 
+  // Single normal-flow entry for future UI code. The URL is never read from
+  // storage or embedded here: an authorized caller must provide it explicitly.
+  // Bridge creation remains inert, and activation only registers a paired
+  // session; neither step dispatches a work order.
+  async function activateDeployment(deploymentUrl) {
+    const bridgeAuthority = globalThis.DriveRelayBridge;
+    if (!bridgeAuthority || typeof bridgeAuthority.create !== 'function') {
+      throw fail('DRIVE_SESSION_BRIDGE_AUTHORITY_UNAVAILABLE');
+    }
+    const finalIssueAuthority = globalThis.DwoFinalIssue;
+    const bridgeCall = bridgeAuthority.create(deploymentUrl);
+    const controller = await activateFinalIssueSession(bridgeCall);
+    if (globalThis.DriveRelayBridge !== bridgeAuthority) {
+      if (finalIssueAuthority && typeof finalIssueAuthority.setIssuedDriveSessionProviderTrial === 'function') {
+        try { finalIssueAuthority.setIssuedDriveSessionProviderTrial(null); } catch (_) {}
+      }
+      throw fail('DRIVE_SESSION_BRIDGE_AUTHORITY_CHANGED');
+    }
+    return controller;
+  }
+
   globalThis.DriveRelaySessionStore = Object.freeze({
     beginPairingCredential,
     resumePairingCredential,
     restorePairedCredential,
     createSessionProvider,
-    activateFinalIssueSession
+    activateFinalIssueSession,
+    activateDeployment
   });
 })();

@@ -2120,6 +2120,8 @@ test('normal credential store persists before pairing and authorizes a stable se
   assert.equal(first,second);assert.equal(Object.isFrozen(first),true);
   assert.equal(first.senderIdentity.privateKey,sender.privateKey);
   assert.equal(first.bridgeCall,bridge);
+  await assert.rejects(()=>store.activateDeployment('https://script.google.com/macros/s/TEST/exec'),
+    {code:'DRIVE_SESSION_BRIDGE_AUTHORITY_UNAVAILABLE'});
   await assert.rejects(()=>store.activateFinalIssueSession(bridge),{code:'DRIVE_SESSION_FINAL_ISSUE_UNAVAILABLE'});
   let installed=null,dispatchedRef=null,dispatchedSession=null;
   const finalIssue=Object.freeze({
@@ -2134,6 +2136,13 @@ test('normal credential store persists before pairing and authorizes a stable se
   assert.equal(dispatchedSession.senderIdentity.privateKey,sender.privateKey);
   assert.equal(dispatchedSession.uploadBearer,input.uploadBearer);
   assert.equal(JSON.stringify(controller).includes(input.uploadBearer),false);
+  const deploymentUrl='https://script.google.com/macros/s/DEPLOYMENT_TEST/exec';
+  let createdUrl=null;
+  sandbox.DriveRelayBridge=Object.freeze({create(url){createdUrl=url;return bridge;}});
+  const deploymentController=await store.activateDeployment(deploymentUrl);
+  assert.equal(createdUrl,deploymentUrl);
+  assert.deepEqual(await deploymentController.dispatch('wo_deployment'),{decision:'KEEP_PENDING',jobId:'job_activation'});
+  assert.equal(dispatchedRef,'wo_deployment');assert.equal(dispatchedSession.bridgeCall,bridge);
   sandbox.DwoFinalIssue=Object.freeze({...finalIssue});
   await assert.rejects(()=>controller.dispatch('wo_replaced'),{code:'DRIVE_SESSION_FINAL_ISSUE_CHANGED'});
   await assert.rejects(()=>store.beginPairingCredential({...input,uploadBearer:'T'.repeat(43)},bridge,{now:()=>2000}),{code:'DRIVE_SESSION_CREDENTIAL_CONFLICT'});
